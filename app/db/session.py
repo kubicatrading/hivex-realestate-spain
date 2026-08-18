@@ -18,7 +18,7 @@ try:
         with engine.connect() as conn:
             pass
 except Exception:
-    db_url = "sqlite:///./hivex_local.db"
+    db_url = "sqlite:////tmp/hivex_local.db"
     connect_args = {"check_same_thread": False}
     engine = create_engine(db_url, connect_args=connect_args, echo=False)
     
