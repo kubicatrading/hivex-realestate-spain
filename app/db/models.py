@@ -1,13 +1,27 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import UserDefinedType
 from geoalchemy2 import Geometry
 from datetime import datetime
 import enum
 
-@compiles(Geometry, "sqlite")
-def compile_geometry_sqlite(type_, compiler, **kw):
+class SafeGeometry(UserDefinedType):
+    def __init__(self, geometry_type="GEOMETRY", srid=4326):
+        self.geometry_type = geometry_type
+        self.srid = srid
+        self.underlying = Geometry(geometry_type=geometry_type, srid=srid)
+
+    def column_expression(self, col):
+        return col
+
+@compiles(SafeGeometry, "sqlite")
+def compile_safe_geo_sqlite(type_, compiler, **kw):
     return "TEXT"
+
+@compiles(SafeGeometry)
+def compile_safe_geo_default(type_, compiler, **kw):
+    return f"geometry({type_.geometry_type}, {type_.srid})"
 
 from app.db.session import Base
 
@@ -30,7 +44,7 @@ class CensusSection(Base):
     population_growth_rate = Column(Float, nullable=True) # Variación de población (%)
     
     # Geometría PostGIS (MultiPolygon EPSG:4326 WGS84)
-    geom = Column(Geometry(geometry_type="MULTIPOLYGON", srid=4326), nullable=True)
+    geom = Column(SafeGeometry("MULTIPOLYGON", 4326), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     parcels = relationship("CadastralParcel", back_populates="census_section")
@@ -51,7 +65,7 @@ class CadastralParcel(Base):
     estimated_market_price = Column(Float, nullable=True)     # Precio mercado estimado (€ total)
 
     # PostGIS (Polygon/MultiPolygon EPSG:4326)
-    geom = Column(Geometry(geometry_type="GEOMETRY", srid=4326), nullable=True)
+    geom = Column(SafeGeometry("GEOMETRY", 4326), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     census_section = relationship("CensusSection", back_populates="parcels")
@@ -80,8 +94,10 @@ class Auction(Base):
     auction_start_date = Column(DateTime, nullable=True)
     auction_end_date = Column(DateTime, nullable=True)
     
-    # Geolocalización del inmueble (Point EPSG:4326)
-    location = Column(Geometry(geometry_type="POINT", srid=4326), nullable=True)
+    # Geolocalización del inmueble (Coordenadas WGS84 + Point EPSG:4326)
+    lat = Column(Float, nullable=True)
+    lon = Column(Float, nullable=True)
+    location = Column(SafeGeometry("POINT", 4326), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     parcel = relationship("CadastralParcel", back_populates="auctions")

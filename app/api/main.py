@@ -292,11 +292,13 @@ def get_opportunities(
             auc = opp.auction
             strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
             
-            # Extract coordinates from geometry or fallback by province
+            # Extract coordinates from lat/lon fields, geometry, or fallback by province
             lat, lon = None, None
-            if auc and auc.location_geom:
+            if auc and auc.lat is not None and auc.lon is not None:
+                lat, lon = auc.lat, auc.lon
+            elif auc and auc.location:
                 try:
-                    point = to_shape(auc.location_geom)
+                    point = to_shape(auc.location)
                     lat, lon = point.y, point.x
                 except Exception:
                     pass

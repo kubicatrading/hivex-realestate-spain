@@ -53,6 +53,8 @@ class OpportunityScoringEngine:
                         starting_bid=item.get("starting_bid", 0.0),
                         deposit_amount=item.get("deposit_amount", 0.0),
                         refcat=item.get("refcat"),
+                        lat=item.get("lat"),
+                        lon=item.get("lon"),
                         status=item.get("status", "EJECUCION")
                     )
                     self.db.add(existing)
