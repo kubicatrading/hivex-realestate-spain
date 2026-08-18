@@ -23,6 +23,7 @@
     
     --font-heading: 'Outfit', sans-serif;
     --font-body: 'Inter', sans-serif;
+    --font-code: 'Fira Code', monospace;
     
     --radius-sm: 8px;
     --radius-md: 14px;
@@ -219,7 +220,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
+    gap: 20px;
     padding: 16px 24px;
     background: rgba(15, 23, 42, 0.85);
     backdrop-filter: blur(20px);
@@ -267,6 +268,38 @@ body {
     letter-spacing: 1px;
 }
 
+/* View Tabs Selector */
+.view-tabs {
+    display: flex;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--glass-border);
+}
+
+.tab-btn {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-heading);
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.tab-btn.active {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 4px 15px var(--primary-glow);
+}
+
 .nav-actions {
     display: flex;
     align-items: center;
@@ -277,7 +310,7 @@ body {
 .kpi-bar {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
     flex-wrap: wrap;
 }
 
@@ -288,7 +321,7 @@ body {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
-    min-width: 140px;
+    min-width: 130px;
 }
 
 .kpi-item.highlight {
@@ -672,52 +705,201 @@ body {
 .fin-val.ref { color: var(--text-muted); text-decoration: line-through; }
 .fin-val.profit { color: var(--accent-green); }
 
-/* Score Indicators */
-.card-scores {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-}
-
-.score-pill {
-    font-size: 0.75rem;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 6px 10px;
-    border-radius: 6px;
+/* Data Sources Monitor Panel Styles */
+.sources-banner {
+    padding: 20px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    color: var(--text-muted);
+    gap: 20px;
 }
 
-.score-pill strong {
+.banner-title h2 {
+    font-family: var(--font-heading);
+    font-size: 1.25rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     color: var(--text-main);
 }
 
-.card-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+.banner-title h2 i {
+    color: var(--accent-green);
+}
+
+.banner-title p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
     margin-top: 4px;
 }
 
-.btn-boe {
-    padding: 6px 12px;
-    font-size: 0.78rem;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
+.sources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.source-card {
+    background: rgba(15, 23, 42, 0.8);
     border: 1px solid var(--glass-border);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    transition: all 0.25s ease;
+}
+
+.source-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--glass-border-hover);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+.source-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.source-title h3 {
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.source-title a {
+    font-size: 0.78rem;
+    color: var(--primary);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
+    gap: 4px;
+}
+
+.badge-status {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
+}
+
+.badge-operational {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.source-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--glass-border);
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.meta-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.meta-value {
+    font-family: var(--font-heading);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.meta-value.latency {
+    color: var(--accent-green);
+}
+
+.btn-inspect {
+    width: 100%;
+    padding: 10px;
+    font-size: 0.85rem;
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--primary);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 600;
     transition: all 0.2s ease;
 }
 
-.btn-boe:hover {
+.btn-inspect:hover {
     background: var(--primary);
-    border-color: var(--primary);
+    color: #fff;
+    box-shadow: 0 4px 15px var(--primary-glow);
+}
+
+/* Modal Code Inspector */
+.modal-large {
+    max-width: 800px;
+}
+
+.modal-header {
+    margin-bottom: 16px;
+}
+
+.modal-header h3 {
+    font-family: var(--font-heading);
+    font-size: 1.2rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-subtitle {
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.json-viewer-container {
+    background: #0d1117;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.json-viewer-container pre {
+    margin: 0;
+    font-family: var(--font-code);
+    font-size: 0.85rem;
+    color: #e6edf3;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
 }
 
 /* Modal */

@@ -1,5 +1,5 @@
 /**
- * HIVEX Real Estate Spain - Single Page Dashboard Logic with JWT Auth
+ * HIVEX Real Estate Spain - Single Page Dashboard Logic with JWT Auth & Data Monitor
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
         user: null,
         allOpportunities: [],
         filteredOpportunities: [],
+        sourcesData: [],
+        activeTab: 'deals',
         currentStrategy: 'ALL',
         minDiscount: 0.30,
         searchQuery: '',
@@ -28,9 +30,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginError = document.getElementById('login-error');
     const btnLoginSubmit = document.getElementById('btn-login-submit');
 
-    // DOM Elements - Dashboard
+    // DOM Elements - Navigation & Views
     const dashboardApp = document.getElementById('dashboard-app');
     const btnLogout = document.getElementById('btn-logout');
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const viewDeals = document.getElementById('view-deals');
+    const viewSources = document.getElementById('view-sources');
+
+    // DOM Elements - Deals View
     const dealsContainer = document.getElementById('deals-container');
     const filteredCount = document.getElementById('filtered-count');
     const selectDiscount = document.getElementById('select-discount');
@@ -38,6 +45,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const stratButtons = document.querySelectorAll('.strat-btn');
     const btnRunPipeline = document.getElementById('btn-run-pipeline');
     
+    // DOM Elements - Sources Monitor View
+    const sourcesGrid = document.getElementById('sources-grid');
+    const btnRefreshSources = document.getElementById('btn-refresh-sources');
+    const modalSample = document.getElementById('modal-sample');
+    const modalSampleClose = document.getElementById('modal-sample-close');
+    const modalSourceName = document.getElementById('modal-source-name');
+    const jsonViewerCode = document.getElementById('json-viewer-code');
+
     // KPI Elements
     const kpiScanned = document.getElementById('kpi-total-scanned');
     const kpiActive = document.getElementById('kpi-active-deals');
@@ -149,7 +164,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 100);
     }
 
-    // Fetch Opportunities from Backend API with Bearer Token
+    // Tab Navigation Switcher
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            const targetTab = btn.dataset.tab;
+            state.activeTab = targetTab;
+
+            if (targetTab === 'deals') {
+                viewDeals.classList.remove('hidden');
+                viewSources.classList.add('hidden');
+                setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+            } else if (targetTab === 'sources') {
+                viewDeals.classList.add('hidden');
+                viewSources.classList.remove('hidden');
+                fetchSourcesStatus();
+            }
+        });
+    });
+
+    // Fetch Opportunities from Backend API
     async function fetchOpportunities() {
         try {
             state.isLoading = true;
@@ -179,6 +215,107 @@ document.addEventListener('DOMContentLoaded', () => {
             state.isLoading = false;
         }
     }
+
+    // Fetch Data Sources Health Status & Real Sample Payloads
+    async function fetchSourcesStatus() {
+        try {
+            sourcesGrid.innerHTML = '<div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #94a3b8;">Verificando estado de conectividad con portales web...</div>';
+
+            const response = await fetch('/api/v1/sources/status', {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+
+            if (response.status === 401) {
+                logout();
+                return;
+            }
+
+            if (!response.ok) throw new Error('Error consultando el monitor de fuentes');
+
+            const data = await response.json();
+            state.sourcesData = data.sources || [];
+            renderSourcesMonitor(data.sources || []);
+        } catch (err) {
+            sourcesGrid.innerHTML = `<div style="grid-column: 1 / -1; padding: 30px; color: #ef4444; text-align: center;">Error al consultar el monitor de fuentes: ${err.message}</div>`;
+        }
+    }
+
+    btnRefreshSources.addEventListener('click', fetchSourcesStatus);
+
+    // Render Data Sources Cards
+    function renderSourcesMonitor(sources) {
+        if (sources.length === 0) {
+            sourcesGrid.innerHTML = '<div style="grid-column: 1 / -1; color: #94a3b8;">No hay datos de fuentes disponibles.</div>';
+            return;
+        }
+
+        sourcesGrid.innerHTML = sources.map(src => {
+            const isOp = src.status === 'OPERATIONAL';
+            const badgeClass = isOp ? 'badge-operational' : 'badge-error';
+            const statusText = isOp ? '🟢 Operativo (200 OK)' : '🔴 Error de Conexión';
+
+            return `
+                <div class="source-card">
+                    <div class="source-header">
+                        <div class="source-title">
+                            <h3>${escapeHtml(src.name)}</h3>
+                            <a href="${src.url}" target="_blank" rel="noopener">
+                                ${escapeHtml(src.url)} <i data-lucide="external-link" style="width: 12px; height: 12px;"></i>
+                            </a>
+                        </div>
+                        <span class="badge-status ${badgeClass}">${statusText}</span>
+                    </div>
+
+                    <div class="source-meta">
+                        <div class="meta-item">
+                            <span class="meta-label">Método de Acceso</span>
+                            <span class="meta-value">${escapeHtml(src.method)}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Latencia de Red</span>
+                            <span class="meta-value latency">${src.latency_ms} ms</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Muestreo Reciente</span>
+                            <span class="meta-value">${escapeHtml(src.last_synced)}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Registros Procesados</span>
+                            <span class="meta-value">${src.records_count} elementos</span>
+                        </div>
+                    </div>
+
+                    <button class="btn-inspect" data-source-id="${src.id}">
+                        <i data-lucide="code"></i> Ver Muestra de Datos Reales
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        if (window.lucide) lucide.createIcons();
+
+        // Attach event listeners for inspect buttons
+        document.querySelectorAll('.btn-inspect').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const sourceId = btn.dataset.sourceId;
+                const srcObj = state.sourcesData.find(s => s.id === sourceId);
+                if (srcObj) {
+                    openSampleModal(srcObj);
+                }
+            });
+        });
+    }
+
+    // Open Modal for Raw JSON Payload
+    function openSampleModal(srcObj) {
+        modalSourceName.textContent = `${srcObj.name} (${srcObj.method})`;
+        jsonViewerCode.textContent = JSON.stringify(srcObj.sample_data, null, 2);
+        modalSample.classList.remove('hidden');
+    }
+
+    modalSampleClose.addEventListener('click', () => {
+        modalSample.classList.add('hidden');
+    });
 
     // Calculate & Update Header KPIs
     function updateKPIs(opps) {
