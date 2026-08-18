@@ -1,5 +1,9 @@
+import os
 from fastapi import FastAPI, Depends, Query, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from geoalchemy2.shape import to_shape
 from typing import List, Optional
 
 from app.db.session import get_db, Base, engine
@@ -11,25 +15,55 @@ from app.core.config import settings
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Backend API para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
+    description="Backend API y Dashboard para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
     version="1.0.0"
 )
 
+# Coordinates fallback map for Spanish provinces/cities
+PROVINCE_COORDS = {
+    "madrid": (40.4168, -3.7038),
+    "barcelona": (41.3851, 2.1734),
+    "málaga": (36.7213, -4.4214),
+    "malaga": (36.7213, -4.4214),
+    "valencia": (39.4699, -0.3763),
+    "sevilla": (37.3891, -5.9845),
+    "zaragoza": (41.6488, -0.8896),
+    "alicante": (38.3452, -0.4810),
+    "bizkaia": (43.2630, -2.9350),
+    "balears": (39.5696, 2.6502),
+    "las palmas": (28.1235, -15.4363)
+}
+
+# Mount static files directory if it exists
+static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 @app.on_event("startup")
 def startup_event():
-    # Asegurar creación de tablas al arrancar la API
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         print(f"Advertencia al crear tablas en startup: {e}")
 
 @app.get("/")
-def health_check():
+def serve_dashboard():
+    index_path = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     return {
         "status": "online",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENV,
         "min_discount_threshold": f"{settings.MIN_DISCOUNT_THRESHOLD * 100:.0f}%"
+    }
+
+@app.get("/api/v1/health")
+def health_check():
+    return {
+        "status": "online",
+        "app": settings.PROJECT_NAME,
+        "environment": settings.ENV
     }
 
 @app.post("/api/v1/pipeline/run")
@@ -82,6 +116,23 @@ def get_opportunities(
         for opp in opportunities:
             auc = opp.auction
             strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
+            
+            # Extract coordinates from geometry or fallback by province
+            lat, lon = None, None
+            if auc and auc.location_geom:
+                try:
+                    point = to_shape(auc.location_geom)
+                    lat, lon = point.y, point.x
+                except Exception:
+                    pass
+            
+            if (not lat or not lon) and auc and auc.province:
+                prov_clean = auc.province.strip().lower()
+                if prov_clean in PROVINCE_COORDS:
+                    lat, lon = PROVINCE_COORDS[prov_clean]
+                else:
+                    lat, lon = (40.4168, -3.7038) # Default Spain
+
             results.append({
                 "id": opp.id,
                 "id_subasta": auc.id_subasta if auc else "N/A",
@@ -95,6 +146,8 @@ def get_opportunities(
                 "potential_gross_profit": round(opp.estimated_reference_value - opp.listing_price, 2),
                 "overall_score": opp.overall_score,
                 "poi_score": opp.poi_score,
+                "lat": lat,
+                "lon": lon,
                 "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
             })
     except Exception as e:

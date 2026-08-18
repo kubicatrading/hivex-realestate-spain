@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HIVEX | Spain Real Estate Intelligence & Off-Market Monitor</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Background Glow Blobs -->
+    <div class="bg-glow blob-1"></div>
+    <div class="bg-glow blob-2"></div>
+
+    <div class="app-container">
+        <!-- Header / Navbar -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">
+                    <i data-lucide="building-2"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>HIVEX <span>REAL ESTATE</span></h1>
+                    <span class="sub-badge">Spain Off-Market Intelligence</span>
+                </div>
+            </div>
+
+            <div class="kpi-bar">
+                <div class="kpi-item">
+                    <span class="kpi-label"><i data-lucide="search"></i> Subastas Analizadas</span>
+                    <span class="kpi-value" id="kpi-total-scanned">0</span>
+                </div>
+                <div class="kpi-item highlight">
+                    <span class="kpi-label"><i data-lucide="sparkles"></i> Oportunidades ≥30%</span>
+                    <span class="kpi-value" id="kpi-active-deals">0</span>
+                </div>
+                <div class="kpi-item">
+                    <span class="kpi-label"><i data-lucide="trending-down"></i> Descuento Medio</span>
+                    <span class="kpi-value" id="kpi-avg-discount">0%</span>
+                </div>
+                <div class="kpi-item profit">
+                    <span class="kpi-label"><i data-lucide="coins"></i> Beneficio Potencial Total</span>
+                    <span class="kpi-value" id="kpi-total-profit">0 €</span>
+                </div>
+            </div>
+
+            <div class="nav-actions">
+                <button id="btn-run-pipeline" class="btn btn-primary btn-glow">
+                    <i data-lucide="play" id="icon-run"></i>
+                    <span id="text-run">Ejecutar Escáner</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Filter & Search Toolbar -->
+            <section class="toolbar-card glass-panel">
+                <div class="filter-group">
+                    <label class="filter-label"><i data-lucide="layers"></i> Estrategia de Inversión</label>
+                    <div class="strategy-selector">
+                        <button class="strat-btn active" data-strategy="ALL">Todas</button>
+                        <button class="strat-btn" data-strategy="HOUSE_FLIPPING">
+                            <i data-lucide="home"></i> House Flipping
+                        </button>
+                        <button class="strat-btn" data-strategy="LAND_DEVELOPMENT">
+                            <i data-lucide="map-pin"></i> Suelo / Desarrollo
+                        </button>
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="select-discount">
+                        <i data-lucide="percent"></i> Descuento Mínimo
+                    </label>
+                    <select id="select-discount" class="custom-select">
+                        <option value="0.30" selected>≥ 30% Descuento</option>
+                        <option value="0.40">≥ 40% Descuento</option>
+                        <option value="0.50">≥ 50% Chollos Extremos</option>
+                    </select>
+                </div>
+
+                <div class="filter-group search-box">
+                    <label class="filter-label" for="input-search">
+                        <i data-lucide="search"></i> Provincia / Localidad
+                    </label>
+                    <div class="input-wrapper">
+                        <input type="text" id="input-search" placeholder="Ej: Madrid, Barcelona, Málaga..." autocomplete="off">
+                        <i data-lucide="map-pin" class="input-icon"></i>
+                    </div>
+                </div>
+
+                <div class="toolbar-stats" id="filtered-count">
+                    Cargando oportunidades...
+                </div>
+            </section>
+
+            <!-- Grid Layout: Interactive Map + Deal Cards -->
+            <div class="workspace-grid">
+                <!-- Map Panel -->
+                <section class="map-panel glass-panel">
+                    <div class="panel-header">
+                        <h2><i data-lucide="map"></i> Mapa Interactivo de Oportunidades PostGIS</h2>
+                        <span class="map-legend">
+                            <span class="dot pin-flipping"></span> House Flipping
+                            <span class="dot pin-land"></span> Suelo / Desarrollo
+                        </span>
+                    </div>
+                    <div id="map" class="map-container"></div>
+                </section>
+
+                <!-- Deals Feed Panel -->
+                <section class="deals-panel">
+                    <div class="panel-header">
+                        <h2><i data-lucide="list"></i> Oportunidades Inmobiliarias Detección Off-Market</h2>
+                    </div>
+                    <div id="deals-container" class="deals-grid">
+                        <!-- Cards dynamically rendered by app.js -->
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal for Detailed Deal View -->
+    <div id="modal-deal" class="modal-backdrop hidden">
+        <div class="modal-content glass-panel">
+            <button id="modal-close" class="modal-close-btn">&times;</button>
+            <div id="modal-body">
+                <!-- Filled dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <!-- App JS -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
