@@ -66,35 +66,39 @@ def get_opportunities(
     db: Session = Depends(get_db)
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
-    query = db.query(Opportunity).join(Auction)
-
-    if strategy:
-        query = query.filter(Opportunity.strategy == strategy)
-    if min_discount:
-        query = query.filter(Opportunity.discount_percentage >= min_discount)
-    if province:
-        query = query.filter(Auction.province.ilike(f"%{province}%"))
-
-    opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
-
     results = []
-    for opp in opportunities:
-        auc = opp.auction
-        results.append({
-            "id": opp.id,
-            "id_subasta": auc.id_subasta,
-            "strategy": opp.strategy,
-            "title": auc.title,
-            "province": auc.province,
-            "locality": auc.locality,
-            "listing_price": opp.listing_price,
-            "estimated_reference_value": opp.estimated_reference_value,
-            "discount_percentage": round(opp.discount_percentage * 100, 2),
-            "potential_gross_profit": round(opp.estimated_reference_value - opp.listing_price, 2),
-            "overall_score": opp.overall_score,
-            "poi_score": opp.poi_score,
-            "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}"
-        })
+    try:
+        query = db.query(Opportunity).outerjoin(Auction)
+
+        if strategy:
+            query = query.filter(Opportunity.strategy == strategy)
+        if min_discount is not None:
+            query = query.filter(Opportunity.discount_percentage >= min_discount)
+        if province:
+            query = query.filter(Auction.province.ilike(f"%{province}%"))
+
+        opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+
+        for opp in opportunities:
+            auc = opp.auction
+            strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
+            results.append({
+                "id": opp.id,
+                "id_subasta": auc.id_subasta if auc else "N/A",
+                "strategy": strategy_val,
+                "title": auc.title if auc else "N/A",
+                "province": auc.province if auc else "N/A",
+                "locality": auc.locality if auc else "N/A",
+                "listing_price": opp.listing_price,
+                "estimated_reference_value": opp.estimated_reference_value,
+                "discount_percentage": round(opp.discount_percentage * 100, 2),
+                "potential_gross_profit": round(opp.estimated_reference_value - opp.listing_price, 2),
+                "overall_score": opp.overall_score,
+                "poi_score": opp.poi_score,
+                "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
+            })
+    except Exception as e:
+        print(f"Error consultando oportunidades: {e}")
 
     return {
         "total": len(results),
