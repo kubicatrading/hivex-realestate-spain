@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sourcesData: [],
         activeTab: 'deals',
         currentStrategy: 'ALL',
-        minDiscount: 0.30,
+        minDiscount: 0.10,
         searchQuery: '',
         isLoading: false
     };
@@ -320,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Calculate & Update Header KPIs
     function updateKPIs(opps) {
         const totalCount = opps.length;
-        const activeCount = opps.filter(o => (o.discount_percentage / 100) >= 0.30).length;
+        const activeCount = opps.filter(o => (o.discount_percentage / 100) >= 0.10).length;
         
         let avgDisc = 0;
         let totalProfit = 0;

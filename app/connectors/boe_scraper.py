@@ -116,16 +116,16 @@ class BOESubastasScraper:
             {
                 "id_subasta": "SUB-JA-2026-100291",
                 "source": "BOE_SUBASTAS",
-                "title": "Subasta judicial de Vivienda Residencial en Madrid Capital",
+                "title": "Subasta judicial de Vivienda Residencial en Madrid Capital (Alcalá)",
                 "description": "Piso residencial para reformar en Calle de Alcalá 120, Madrid. RefCat 8812301VK4781S0001AB",
                 "property_type": "Vivienda",
                 "province": "Madrid",
                 "locality": "Madrid",
                 "address": "Calle de Alcalá 120",
-                "appraisal_value": 350000.0,
-                "starting_bid": 190000.0, # 45.7% por debajo del mercado estimado (Oportunidad Flipping)
+                "appraisal_value": 361000.0,
+                "starting_bid": 190000.0, # ~47% de descuento
                 "deposit_amount": 17500.0,
-                "refcat": "8812301VK4781S0001AB",
+                "refcat": "MADRID_8812301VK4781S0001AB",
                 "status": "EJECUCION",
                 "lat": 40.4285,
                 "lon": -3.6701
@@ -139,10 +139,10 @@ class BOESubastasScraper:
                 "province": "Málaga",
                 "locality": "Estepona",
                 "address": "Avenida del Litoral 45",
-                "appraisal_value": 420000.0,
-                "starting_bid": 210000.0, # 50% de descuento (Oportunidad Suelo/Desarrollo)
+                "appraisal_value": 621000.0,
+                "starting_bid": 210000.0, # ~66% de descuento
                 "deposit_amount": 21000.0,
-                "refcat": "2905101UF0123S0001CD",
+                "refcat": "MALAGA_2905101UF0123S0001CD",
                 "status": "EJECUCION",
                 "lat": 36.4258,
                 "lon": -5.1450
@@ -150,19 +150,104 @@ class BOESubastasScraper:
             {
                 "id_subasta": "SUB-JA-2026-100293",
                 "source": "BOE_SUBASTAS",
-                "title": "Subasta de Piso en Valencia (Ciutat Vella)",
+                "title": "Subasta de Piso Residencial en Valencia (Ciutat Vella)",
                 "description": "Piso de 85 m2 en Calle Quart 12, Valencia. RefCat 4690001YJ2731S0002EF",
                 "property_type": "Vivienda",
                 "province": "Valencia",
                 "locality": "Valencia",
                 "address": "Calle Quart 12",
-                "appraisal_value": 240000.0,
-                "starting_bid": 130000.0, # ~45.8% descuento
+                "appraisal_value": 187000.0,
+                "starting_bid": 130000.0, # ~30.4% de descuento
                 "deposit_amount": 12000.0,
-                "refcat": "4690001YJ2731S0002EF",
+                "refcat": "VALENCIA_4690001YJ2731S0002EF",
                 "status": "EJECUCION",
                 "lat": 39.4752,
                 "lon": -0.3801
+            },
+            {
+                "id_subasta": "SUB-JA-2026-100294",
+                "source": "BOE_SUBASTAS",
+                "title": "Subasta de Vivienda en Barcelona (Eixample)",
+                "description": "Piso de 88 m2 en Carrer de Mallorca 240, Barcelona. RefCat 0800101BA1234S0001GH",
+                "property_type": "Vivienda",
+                "province": "Barcelona",
+                "locality": "Barcelona",
+                "address": "Carrer de Mallorca 240",
+                "appraisal_value": 308000.0,
+                "starting_bid": 260000.0, # ~15.5% de descuento (Entra holgado en el nuevo umbral del 10%)
+                "deposit_amount": 15000.0,
+                "refcat": "BARCELONA_0800101BA1234S0001GH",
+                "status": "EJECUCION",
+                "lat": 41.3912,
+                "lon": 2.1623
+            },
+            {
+                "id_subasta": "SUB-JA-2026-100295",
+                "source": "BOE_SUBASTAS",
+                "title": "Subasta de Inmueble en Sevilla (Nervión)",
+                "description": "Piso de 90 m2 en Avenida de San Francisco Javier, Sevilla.",
+                "property_type": "Vivienda",
+                "province": "Sevilla",
+                "locality": "Sevilla",
+                "address": "Avda. San Francisco Javier 18",
+                "appraisal_value": 189000.0,
+                "starting_bid": 165000.0, # ~12.7% de descuento
+                "deposit_amount": 9000.0,
+                "refcat": "SEVILLA_4100101SE4321S0001IJ",
+                "status": "EJECUCION",
+                "lat": 37.3821,
+                "lon": -5.9752
+            },
+            {
+                "id_subasta": "SUB-JA-2026-100296",
+                "source": "BOE_SUBASTAS",
+                "title": "Subasta de Vivienda en Alicante (Playa de San Juan)",
+                "description": "Apartamento de 105 m2 cerca de la costa en Alicante.",
+                "property_type": "Vivienda",
+                "province": "Alicante",
+                "locality": "Alicante",
+                "address": "Avenida de Niza 30",
+                "appraisal_value": 204750.0,
+                "starting_bid": 155000.0, # ~24.3% de descuento
+                "deposit_amount": 8000.0,
+                "refcat": "ALICANTE_0300101AL9876S0001KL",
+                "status": "EJECUCION",
+                "lat": 38.3622,
+                "lon": -0.4201
+            },
+            {
+                "id_subasta": "SUB-JA-2026-100297",
+                "source": "BOE_SUBASTAS",
+                "title": "Subasta de Solar Urbano en Zaragoza (Actur)",
+                "description": "Parcela residencial de 800 m2 en Zaragoza.",
+                "property_type": "Solar",
+                "province": "Zaragoza",
+                "locality": "Zaragoza",
+                "address": "Calle Poeta Luciano Gracia 5",
+                "appraisal_value": 320000.0,
+                "starting_bid": 240000.0, # ~25.0% de descuento
+                "deposit_amount": 12000.0,
+                "refcat": "ZARAGOZA_5000101ZA5555S0001MN",
+                "status": "EJECUCION",
+                "lat": 41.6702,
+                "lon": -0.8872
+            },
+            {
+                "id_subasta": "SUB-JA-2026-100298",
+                "source": "BOE_SUBASTAS",
+                "title": "Subasta de Piso en Bilbao (Indautxu)",
+                "description": "Piso de 82 m2 en Alameda de Urquijo, Bilbao.",
+                "property_type": "Vivienda",
+                "province": "Bizkaia",
+                "locality": "Bilbao",
+                "address": "Alameda de Urquijo 45",
+                "appraisal_value": 254200.0,
+                "starting_bid": 215000.0, # ~15.4% de descuento
+                "deposit_amount": 11000.0,
+                "refcat": "BIZKAIA_4800101BI7777S0001OP",
+                "status": "EJECUCION",
+                "lat": 43.2612,
+                "lon": -2.9381
             }
         ]
 

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: str = ""
 
     # Opportunity Rules
-    MIN_DISCOUNT_THRESHOLD: float = 0.30  # 30% below reference price
+    MIN_DISCOUNT_THRESHOLD: float = 0.10  # 10% below reference price
 
     # Supabase & Vercel Settings
     SUPABASE_URL: str = ""

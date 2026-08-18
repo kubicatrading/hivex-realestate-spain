@@ -51,22 +51,52 @@ class CatastroClient:
         except Exception as e:
             logger.warning(f"Error consultando Catastro WFS para {refcat}: {e}")
 
-        # Asignar estimaciones fiscales por defecto según la zona/tipo
-        if "VK" in clean_refcat or "Madrid" in refcat:
+        # Asignar estimaciones fiscales y precios de mercado por provincia/zona
+        ref_upper = (refcat + clean_refcat).upper()
+        if "MADRID" in ref_upper or "VK" in ref_upper:
             details["reference_price_m2"] = 3800.0
             details["land_use"] = "RESIDENCIAL_URBANO"
             details["surface_m2"] = 95.0
-            details["build_year"] = 1988
-        elif "UF" in clean_refcat or "Málaga" in refcat:
-            details["reference_price_m2"] = 450.0  # Suelo edificable en m2
+        elif "BARCELONA" in ref_upper or "BA" in ref_upper:
+            details["reference_price_m2"] = 3500.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 88.0
+        elif "MÁLAGA" in ref_upper or "MALAGA" in ref_upper or "UF" in ref_upper:
+            details["reference_price_m2"] = 450.0  # Suelo edificable m2 / 2800 vivienda
             details["land_use"] = "SUELO_URBANIZABLE"
             details["surface_m2"] = 1200.0
-            details["build_year"] = None
-        elif "YJ" in clean_refcat or "Valencia" in refcat:
+        elif "VALENCIA" in ref_upper or "YJ" in ref_upper:
             details["reference_price_m2"] = 2200.0
             details["land_use"] = "RESIDENCIAL_URBANO"
             details["surface_m2"] = 85.0
-            details["build_year"] = 1978
+        elif "SEVILLA" in ref_upper:
+            details["reference_price_m2"] = 2100.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 90.0
+        elif "ALICANTE" in ref_upper:
+            details["reference_price_m2"] = 1950.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 105.0
+        elif "ZARAGOZA" in ref_upper:
+            details["reference_price_m2"] = 1850.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 92.0
+        elif "BIZKAIA" in ref_upper or "BILBAO" in ref_upper:
+            details["reference_price_m2"] = 3100.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 82.0
+        elif "BALEARES" in ref_upper or "PALMA" in ref_upper:
+            details["reference_price_m2"] = 3900.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 110.0
+        elif "MURCIA" in ref_upper:
+            details["reference_price_m2"] = 1450.0
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 100.0
+        else:
+            details["reference_price_m2"] = 2400.0  # Promedio nacional de zonas urbanadas
+            details["land_use"] = "RESIDENCIAL_URBANO"
+            details["surface_m2"] = 90.0
 
         return details
 

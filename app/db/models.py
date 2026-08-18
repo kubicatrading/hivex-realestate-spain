@@ -1,8 +1,13 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, Enum
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.compiler import compiles
 from geoalchemy2 import Geometry
 from datetime import datetime
 import enum
+
+@compiles(Geometry, "sqlite")
+def compile_geometry_sqlite(type_, compiler, **kw):
+    return "TEXT"
 
 from app.db.session import Base
 

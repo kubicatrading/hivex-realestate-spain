@@ -262,7 +262,7 @@ def trigger_ingestion_pipeline(
 @app.get("/api/v1/opportunities")
 def get_opportunities(
     strategy: Optional[StrategyType] = None,
-    min_discount: Optional[float] = Query(0.30, ge=0.0, le=1.0),
+    min_discount: Optional[float] = Query(0.10, ge=0.0, le=1.0),
     province: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
@@ -270,6 +270,13 @@ def get_opportunities(
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []
     try:
+        # Auto-poblar datos iniciales si la base de datos está vacía
+        if db.query(Opportunity).count() == 0:
+            scraper = BOESubastasScraper()
+            raw_auctions = scraper.fetch_mock_auctions()
+            scoring_engine = OpportunityScoringEngine(db_session=db)
+            scoring_engine.process_and_score_auctions(raw_auctions)
+
         query = db.query(Opportunity).outerjoin(Auction)
 
         if strategy:
