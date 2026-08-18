@@ -20,7 +20,39 @@
     <div class="bg-glow blob-1"></div>
     <div class="bg-glow blob-2"></div>
 
-    <div class="app-container">
+    <!-- Login Modal Overlay -->
+    <div id="login-overlay" class="login-backdrop">
+        <div class="login-card glass-panel">
+            <div class="login-header">
+                <div class="logo-icon large">
+                    <i data-lucide="building-2"></i>
+                </div>
+                <h2>Acceso Restringido <span>HIVEX</span></h2>
+                <p>Plataforma de Inteligencia Inmobiliaria Off-Market</p>
+            </div>
+
+            <form id="form-login" class="login-form">
+                <div id="login-error" class="login-error-banner hidden"></div>
+
+                <div class="form-group">
+                    <label for="input-login"><i data-lucide="user"></i> Usuario o Correo Electrónico</label>
+                    <input type="text" id="input-login" placeholder="jsaavedra o semeviene@hotmail.es" required autocomplete="username">
+                </div>
+
+                <div class="form-group">
+                    <label for="input-password"><i data-lucide="key-round"></i> Contraseña</label>
+                    <input type="password" id="input-password" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+
+                <button type="submit" id="btn-login-submit" class="btn btn-primary btn-full btn-glow">
+                    <i data-lucide="log-in"></i> Acceder a la Plataforma
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Container -->
+    <div id="dashboard-app" class="app-container hidden">
         <!-- Header / Navbar -->
         <header class="navbar">
             <div class="brand">
@@ -56,6 +88,10 @@
                 <button id="btn-run-pipeline" class="btn btn-primary btn-glow">
                     <i data-lucide="play" id="icon-run"></i>
                     <span id="text-run">Ejecutar Escáner</span>
+                </button>
+
+                <button id="btn-logout" class="btn btn-secondary" title="Cerrar Sesión">
+                    <i data-lucide="log-out"></i>
                 </button>
             </div>
         </header>

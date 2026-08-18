@@ -1,5 +1,5 @@
 /**
- * HIVEX Real Estate Spain - Single Page Dashboard Logic
+ * HIVEX Real Estate Spain - Single Page Dashboard Logic with JWT Auth
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // App State
     let state = {
+        token: localStorage.getItem('hivex_token') || null,
+        user: null,
         allOpportunities: [],
         filteredOpportunities: [],
         currentStrategy: 'ALL',
@@ -18,7 +20,17 @@ document.addEventListener('DOMContentLoaded', () => {
         isLoading: false
     };
 
-    // DOM Elements
+    // DOM Elements - Login
+    const loginOverlay = document.getElementById('login-overlay');
+    const formLogin = document.getElementById('form-login');
+    const inputLogin = document.getElementById('input-login');
+    const inputPassword = document.getElementById('input-password');
+    const loginError = document.getElementById('login-error');
+    const btnLoginSubmit = document.getElementById('btn-login-submit');
+
+    // DOM Elements - Dashboard
+    const dashboardApp = document.getElementById('dashboard-app');
+    const btnLogout = document.getElementById('btn-logout');
     const dealsContainer = document.getElementById('deals-container');
     const filteredCount = document.getElementById('filtered-count');
     const selectDiscount = document.getElementById('select-discount');
@@ -33,22 +45,125 @@ document.addEventListener('DOMContentLoaded', () => {
     const kpiTotalProfit = document.getElementById('kpi-total-profit');
 
     // Initialize Leaflet Map
-    const map = L.map('map').setView([40.4168, -3.7038], 6); // Centered on Madrid / Spain
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19
-    }).addTo(map);
+    let map = null;
+    let mapMarkersLayer = null;
 
-    let mapMarkersLayer = L.layerGroup().addTo(map);
+    function initMap() {
+        if (!map) {
+            map = L.map('map').setView([40.4168, -3.7038], 6); // Centered on Madrid / Spain
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }).addTo(map);
 
-    // Fetch Opportunities from Backend API
+            mapMarkersLayer = L.layerGroup().addTo(map);
+        }
+    }
+
+    // Authentication Checks
+    async function checkAuthSession() {
+        if (!state.token) {
+            showLoginOverlay();
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/v1/auth/me', {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                state.user = data.user;
+                showDashboard();
+            } else {
+                logout();
+            }
+        } catch (e) {
+            logout();
+        }
+    }
+
+    // Login Form Submit Handler
+    formLogin.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginError.classList.add('hidden');
+        btnLoginSubmit.disabled = true;
+        btnLoginSubmit.innerHTML = 'Verificando...';
+
+        const loginVal = inputLogin.value.trim();
+        const passVal = inputPassword.value;
+
+        try {
+            const res = await fetch('/api/v1/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ login: loginVal, password: passVal })
+            });
+
+            const data = await res.json();
+
+            if (res.ok && data.access_token) {
+                state.token = data.access_token;
+                state.user = data.user;
+                localStorage.setItem('hivex_token', data.access_token);
+                showDashboard();
+                showToast(`¡Bienvenido ${data.user.username}!`, 'success');
+            } else {
+                loginError.textContent = data.detail || 'Error de autenticación';
+                loginError.classList.remove('hidden');
+            }
+        } catch (err) {
+            loginError.textContent = 'Error de conexión con el servidor.';
+            loginError.classList.remove('hidden');
+        } finally {
+            btnLoginSubmit.disabled = false;
+            btnLoginSubmit.innerHTML = '<i data-lucide="log-in"></i> Acceder a la Plataforma';
+            if (window.lucide) lucide.createIcons();
+        }
+    });
+
+    // Logout Handler
+    function logout() {
+        state.token = null;
+        state.user = null;
+        localStorage.removeItem('hivex_token');
+        showLoginOverlay();
+    }
+
+    btnLogout.addEventListener('click', logout);
+
+    function showLoginOverlay() {
+        loginOverlay.classList.remove('hidden');
+        dashboardApp.classList.add('hidden');
+    }
+
+    function showDashboard() {
+        loginOverlay.classList.add('hidden');
+        dashboardApp.classList.remove('hidden');
+        setTimeout(() => {
+            initMap();
+            map.invalidateSize();
+            fetchOpportunities();
+        }, 100);
+    }
+
+    // Fetch Opportunities from Backend API with Bearer Token
     async function fetchOpportunities() {
         try {
             state.isLoading = true;
             dealsContainer.innerHTML = '<div style="padding: 20px; color: #94a3b8; text-align: center;">Cargando oportunidades del mercado...</div>';
 
-            const response = await fetch(`/api/v1/opportunities?min_discount=0.0`);
+            const response = await fetch(`/api/v1/opportunities?min_discount=0.0`, {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+
+            if (response.status === 401) {
+                logout();
+                return;
+            }
+
             if (!response.ok) throw new Error('Error al conectar con la API');
 
             const data = await response.json();
@@ -186,6 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render Pins on Map
     function renderMapMarkers(opps) {
+        if (!mapMarkersLayer) return;
         mapMarkersLayer.clearLayers();
         const bounds = [];
 
@@ -215,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        if (bounds.length > 0) {
+        if (bounds.length > 0 && map) {
             map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
         }
     }
@@ -231,7 +347,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             showToast('Lanzando captura de subastas en vivo...', 'info');
 
-            const res = await fetch('/api/v1/pipeline/run', { method: 'POST' });
+            const res = await fetch('/api/v1/pipeline/run', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+
+            if (res.status === 401) {
+                logout();
+                return;
+            }
+
             if (!res.ok) throw new Error('Falló la ejecución de la captura');
 
             const result = await res.json();
@@ -293,6 +418,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 4000);
     }
 
-    // Initial Data Load
-    fetchOpportunities();
+    // Initial Auth Check
+    checkAuthSession();
 });

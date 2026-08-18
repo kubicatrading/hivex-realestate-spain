@@ -1,7 +1,8 @@
 import os
-from fastapi import FastAPI, Depends, Query, HTTPException
+from fastapi import FastAPI, Depends, Query, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from geoalchemy2.shape import to_shape
 from typing import List, Optional
@@ -12,12 +13,21 @@ from app.connectors.boe_scraper import BOESubastasScraper
 from app.engine.scoring_engine import OpportunityScoringEngine
 from app.services.notifier import TelegramNotifier
 from app.core.config import settings
+from app.core.auth import (
+    verify_credentials,
+    create_access_token,
+    get_current_user
+)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API y Dashboard para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
     version="1.0.0"
 )
+
+class LoginRequest(BaseModel):
+    login: str
+    password: str
 
 # Coordinates fallback map for Spanish provinces/cities
 PROVINCE_COORDS = {
@@ -56,8 +66,7 @@ def serve_dashboard():
     return {
         "status": "online",
         "app": settings.PROJECT_NAME,
-        "environment": settings.ENV,
-        "min_discount_threshold": f"{settings.MIN_DISCOUNT_THRESHOLD * 100:.0f}%"
+        "environment": settings.ENV
     }
 
 @app.get("/api/v1/health")
@@ -68,8 +77,33 @@ def health_check():
         "environment": settings.ENV
     }
 
+@app.post("/api/v1/auth/login")
+def login(request: LoginRequest):
+    """Autentica un usuario por nombre de usuario O correo electrónico."""
+    user = verify_credentials(request.login, request.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario/Email o contraseña incorrectos"
+        )
+    
+    access_token = create_access_token(data={"sub": user["username"], "email": user["email"]})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
+
+@app.get("/api/v1/auth/me")
+def get_me(current_user: dict = Depends(get_current_user)):
+    """Verifica el estado de la sesión activa."""
+    return {"status": "authenticated", "user": current_user}
+
 @app.post("/api/v1/pipeline/run")
-def trigger_ingestion_pipeline(db: Session = Depends(get_db)):
+def trigger_ingestion_pipeline(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """Ejecuta la captura de subastas y actualización de oportunidades en tiempo real."""
     scraper = BOESubastasScraper()
     raw_auctions = scraper.fetch_mock_auctions()
@@ -99,7 +133,8 @@ def get_opportunities(
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(0.30, ge=0.0, le=1.0),
     province: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []

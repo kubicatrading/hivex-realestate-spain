@@ -44,6 +44,10 @@ body {
     line-height: 1.5;
 }
 
+.hidden {
+    display: none !important;
+}
+
 /* Background Glowing Blobs */
 .bg-glow {
     position: fixed;
@@ -65,6 +69,128 @@ body {
     background: radial-gradient(circle, rgba(16, 185, 129, 0.12), transparent 70%);
     bottom: -150px;
     right: -150px;
+}
+
+/* Login Screen Overlay */
+.login-backdrop {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(8, 12, 20, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 10000;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 440px;
+    padding: 36px;
+    border-radius: var(--radius-lg);
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.logo-icon.large {
+    width: 58px;
+    height: 58px;
+    margin: 0 auto 16px auto;
+    border-radius: 12px;
+}
+
+.login-header h2 {
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin-bottom: 6px;
+}
+
+.login-header h2 span {
+    color: var(--primary);
+}
+
+.login-header p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-group label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    color: #fff;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.form-group input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+
+.btn-full {
+    width: 100%;
+    justify-content: center;
+    padding: 12px;
+    margin-top: 8px;
+    font-size: 0.95rem;
+}
+
+.login-error-banner {
+    padding: 10px 14px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+    border: 1px solid var(--glass-border);
+}
+
+.btn-secondary:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.4);
 }
 
 /* App Container */
@@ -139,6 +265,12 @@ body {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 1px;
+}
+
+.nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 /* KPI Header Bar */
