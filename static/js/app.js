@@ -380,23 +380,53 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        dealsContainer.innerHTML = opps.map(opp => {
+        dealsContainer.innerHTML = opps.map((opp, idx) => {
             const isFlipping = opp.strategy === 'HOUSE_FLIPPING';
             const stratLabel = isFlipping ? 'House Flipping' : 'Suelo / Desarrollo';
             const stratClass = isFlipping ? 'strat-flipping' : 'strat-land';
+            const mainImg = (opp.images && opp.images.length > 0) ? opp.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80';
+            const imgCount = opp.images ? opp.images.length : 0;
+            const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
+
+            let urbanismHtml = '';
+            if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
+                const zoning = opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
+                const buildability = opp.urbanism.buildability_ratio;
+                const status = opp.urbanism.urbanization_status;
+                const uses = opp.urbanism.permitted_uses;
+
+                urbanismHtml = `
+                    <div class="card-urbanism">
+                        <div class="urb-header">
+                            <i data-lucide="building-2" style="width: 14px; height: 14px;"></i> Ficha Urbanística PGOU
+                        </div>
+                        <div class="urb-badge-grid">
+                            <span class="urb-tag zoning" title="Calificación"><i data-lucide="shield-check" style="width: 12px; height: 12px;"></i> ${escapeHtml(zoning)}</span>
+                            ${buildability ? `<span class="urb-tag buildability"><i data-lucide="ruler" style="width: 12px; height: 12px;"></i> ${escapeHtml(buildability)}</span>` : ''}
+                        </div>
+                        ${status ? `<div class="urb-status"><strong>PGOU:</strong> ${escapeHtml(status)}</div>` : ''}
+                        ${uses ? `<div class="urb-uses"><strong>Usos:</strong> ${escapeHtml(uses)}</div>` : ''}
+                    </div>
+                `;
+            }
 
             return `
-                <div class="deal-card">
-                    <div class="card-top">
-                        <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                        <span class="badge-discount">-${opp.discount_percentage.toFixed(0)}%</span>
+                <div class="deal-card" data-opp-index="${idx}">
+                    <div class="card-image-banner" style="background-image: url('${mainImg}');" onclick="openPropertyDetailModal(${idx})">
+                        <div class="card-image-overlay">
+                            <span class="badge-strategy ${stratClass}">${stratLabel}</span>
+                            <span class="badge-discount">-${opp.discount_percentage.toFixed(0)}%</span>
+                        </div>
+                        ${imgCount > 0 ? `<span class="photo-count-badge"><i data-lucide="camera" style="width: 12px; height: 12px;"></i> ${imgCount} foto${imgCount > 1 ? 's' : ''}</span>` : ''}
                     </div>
 
-                    <h3 class="card-title">${escapeHtml(opp.title)}</h3>
+                    <h3 class="card-title" onclick="openPropertyDetailModal(${idx})" style="cursor: pointer;">${escapeHtml(opp.title)}</h3>
                     <div class="card-location">
-                        <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
-                        ${escapeHtml(opp.locality)}, ${escapeHtml(opp.province)}
+                        <i data-lucide="map-pin" style="width: 14px; height: 14px; flex-shrink: 0; color: var(--primary);"></i>
+                        <span>${escapeHtml(fullAddress)}</span>
                     </div>
+
+                    ${urbanismHtml}
 
                     <div class="card-financials">
                         <div class="fin-item">
@@ -424,9 +454,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
 
-                    <div class="card-footer">
-                        <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn-boe">
-                            Ver en BOE <i data-lucide="external-link" style="width: 12px; height: 14px;"></i>
+                    <div class="card-footer" style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" style="flex: 1; padding: 8px 12px; font-size: 0.82rem;" onclick="openPropertyDetailModal(${idx})">
+                            <i data-lucide="image" style="width: 14px; height: 14px;"></i> Ver Fotos & Ficha
+                        </button>
+                        <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn-boe" style="padding: 8px 12px;">
+                            BOE <i data-lucide="external-link" style="width: 12px; height: 14px;"></i>
                         </a>
                     </div>
                 </div>
@@ -436,16 +469,123 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.lucide) lucide.createIcons();
     }
 
+    // Attach global window function to open Property Detail Modal
+    window.openPropertyDetailModal = function(index) {
+        const opp = state.filteredOpportunities[index];
+        if (!opp) return;
+
+        const modal = document.getElementById('modal-property-detail');
+        const body = document.getElementById('modal-prop-body');
+        const images = (opp.images && opp.images.length > 0) ? opp.images : ['https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80'];
+        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
+
+        let urbanismDetail = '';
+        if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
+            urbanismDetail = `
+                <div class="card-urbanism" style="margin-top: 16px; padding: 16px;">
+                    <div class="urb-header" style="font-size: 0.9rem;">
+                        <i data-lucide="building-2"></i> Ficha Urbanística Completa & Licencia PGOU
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+                        <div>
+                            <span class="meta-label">Calificación Suelo:</span>
+                            <div class="meta-value">${escapeHtml(opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC-R)')}</div>
+                        </div>
+                        <div>
+                            <span class="meta-label">Edificabilidad / Coeficiente:</span>
+                            <div class="meta-value">${escapeHtml(opp.urbanism.buildability_ratio || 'N/A')}</div>
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <span class="meta-label">Estado Planeamiento Urbanístico (PGOU):</span>
+                            <div class="meta-value" style="color: #fbbf24;">${escapeHtml(opp.urbanism.urbanization_status || 'Aprobación Provisional / En trámite')}</div>
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <span class="meta-label">Usos Permitidos & Alturas:</span>
+                            <div class="meta-value">${escapeHtml(opp.urbanism.permitted_uses || 'Residencial / Comercial')}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        body.innerHTML = `
+            <div class="modal-prop-container">
+                <div class="modal-gallery-main" id="prop-main-img" style="background-image: url('${images[0]}');"></div>
+                ${images.length > 1 ? `
+                    <div class="modal-gallery-thumbs">
+                        ${images.map((img, i) => `
+                            <img src="${img}" class="thumb-img ${i === 0 ? 'active' : ''}" onclick="changeModalMainImg('${img}', this)" alt="Foto ${i+1}">
+                        `).join('')}
+                    </div>
+                ` : ''}
+
+                <div class="modal-prop-header">
+                    <h2>${escapeHtml(opp.title)}</h2>
+                    <div class="modal-prop-address">
+                        <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
+                    </div>
+                </div>
+
+                <div class="card-financials" style="padding: 16px; font-size: 1rem;">
+                    <div class="fin-item">
+                        <span class="fin-label">Precio Salida Subasta</span>
+                        <span class="fin-val price">${formatCurrency(opp.listing_price)}</span>
+                    </div>
+                    <div class="fin-item">
+                        <span class="fin-label">Valor Referencia Mercado</span>
+                        <span class="fin-val ref">${formatCurrency(opp.estimated_reference_value)}</span>
+                    </div>
+                    <div class="fin-item">
+                        <span class="fin-label">Descuento</span>
+                        <span class="fin-val profit">-${opp.discount_percentage.toFixed(1)}%</span>
+                    </div>
+                    <div class="fin-item">
+                        <span class="fin-label">Beneficio Bruto</span>
+                        <span class="fin-val profit">+${formatCurrency(opp.potential_gross_profit)}</span>
+                    </div>
+                </div>
+
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5;">${escapeHtml(opp.description || '')}</p>
+
+                ${urbanismDetail}
+
+                <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px;">
+                    <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn btn-primary">
+                        <i data-lucide="external-link"></i> Abrir Expediente Oficial en BOE
+                    </a>
+                </div>
+            </div>
+        `;
+
+        if (window.lucide) lucide.createIcons();
+        modal.classList.remove('hidden');
+    };
+
+    window.changeModalMainImg = function(url, el) {
+        document.getElementById('prop-main-img').style.backgroundImage = `url('${url}')`;
+        document.querySelectorAll('.thumb-img').forEach(t => t.classList.remove('active'));
+        if (el) el.classList.add('active');
+    };
+
+    const modalPropClose = document.getElementById('modal-prop-close');
+    if (modalPropClose) {
+        modalPropClose.addEventListener('click', () => {
+            document.getElementById('modal-property-detail').classList.add('hidden');
+        });
+    }
+
     // Render Pins on Map
     function renderMapMarkers(opps) {
         if (!mapMarkersLayer) return;
         mapMarkersLayer.clearLayers();
         const bounds = [];
 
-        opps.forEach(opp => {
+        opps.forEach((opp, idx) => {
             if (opp.lat && opp.lon) {
                 const color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
-                
+                const mainImg = (opp.images && opp.images.length > 0) ? opp.images[0] : '';
+                const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}`;
+
                 const customIcon = L.divIcon({
                     className: 'custom-map-pin',
                     html: `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${color};"></div>`,
@@ -454,10 +594,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
                 marker.bindPopup(`
-                    <div style="font-family: sans-serif; color: #1e293b;">
-                        <strong style="font-size: 14px;">${escapeHtml(opp.title)}</strong><br>
-                        <span style="color: #64748b; font-size: 12px;">${escapeHtml(opp.locality)}, ${escapeHtml(opp.province)}</span><br>
-                        <div style="margin-top: 6px; font-weight: bold; color: #10b981;">
+                    <div style="font-family: sans-serif; color: #1e293b; max-width: 240px;">
+                        ${mainImg ? `<img src="${mainImg}" style="width: 100%; height: 100px; object-fit: cover; border-radius: 6px; margin-bottom: 8px;">` : ''}
+                        <strong style="font-size: 13px; display: block;">${escapeHtml(opp.title)}</strong>
+                        <span style="color: #64748b; font-size: 11px;">📍 ${escapeHtml(fullAddress)}</span>
+                        <div style="margin-top: 6px; font-weight: bold; color: #10b981; font-size: 12px;">
                             -${opp.discount_percentage.toFixed(0)}% Descuento | ${formatCurrency(opp.listing_price)}
                         </div>
                     </div>

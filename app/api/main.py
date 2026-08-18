@@ -311,13 +311,34 @@ def get_opportunities(
                 else:
                     lat, lon = (40.4168, -3.7038) # Default Spain
 
+            # Parse stored JSON images list
+            import json
+            images_list = []
+            if auc and auc.images_json:
+                try:
+                    images_list = json.loads(auc.images_json)
+                except Exception:
+                    images_list = []
+
+            # Address formatting
+            address_str = auc.address if (auc and auc.address) else ""
+            locality_str = auc.locality if (auc and auc.locality) else ""
+            province_str = auc.province if (auc and auc.province) else ""
+            
+            full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
+            full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
+
             results.append({
                 "id": opp.id,
                 "id_subasta": auc.id_subasta if auc else "N/A",
                 "strategy": strategy_val,
                 "title": auc.title if auc else "N/A",
-                "province": auc.province if auc else "N/A",
-                "locality": auc.locality if auc else "N/A",
+                "description": auc.description if auc else "",
+                "property_type": auc.property_type if auc else "Vivienda",
+                "address": address_str,
+                "locality": locality_str,
+                "province": province_str,
+                "full_address": full_address,
                 "listing_price": opp.listing_price,
                 "estimated_reference_value": opp.estimated_reference_value,
                 "discount_percentage": round(opp.discount_percentage * 100, 2),
@@ -326,6 +347,13 @@ def get_opportunities(
                 "poi_score": opp.poi_score,
                 "lat": lat,
                 "lon": lon,
+                "images": images_list,
+                "urbanism": {
+                    "zoning_classification": auc.zoning_classification if (auc and auc.zoning_classification) else None,
+                    "urbanization_status": auc.urbanization_status if (auc and auc.urbanization_status) else None,
+                    "buildability_ratio": auc.buildability_ratio if (auc and auc.buildability_ratio) else None,
+                    "permitted_uses": auc.permitted_uses if (auc and auc.permitted_uses) else None
+                },
                 "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
             })
     except Exception as e:

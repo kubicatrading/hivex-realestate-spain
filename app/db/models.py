@@ -94,6 +94,13 @@ class Auction(Base):
     auction_start_date = Column(DateTime, nullable=True)
     auction_end_date = Column(DateTime, nullable=True)
     
+    # Datos Urbanísticos para Solares / Terrenos
+    zoning_classification = Column(String(150), nullable=True) # Calificación (ej. Suelo Urbano Consolidado SUC-R)
+    urbanization_status = Column(String(200), nullable=True)   # Estado PGOU / Urbanización
+    buildability_ratio = Column(String(100), nullable=True)    # Edificabilidad (ej. 0.8 m2t/m2s)
+    permitted_uses = Column(String(150), nullable=True)        # Usos (ej. Residencial Colectivo / Unifamiliar)
+    images_json = Column(Text, nullable=True)                  # Lista JSON de URLs de imágenes/fotos
+
     # Geolocalización del inmueble (Coordenadas WGS84 + Point EPSG:4326)
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)

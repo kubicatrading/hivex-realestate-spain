@@ -38,6 +38,10 @@ class OpportunityScoringEngine:
                 
                 # Check if auction already processed
                 existing = self.db.query(Auction).filter(Auction.id_subasta == auction_id).first()
+                import json
+                images_list = item.get("images", [])
+                images_json_str = json.dumps(images_list) if images_list else None
+
                 if not existing:
                     # Crear registro de subasta
                     existing = Auction(
@@ -55,11 +59,26 @@ class OpportunityScoringEngine:
                         refcat=item.get("refcat"),
                         lat=item.get("lat"),
                         lon=item.get("lon"),
+                        zoning_classification=item.get("zoning_classification"),
+                        urbanization_status=item.get("urbanization_status"),
+                        buildability_ratio=item.get("buildability_ratio"),
+                        permitted_uses=item.get("permitted_uses"),
+                        images_json=images_json_str,
                         status=item.get("status", "EJECUCION")
                     )
                     self.db.add(existing)
                     self.db.commit()
                     self.db.refresh(existing)
+                else:
+                    # Actualizar datos enriquecidos si ya existía
+                    existing.address = item.get("address") or existing.address
+                    existing.zoning_classification = item.get("zoning_classification") or existing.zoning_classification
+                    existing.urbanization_status = item.get("urbanization_status") or existing.urbanization_status
+                    existing.buildability_ratio = item.get("buildability_ratio") or existing.buildability_ratio
+                    existing.permitted_uses = item.get("permitted_uses") or existing.permitted_uses
+                    if images_json_str:
+                        existing.images_json = images_json_str
+                    self.db.commit()
 
                 # 1. Enriquecer con datos del Catastro
                 refcat = item.get("refcat") or f"ES_{auction_id}"
