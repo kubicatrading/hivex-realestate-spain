@@ -34,8 +34,10 @@ PROVINCE_COORDS = {
     "las palmas": (28.1235, -15.4363)
 }
 
-# Mount static files directory if it exists
-static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
+# Calculate absolute path to project root
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+static_dir = os.path.join(BASE_DIR, "static")
+
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
