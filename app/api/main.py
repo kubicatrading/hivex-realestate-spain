@@ -262,7 +262,7 @@ def trigger_ingestion_pipeline(
 @app.get("/api/v1/opportunities")
 def get_opportunities(
     strategy: Optional[StrategyType] = None,
-    min_discount: Optional[float] = Query(0.10, ge=0.0, le=1.0),
+    min_discount: Optional[float] = Query(None, ge=0.0, le=1.0),
     province: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
@@ -281,8 +281,9 @@ def get_opportunities(
 
         if strategy:
             query = query.filter(Opportunity.strategy == strategy)
-        if min_discount is not None:
-            query = query.filter(Opportunity.discount_percentage >= min_discount)
+        effective_min_discount = min_discount if min_discount is not None else settings.MIN_DISCOUNT_THRESHOLD
+        if effective_min_discount > 0:
+            query = query.filter(Opportunity.discount_percentage >= effective_min_discount)
         if province:
             query = query.filter(Auction.province.ilike(f"%{province}%"))
 
