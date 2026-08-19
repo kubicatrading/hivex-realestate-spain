@@ -185,11 +185,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Fetch Opportunities from Backend API
-    async function fetchOpportunities() {
+    // Fetch Opportunities from Backend API (Supports silent background updates)
+    async function fetchOpportunities(isSilent = false) {
         try {
-            state.isLoading = true;
-            dealsContainer.innerHTML = '<div style="padding: 20px; color: #94a3b8; text-align: center;">Cargando oportunidades del mercado...</div>';
+            if (!isSilent && state.allOpportunities.length === 0) {
+                state.isLoading = true;
+                dealsContainer.innerHTML = '<div style="padding: 20px; color: #94a3b8; text-align: center;">Cargando oportunidades del mercado...</div>';
+            }
 
             const response = await fetch(`/api/v1/opportunities?min_discount=0.0`, {
                 headers: { 'Authorization': `Bearer ${state.token}` }
@@ -203,18 +205,48 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error('Error al conectar con la API');
 
             const data = await response.json();
-            state.allOpportunities = data.opportunities || [];
+            const newOpps = data.opportunities || [];
             
-            updateKPIs(data.opportunities || []);
-            applyFilters();
+            // Reconciliación silenciosa si ya existían datos en pantalla
+            if (isSilent && state.allOpportunities.length > 0) {
+                const oldIds = new Set(state.allOpportunities.map(o => o.id));
+                const newIds = new Set(newOpps.map(o => o.id));
+
+                const addedCount = newOpps.filter(o => !oldIds.has(o.id)).length;
+                const removedCount = state.allOpportunities.filter(o => !newIds.has(o.id)).length;
+                
+                state.allOpportunities = newOpps;
+                updateKPIs(newOpps);
+                applyFilters();
+
+                if (addedCount > 0) {
+                    showToast(`✨ Se han incorporado ${addedCount} nueva(s) oportunidad(es) al mercado`, 'success');
+                }
+                if (removedCount > 0) {
+                    showToast(`ℹ️ Se han retirado ${removedCount} oportunidad(es) que ya no están activas`, 'info');
+                }
+            } else {
+                state.allOpportunities = newOpps;
+                updateKPIs(newOpps);
+                applyFilters();
+            }
+
             state.isLoading = false;
         } catch (error) {
             console.error('Fetch error:', error);
-            dealsContainer.innerHTML = `<div style="padding: 20px; color: #ef4444; text-align: center;">Error al cargar datos: ${error.message}</div>`;
-            showToast('Error al conectar con el servidor', 'error');
+            if (!isSilent) {
+                dealsContainer.innerHTML = `<div style="padding: 20px; color: #ef4444; text-align: center;">Error al cargar datos: ${error.message}</div>`;
+                showToast('Error al conectar con el servidor', 'error');
+            }
             state.isLoading = false;
         }
     }
+
+    // Configurar actualización silenciosa en segundo plano cada 15 minutos (900.000 ms)
+    setInterval(() => {
+        console.log("Ejecutando refresco silencioso programado cada 15 minutos...");
+        fetchOpportunities(true);
+    }, 15 * 60 * 1000);
 
     // Fetch Data Sources Health Status & Real Sample Payloads
     async function fetchSourcesStatus() {
@@ -380,91 +412,114 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+    // Helper function to return original image or Cadastral parcel map image if no photo exists
+    function getOpportunityMainImage(opp) {
+        if (opp.images && opp.images.length > 0 && opp.images[0]) {
+            return { url: opp.images[0], isMap: false };
+        }
+        if (opp.lat && opp.lon) {
+            const d = 0.0018;
+            const catastroWmsUrl = `https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX=${opp.lon-d},${opp.lat-d},${opp.lon+d},${opp.lat+d}&WIDTH=600&HEIGHT=300`;
+            return { url: catastroWmsUrl, isMap: true };
+        }
+        return { url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80', isMap: false };
+    }
+
+    // Render Opportunity Cards Feed
+    function renderDeals(opps) {
+        if (opps.length === 0) {
+            dealsContainer.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #64748b; background: rgba(0,0,0,0.2); border-radius: 12px;">
+                    <i data-lucide="inbox" style="width: 32px; height: 32px; margin-bottom: 8px;"></i>
+                    <p>No se encontraron oportunidades con los filtros seleccionados.</p>
+                </div>
+            `;
+            if (window.lucide) lucide.createIcons();
+            return;
+        }
+
         dealsContainer.innerHTML = opps.map((opp, idx) => {
             const isFlipping = opp.strategy === 'HOUSE_FLIPPING';
             const stratLabel = isFlipping ? 'House Flipping' : 'Suelo / Desarrollo';
             const stratClass = isFlipping ? 'strat-flipping' : 'strat-land';
-            const mainImg = (opp.images && opp.images.length > 0) ? opp.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80';
+            
+            const imgInfo = getOpportunityMainImage(opp);
+            const mainImg = imgInfo.url;
             const imgCount = opp.images ? opp.images.length : 0;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
 
             let urbanismHtml = '';
             if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
                 const zoning = opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
-                const buildability = opp.urbanism.buildability_ratio;
-                const status = opp.urbanism.urbanization_status;
-                const uses = opp.urbanism.permitted_uses;
-
                 urbanismHtml = `
-                    <div class="card-urbanism">
-                        <div class="urb-header">
-                            <i data-lucide="building-2" style="width: 14px; height: 14px;"></i> Ficha Urbanística PGOU
-                        </div>
-                        <div class="urb-badge-grid">
-                            <span class="urb-tag zoning" title="Calificación"><i data-lucide="shield-check" style="width: 12px; height: 12px;"></i> ${escapeHtml(zoning)}</span>
-                            ${buildability ? `<span class="urb-tag buildability"><i data-lucide="ruler" style="width: 12px; height: 12px;"></i> ${escapeHtml(buildability)}</span>` : ''}
-                        </div>
-                        ${status ? `<div class="urb-status"><strong>PGOU:</strong> ${escapeHtml(status)}</div>` : ''}
-                        ${uses ? `<div class="urb-uses"><strong>Usos:</strong> ${escapeHtml(uses)}</div>` : ''}
+                    <div class="card-urbanism-compact">
+                        <span class="urb-tag zoning" title="Calificación PGOU"><i data-lucide="shield-check" style="width: 12px; height: 12px;"></i> ${escapeHtml(zoning)}</span>
                     </div>
                 `;
             }
 
             return `
-                <div class="deal-card" data-opp-index="${idx}">
-                    <div class="card-image-banner" style="background-image: url('${mainImg}');" onclick="openPropertyDetailModal(${idx})">
+                <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
+                    <div class="card-image-banner" style="background-image: url('${mainImg}');" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay">
                             <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                            <span class="badge-discount">-${opp.discount_percentage.toFixed(0)}%</span>
+                            <span class="badge-discount">-${opp.discount_percentage.toFixed(0)}% BOE</span>
                         </div>
-                        ${imgCount > 0 ? `<span class="photo-count-badge"><i data-lucide="camera" style="width: 12px; height: 12px;"></i> ${imgCount} foto${imgCount > 1 ? 's' : ''}</span>` : ''}
+                        ${imgCount > 0 
+                            ? `<span class="photo-count-badge"><i data-lucide="camera" style="width: 11px; height: 11px;"></i> ${imgCount} foto${imgCount > 1 ? 's' : ''}</span>` 
+                            : `<span class="photo-count-badge map-badge"><i data-lucide="map-pin" style="width: 11px; height: 11px;"></i> Mapa Catastro</span>`
+                        }
                     </div>
 
-                    <h3 class="card-title" onclick="openPropertyDetailModal(${idx})" style="cursor: pointer;">${escapeHtml(opp.title)}</h3>
-                    <div class="card-location">
-                        <i data-lucide="map-pin" style="width: 14px; height: 14px; flex-shrink: 0; color: var(--primary);"></i>
-                        <span>${escapeHtml(fullAddress)}</span>
-                    </div>
+                    <div class="card-content-compact">
+                        <h3 class="card-title" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h3>
+                        
+                        <div class="card-location">
+                            <a href="javascript:void(0)" class="address-maps-link" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)" title="Ver en Google Maps / Street View">
+                                <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> <span>${escapeHtml(fullAddress)}</span>
+                                <span class="maps-badge">Street View</span>
+                            </a>
+                        </div>
 
-                    ${urbanismHtml}
+                        ${urbanismHtml}
 
-                    <div class="card-financials">
-                        <div class="fin-item">
-                            <span class="fin-label">Precio Subasta</span>
-                            <span class="fin-val price">${formatCurrency(opp.listing_price)}</span>
+                        <div class="card-financials-grid">
+                            <div class="fin-cell">
+                                <span class="fin-lbl">Tasación BOE</span>
+                                <span class="fin-val val-tasacion">${formatCurrency(opp.estimated_reference_value)}</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">Precio Salida</span>
+                                <span class="fin-val val-salida">${formatCurrency(opp.listing_price)}</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">Beneficio Est.</span>
+                                <span class="fin-val val-profit">+${formatCurrency(opp.potential_gross_profit)}</span>
+                            </div>
                         </div>
-                        <div class="fin-item">
-                            <span class="fin-label">Valor Referencia</span>
-                            <span class="fin-val ref">${formatCurrency(opp.estimated_reference_value)}</span>
-                        </div>
-                        <div class="fin-item">
-                            <span class="fin-label">Beneficio Bruto</span>
-                            <span class="fin-val profit">+${formatCurrency(opp.potential_gross_profit)}</span>
-                        </div>
-                    </div>
 
-                    <div class="card-scores">
-                        <div class="score-pill">
-                            <span>Score Global:</span>
-                            <strong>${opp.overall_score}/100</strong>
-                        </div>
-                        <div class="score-pill">
-                            <span>Score POI:</span>
-                            <strong>${opp.poi_score}/100</strong>
-                        </div>
-                    </div>
+                        <div class="card-bottom-row">
+                            <div class="scores-compact">
+                                <span class="score-chip" title="Score Global">Score: <strong>${opp.overall_score}</strong></span>
+                                <span class="score-chip poi" title="Servicios y Entorno POI">POI: <strong>${opp.poi_score}</strong></span>
+                            </div>
 
-                    <div class="card-footer" style="display: flex; gap: 8px;">
-                        <button class="btn btn-secondary" style="flex: 1; padding: 8px 12px; font-size: 0.82rem;" onclick="openPropertyDetailModal(${idx})">
-                            <i data-lucide="image" style="width: 14px; height: 14px;"></i> Ver Fotos & Ficha
-                        </button>
-                        <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn-boe" style="padding: 8px 12px;">
-                            BOE <i data-lucide="external-link" style="width: 12px; height: 14px;"></i>
-                        </a>
+                            <div class="card-actions-group">
+                                <button class="btn btn-secondary btn-xs" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
+                                    <i data-lucide="eye" style="width: 12px; height: 12px;"></i> Ficha
+                                </button>
+                                <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn-boe-xs" onclick="event.stopPropagation();">
+                                    BOE <i data-lucide="external-link" style="width: 11px; height: 11px;"></i>
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
         }).join('');
+
+        if (window.lucide) lucide.createIcons();
+    }
 
         if (window.lucide) lucide.createIcons();
     }
@@ -521,8 +576,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <div class="modal-prop-header">
                     <h2>${escapeHtml(opp.title)}</h2>
-                    <div class="modal-prop-address">
-                        <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
+                    <div class="modal-prop-address" style="margin-top: 8px;">
+                        <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
+                            <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
+                            <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps & Street View</span>
+                        </a>
                     </div>
                 </div>
 
@@ -549,7 +607,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 ${urbanismDetail}
 
-                <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border);">
+                    <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
+                        <i data-lucide="x"></i> Cerrar Ventana
+                    </button>
                     <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn btn-primary">
                         <i data-lucide="external-link"></i> Abrir Expediente Oficial en BOE
                     </a>
@@ -561,48 +622,192 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.remove('hidden');
     };
 
+    window.closePropertyDetailModal = function() {
+        const modal = document.getElementById('modal-property-detail');
+        if (modal) modal.classList.add('hidden');
+    };
+
+    window.openGoogleMapsModal = function(address, lat, lon, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        const modal = document.getElementById('modal-google-maps');
+        const addrSpan = document.getElementById('modal-gmaps-address');
+        const linkExt = document.getElementById('link-gmaps-external');
+        const linkStreet = document.getElementById('link-gmaps-streetview');
+
+        let fullSearch = (address && address.trim() !== '') ? address.trim() : '';
+        if (fullSearch && !fullSearch.toLowerCase().includes('españa') && !fullSearch.toLowerCase().includes('spain')) {
+            fullSearch += ', España';
+        }
+
+        const query = fullSearch || (lat && lon ? `${lat},${lon}` : 'España');
+        const encQuery = encodeURIComponent(query);
+
+        addrSpan.textContent = address || query;
+
+        // Embed URLs
+        window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=18&ie=UTF8&iwloc=&output=embed`;
+        window._gmapsStreetUrl = (lat && lon) 
+            ? `https://maps.google.com/maps?q=&layer=c&cbll=${lat},${lon}&cbp=11,0,0,0,0&output=embed`
+            : `https://maps.google.com/maps?q=${encQuery}&layer=c&output=embed`;
+
+        // Direct links
+        linkExt.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}`;
+        if (lat && lon) {
+            linkStreet.href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`;
+        } else {
+            linkStreet.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}&layer=c`;
+        }
+
+        switchGmapsTab('streetview');
+
+        modal.classList.remove('hidden');
+        if (window.lucide) lucide.createIcons();
+    };
+
+    window.switchGmapsTab = function(tab) {
+        const iframe = document.getElementById('iframe-gmaps');
+        const btnStreet = document.getElementById('tab-btn-streetview');
+        const btnMap = document.getElementById('tab-btn-map');
+
+        if (tab === 'streetview') {
+            if (iframe) iframe.src = window._gmapsStreetUrl || window._gmapsMapUrl;
+            if (btnStreet) { btnStreet.classList.add('active', 'btn-primary'); btnStreet.classList.remove('btn-secondary'); }
+            if (btnMap) { btnMap.classList.remove('active', 'btn-primary'); btnMap.classList.add('btn-secondary'); }
+        } else {
+            if (iframe) iframe.src = window._gmapsMapUrl;
+            if (btnMap) { btnMap.classList.add('active', 'btn-primary'); btnMap.classList.remove('btn-secondary'); }
+            if (btnStreet) { btnStreet.classList.remove('active', 'btn-primary'); btnStreet.classList.add('btn-secondary'); }
+        }
+    };
+
+    window.closeGoogleMapsModal = function() {
+        const modal = document.getElementById('modal-google-maps');
+        const iframe = document.getElementById('iframe-gmaps');
+        if (iframe) iframe.src = '';
+        if (modal) modal.classList.add('hidden');
+    };
+
     window.changeModalMainImg = function(url, el) {
         document.getElementById('prop-main-img').style.backgroundImage = `url('${url}')`;
         document.querySelectorAll('.thumb-img').forEach(t => t.classList.remove('active'));
         if (el) el.classList.add('active');
     };
 
+    let markersMap = {};
+
+    window.highlightOpportunityPin = function(oppId, lat, lon) {
+        document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
+        const cardEl = document.querySelector(`.deal-card[data-opp-id="${oppId}"]`);
+        if (cardEl) cardEl.classList.add('card-highlight');
+
+        const marker = markersMap[oppId];
+        if (marker && map) {
+            if (lat && lon) {
+                map.flyTo([lat, lon], 15, { duration: 0.8 });
+            }
+            marker.openPopup();
+
+            if (marker._icon) {
+                document.querySelectorAll('.custom-map-pin').forEach(p => p.classList.remove('pin-pulse-highlight'));
+                const pinDiv = marker._icon.querySelector('div');
+                if (pinDiv) {
+                    pinDiv.classList.add('pin-pulse-highlight');
+                    setTimeout(() => pinDiv.classList.remove('pin-pulse-highlight'), 3500);
+                }
+            }
+        }
+    };
+
+    // Modal Close Button Event Listeners
     const modalPropClose = document.getElementById('modal-prop-close');
     if (modalPropClose) {
-        modalPropClose.addEventListener('click', () => {
-            document.getElementById('modal-property-detail').classList.add('hidden');
-        });
+        modalPropClose.addEventListener('click', closePropertyDetailModal);
     }
 
-    // Render Pins on Map
+    const modalGmapsClose = document.getElementById('modal-gmaps-close');
+    if (modalGmapsClose) {
+        modalGmapsClose.addEventListener('click', closeGoogleMapsModal);
+    }
+
+    const btnGmapsBottomClose = document.getElementById('btn-gmaps-bottom-close');
+    if (btnGmapsBottomClose) {
+        btnGmapsBottomClose.addEventListener('click', closeGoogleMapsModal);
+    }
+
+    // Backdrop & Escape key handler to close active modals
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+                backdrop.classList.add('hidden');
+                const iframe = backdrop.querySelector('iframe');
+                if (iframe) iframe.src = '';
+            }
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal-backdrop').forEach(b => {
+                b.classList.add('hidden');
+                const iframe = b.querySelector('iframe');
+                if (iframe) iframe.src = '';
+            });
+        }
+    });
+
+    // Render Pins on Map with Interactivity
     function renderMapMarkers(opps) {
         if (!mapMarkersLayer) return;
         mapMarkersLayer.clearLayers();
+        markersMap = {};
         const bounds = [];
 
         opps.forEach((opp, idx) => {
             if (opp.lat && opp.lon) {
                 const color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
-                const mainImg = (opp.images && opp.images.length > 0) ? opp.images[0] : '';
+                const imgInfo = getOpportunityMainImage(opp);
+                const mainImg = imgInfo.url;
                 const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}`;
 
                 const customIcon = L.divIcon({
                     className: 'custom-map-pin',
-                    html: `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${color};"></div>`,
-                    iconSize: [14, 14]
+                    html: `<div style="background-color: ${color}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${color}; cursor: pointer;"></div>`,
+                    iconSize: [18, 18]
                 });
 
                 const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
+                markersMap[opp.id] = marker;
+
                 marker.bindPopup(`
-                    <div style="font-family: sans-serif; color: #1e293b; max-width: 240px;">
-                        ${mainImg ? `<img src="${mainImg}" style="width: 100%; height: 100px; object-fit: cover; border-radius: 6px; margin-bottom: 8px;">` : ''}
-                        <strong style="font-size: 13px; display: block;">${escapeHtml(opp.title)}</strong>
-                        <span style="color: #64748b; font-size: 11px;">📍 ${escapeHtml(fullAddress)}</span>
-                        <div style="margin-top: 6px; font-weight: bold; color: #10b981; font-size: 12px;">
-                            -${opp.discount_percentage.toFixed(0)}% Descuento | ${formatCurrency(opp.listing_price)}
+                    <div style="font-family: sans-serif; color: #1e293b; max-width: 250px; padding: 4px;">
+                        <img src="${mainImg}" style="width: 100%; height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 8px; border: 1px solid #cbd5e1;">
+                        <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
+                        <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
+                        <div style="margin-bottom: 4px; font-size: 11px; color: #475569;">
+                            <strong>Tasación BOE:</strong> ${formatCurrency(opp.estimated_reference_value)}
                         </div>
+                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
+                            -${opp.discount_percentage.toFixed(0)}% Descuento | Salida: ${formatCurrency(opp.listing_price)}
+                        </div>
+                        <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
+                            🔍 Ver Ficha Completa
+                        </button>
                     </div>
                 `);
+
+                // Al pulsar la chincheta: resaltar tarjeta en el panel y hacer scroll
+                marker.on('click', () => {
+                    document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
+                    const cardEl = document.querySelector(`.deal-card[data-opp-id="${opp.id}"]`);
+                    if (cardEl) {
+                        cardEl.classList.add('card-highlight');
+                        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
 
                 mapMarkersLayer.addLayer(marker);
                 bounds.push([opp.lat, opp.lon]);
@@ -614,17 +819,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Trigger Ingestion Pipeline
+    // Trigger Ingestion Pipeline (Silent non-blocking execution)
     btnRunPipeline.addEventListener('click', async () => {
-        if (state.isLoading) return;
-        
         try {
-            state.isLoading = true;
             btnRunPipeline.disabled = true;
             document.getElementById('text-run').textContent = 'Escaneando...';
 
-            showToast('Lanzando captura de subastas en vivo...', 'info');
+            showToast('🔍 Escáner activado. Rastreando el BOE en segundo plano sin interrumpir la pantalla...', 'info');
 
+            // 1. Lanzar la captura en segundo plano en el servidor
             const res = await fetch('/api/v1/pipeline/run', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${state.token}` }
@@ -635,16 +838,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!res.ok) throw new Error('Falló la ejecución de la captura');
+            if (!res.ok) throw new Error('Falló la activación del escáner');
 
-            const result = await res.json();
-            showToast(`¡Escáner completado! Subastas procesadas: ${result.processed_auctions}`, 'success');
+            // 2. Ejecutar lectura silenciosa inmediata sin alterar los resultados cargados
+            await fetchOpportunities(true);
 
-            await fetchOpportunities();
+            // 3. Consultas de reconciliación silenciosa progresivas a los 4s, 10s y 18s
+            setTimeout(() => fetchOpportunities(true), 4000);
+            setTimeout(() => fetchOpportunities(true), 10000);
+            setTimeout(() => {
+                fetchOpportunities(true);
+                btnRunPipeline.disabled = false;
+                document.getElementById('text-run').textContent = 'Ejecutar Escáner';
+            }, 18000);
+
         } catch (err) {
-            showToast(`Error ejecutando escáner: ${err.message}`, 'error');
-        } finally {
-            state.isLoading = false;
+            showToast(`Error activando escáner: ${err.message}`, 'error');
             btnRunPipeline.disabled = false;
             document.getElementById('text-run').textContent = 'Ejecutar Escáner';
         }

@@ -10,9 +10,9 @@ class OSMOverpassClient:
     Calcula la densidad de puntos de interés (POIs: salud, educación, transporte, supermercados)
     a un radio determinado (ej. 500m / 1000m) de un inmueble o solar.
     """
-    OVERPASS_URL = "http://overpass-api.de/api/interpreter"
+    OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
-    def __init__(self, timeout: float = 12.0):
+    def __init__(self, timeout: float = 0.2):
         self.client = httpx.Client(timeout=timeout)
 
     def get_poi_metrics(self, lat: float, lon: float, radius_meters: int = 500) -> Dict[str, Any]:
@@ -55,6 +55,15 @@ class OSMOverpassClient:
             logger.warning(f"Error consultando Overpass API para ({lat}, {lon}): {e}")
 
         # Fallback estimación basada en densidad de ubicación conocida
+        if lat is None or lon is None:
+            metrics["health_count"] = 1
+            metrics["education_count"] = 2
+            metrics["supermarket_count"] = 2
+            metrics["transit_count"] = 2
+            metrics["total_pois"] = 7
+            metrics["poi_score"] = 65.0
+            return metrics
+
         if abs(lat - 40.4285) < 0.05: # Madrid Centro
             metrics["health_count"] = 2
             metrics["education_count"] = 4

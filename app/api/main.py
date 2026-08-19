@@ -1,6 +1,6 @@
 import os
 import time
-from fastapi import FastAPI, Depends, Query, HTTPException, status
+from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -230,37 +230,45 @@ def get_sources_status(current_user: dict = Depends(get_current_user)):
         "sources": sources
     }
 
-@app.post("/api/v1/pipeline/run")
-def trigger_ingestion_pipeline(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+async def _run_background_pipeline():
+    """Ejecuta la captura de subastas e ingesta en segundo plano."""
+    try:
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        scraper = BOESubastasScraper()
+        raw_auctions = await scraper.async_scrape_live_auctions(limit=None)
+        
+        scoring_engine = OpportunityScoringEngine(db_session=db)
+        opportunities = scoring_engine.process_and_score_auctions(raw_auctions)
+
+        notifier = TelegramNotifier()
+        alerts_sent = 0
+        for opp in opportunities:
+            if not opp.is_alert_sent:
+                if notifier.send_opportunity_alert(opp):
+                    opp.is_alert_sent = True
+                    alerts_sent += 1
+
+        db.commit()
+        db.close()
+        print(f"Pipeline en segundo plano completado: {len(raw_auctions)} subastas procesadas, {len(opportunities)} oportunidades.")
+    except Exception as e:
+        print(f"Error ejecutando pipeline en segundo plano: {e}")
+
+@app.api_route("/api/v1/pipeline/run", methods=["GET", "POST"])
+async def trigger_ingestion_pipeline(
+    background_tasks: BackgroundTasks
 ):
-    """Ejecuta la captura de subastas y actualización de oportunidades en tiempo real."""
-    scraper = BOESubastasScraper()
-    raw_auctions = scraper.fetch_mock_auctions()
-    
-    scoring_engine = OpportunityScoringEngine(db_session=db)
-    opportunities = scoring_engine.process_and_score_auctions(raw_auctions)
-
-    notifier = TelegramNotifier()
-    alerts_sent = 0
-    for opp in opportunities:
-        if not opp.is_alert_sent:
-            if notifier.send_opportunity_alert(opp):
-                opp.is_alert_sent = True
-                alerts_sent += 1
-
-    db.commit()
-
+    """Ejecuta la captura de subastas reales y actualización de oportunidades en segundo plano de forma silenciosa."""
+    background_tasks.add_task(_run_background_pipeline)
     return {
-        "status": "success",
-        "processed_auctions": len(raw_auctions),
-        "detected_opportunities": len(opportunities),
-        "alerts_sent": alerts_sent
+        "status": "processing",
+        "message": "Escáner de subastas en vivo activado en segundo plano de forma silenciosa."
     }
 
 @app.get("/api/v1/opportunities")
-def get_opportunities(
+async def get_opportunities(
+    background_tasks: BackgroundTasks,
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(None, ge=0.0, le=1.0),
     province: Optional[str] = None,
@@ -270,18 +278,16 @@ def get_opportunities(
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []
     try:
-        # Auto-poblar datos iniciales si la base de datos está vacía
+        # Si la base de datos está vacía, activar el escáner en segundo plano
         if db.query(Opportunity).count() == 0:
-            scraper = BOESubastasScraper()
-            raw_auctions = scraper.fetch_mock_auctions()
-            scoring_engine = OpportunityScoringEngine(db_session=db)
-            scoring_engine.process_and_score_auctions(raw_auctions)
+            background_tasks.add_task(_run_background_pipeline)
+
 
         query = db.query(Opportunity).outerjoin(Auction)
 
         if strategy:
             query = query.filter(Opportunity.strategy == strategy)
-        effective_min_discount = min_discount if min_discount is not None else settings.MIN_DISCOUNT_THRESHOLD
+        effective_min_discount = min_discount if min_discount is not None else 0.0
         if effective_min_discount > 0:
             query = query.filter(Opportunity.discount_percentage >= effective_min_discount)
         if province:

@@ -1,9 +1,15 @@
 {
   "version": 2,
-  "builds": [
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "hivex_local.db"
+    }
+  },
+  "crons": [
     {
-      "src": "api/index.py",
-      "use": "@vercel/python"
+      "path": "/api/v1/pipeline/run",
+      "schedule": "*/15 * * * *"
     }
   ],
   "routes": [

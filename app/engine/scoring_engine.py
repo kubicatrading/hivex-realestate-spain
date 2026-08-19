@@ -123,23 +123,34 @@ class OpportunityScoringEngine:
                     f"Descuento={discount_pct * 100:.1f}%, Score={overall_score}"
                 )
 
-                # 5. Filtrar según umbral de descuento (ej. >= 30%)
+                # 5. Filtrar según umbral de descuento
                 if discount_pct >= settings.MIN_DISCOUNT_THRESHOLD:
-                    # Crear Oportunidad
-                    opportunity = Opportunity(
-                        auction_id=existing.id,
-                        strategy=strategy,
-                        listing_price=listing_price,
-                        estimated_reference_value=estimated_market_value,
-                        discount_percentage=discount_pct,
-                        poi_score=poi_data["poi_score"],
-                        income_score=round(ine_data["avg_household_income"] / 500.0, 2),
-                        overall_score=overall_score,
-                        is_alert_sent=False
-                    )
-                    self.db.add(opportunity)
+                    existing_opp = self.db.query(Opportunity).filter(Opportunity.auction_id == existing.id).first()
+                    if existing_opp:
+                        existing_opp.strategy = strategy
+                        existing_opp.listing_price = listing_price
+                        existing_opp.estimated_reference_value = estimated_market_value
+                        existing_opp.discount_percentage = discount_pct
+                        existing_opp.poi_score = poi_data["poi_score"]
+                        existing_opp.income_score = round(ine_data["avg_household_income"] / 500.0, 2)
+                        existing_opp.overall_score = overall_score
+                        opportunity = existing_opp
+                    else:
+                        opportunity = Opportunity(
+                            auction_id=existing.id,
+                            strategy=strategy,
+                            listing_price=listing_price,
+                            estimated_reference_value=estimated_market_value,
+                            discount_percentage=discount_pct,
+                            poi_score=poi_data["poi_score"],
+                            income_score=round(ine_data["avg_household_income"] / 500.0, 2),
+                            overall_score=overall_score,
+                            is_alert_sent=False
+                        )
+                        self.db.add(opportunity)
+                    
+                    self.db.flush()
                     self.db.commit()
-                    self.db.refresh(opportunity)
                     detected_opportunities.append(opportunity)
 
             except Exception as e:

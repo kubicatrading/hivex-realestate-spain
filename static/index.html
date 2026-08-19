@@ -213,9 +213,48 @@
     <!-- Modal for Property Photo Gallery & Urbanistic Inspection -->
     <div id="modal-property-detail" class="modal-backdrop hidden">
         <div class="modal-content glass-panel modal-large">
-            <button id="modal-prop-close" class="modal-close-btn">&times;</button>
+            <button id="modal-prop-close" class="modal-close-btn" title="Cerrar">&times;</button>
             <div id="modal-prop-body">
                 <!-- Content filled dynamically by app.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Google Maps & Street View -->
+    <div id="modal-google-maps" class="modal-backdrop hidden">
+        <div class="modal-content glass-panel modal-large">
+            <button id="modal-gmaps-close" class="modal-close-btn" title="Cerrar">&times;</button>
+            <div class="modal-header">
+                <h3><i data-lucide="map-pin"></i> Ubicación, Fotos & Street View</h3>
+                <span id="modal-gmaps-address" class="modal-subtitle">Cargando dirección...</span>
+            </div>
+            
+            <div class="gmaps-tab-bar" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
+                <button id="tab-btn-streetview" class="btn btn-primary btn-sm active" onclick="switchGmapsTab('streetview')">
+                    <i data-lucide="footprints"></i> Google Street View (360°)
+                </button>
+                <button id="tab-btn-map" class="btn btn-secondary btn-sm" onclick="switchGmapsTab('map')">
+                    <i data-lucide="map"></i> Mapa Satélite / Terreno
+                </button>
+            </div>
+
+            <div class="gmaps-actions" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <a id="link-gmaps-external" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+                    <i data-lucide="external-link"></i> Abrir Google Maps
+                </a>
+                <a id="link-gmaps-streetview" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+                    <i data-lucide="footprints"></i> Abrir Street View Completo
+                </a>
+            </div>
+
+            <div class="google-maps-container">
+                <iframe id="iframe-gmaps" class="gmaps-iframe" src="" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                <button id="btn-gmaps-bottom-close" class="btn btn-secondary">
+                    <i data-lucide="x"></i> Cerrar Mapa
+                </button>
             </div>
         </div>
     </div>
