@@ -17,7 +17,8 @@ from app.core.config import settings
 from app.core.auth import (
     verify_credentials,
     create_access_token,
-    get_current_user
+    get_current_user,
+    get_current_user_optional
 )
 
 app = FastAPI(
@@ -101,7 +102,7 @@ def get_me(current_user: dict = Depends(get_current_user)):
     return {"status": "authenticated", "user": current_user}
 
 @app.get("/api/v1/sources/status")
-def get_sources_status(current_user: dict = Depends(get_current_user)):
+def get_sources_status(current_user: Optional[dict] = Depends(get_current_user_optional)):
     """Devuelve el estado de salud, latencia y muestra de datos reales de cada fuente web."""
     sources = []
 
@@ -273,7 +274,7 @@ async def get_opportunities(
     min_discount: Optional[float] = Query(None, ge=0.0, le=1.0),
     province: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []

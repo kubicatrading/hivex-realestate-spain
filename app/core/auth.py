@@ -96,3 +96,13 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No se pudo validar el token de autenticación.",
         )
+
+def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[Dict[str, str]]:
+    """FastAPI Dependency for optional authentication."""
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return {"username": AUTHORIZED_USER["username"], "email": AUTHORIZED_USER["email"]}
+    except Exception:
+        return None
