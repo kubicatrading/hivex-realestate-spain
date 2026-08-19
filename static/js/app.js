@@ -399,19 +399,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMapMarkers(state.filteredOpportunities);
     }
 
-    // Render Cards Grid
-    function renderDeals(opps) {
-        if (opps.length === 0) {
-            dealsContainer.innerHTML = `
-                <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #64748b; background: rgba(0,0,0,0.2); border-radius: 12px;">
-                    <i data-lucide="inbox" style="width: 32px; height: 32px; margin-bottom: 8px;"></i>
-                    <p>No se encontraron oportunidades con los filtros seleccionados.</p>
-                </div>
-            `;
-            if (window.lucide) lucide.createIcons();
-            return;
-        }
-
     // Helper function to return original image or Cadastral parcel map image if no photo exists
     function getOpportunityMainImage(opp) {
         if (opp.images && opp.images.length > 0 && opp.images[0]) {
@@ -517,9 +504,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
         }).join('');
-
-        if (window.lucide) lucide.createIcons();
-    }
 
         if (window.lucide) lucide.createIcons();
     }
