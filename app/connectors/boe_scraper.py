@@ -39,6 +39,26 @@ class BOESubastasScraper:
             return match.group(1)
         return None
 
+    def extract_surface_m2(self, text: str) -> Optional[float]:
+        """Extrae la superficie en m2 (ej: 120 m2, 120m2, 120,50 m2) del texto o ficha del registro."""
+        if not text:
+            return None
+        patterns = [
+            r'(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros\s+cuadrados)',
+            r'superficie(?:\s+construida|\s+útil|\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)'
+        ]
+        for pat in patterns:
+            m = re.search(pat, text.lower())
+            if m:
+                try:
+                    val_str = m.group(1).replace('.', '').replace(',', '.')
+                    val = float(val_str)
+                    if 10.0 <= val <= 50000.0:
+                        return val
+                except Exception:
+                    pass
+        return None
+
     def parse_auction_detail(self, auction_id: str, html_content: str) -> Dict[str, Any]:
         """
         Parsea el HTML de la página de detalles de un lote/subasta del BOE.

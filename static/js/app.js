@@ -406,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (opp.lat && opp.lon) {
             const d = 0.0018;
-            const catastroWmsUrl = `https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX=${opp.lon-d},${opp.lat-d},${opp.lon+d},${opp.lat+d}&WIDTH=600&HEIGHT=300`;
+            const catastroWmsUrl = `https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA,ORTOFOTO&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX=${opp.lon-d},${opp.lat-d},${opp.lon+d},${opp.lat+d}&WIDTH=600&HEIGHT=300`;
             return { url: catastroWmsUrl, isMap: true };
         }
         return { url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80', isMap: false };
@@ -435,6 +435,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const imgCount = opp.images ? opp.images.length : 0;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
 
+            // Metrics according to User Rules 5.1-5.4
+            const refVal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
+            const surface = opp.surface_m2 || (isFlipping ? 110 : 350);
+            const propertyM2 = opp.property_m2_price || Math.round(refVal / surface);
+            const areaM2 = opp.area_m2_price || Math.round((opp.estimated_reference_value || refVal * 1.4) / surface);
+            const typeLabel = isFlipping ? 'Inmueble' : 'Solar';
+
             let urbanismHtml = '';
             if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
                 const zoning = opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
@@ -454,7 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         ${imgCount > 0 
                             ? `<span class="photo-count-badge"><i data-lucide="camera" style="width: 11px; height: 11px;"></i> ${imgCount} foto${imgCount > 1 ? 's' : ''}</span>` 
-                            : `<span class="photo-count-badge map-badge"><i data-lucide="map-pin" style="width: 11px; height: 11px;"></i> Mapa Catastro</span>`
+                            : `<span class="photo-count-badge map-badge"><i data-lucide="map-pin" style="width: 11px; height: 11px;"></i> Mapa Satélite</span>`
                         }
                     </div>
 
@@ -462,26 +469,30 @@ document.addEventListener('DOMContentLoaded', () => {
                         <h3 class="card-title" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h3>
                         
                         <div class="card-location">
-                            <a href="javascript:void(0)" class="address-maps-link" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)" title="Ver en Google Maps / Street View">
+                            <a href="javascript:void(0)" class="address-maps-link" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)" title="Ver en Google Maps Satélite">
                                 <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> <span>${escapeHtml(fullAddress)}</span>
-                                <span class="maps-badge">Street View</span>
+                                <span class="maps-badge">Google Maps</span>
                             </a>
                         </div>
 
                         ${urbanismHtml}
 
-                        <div class="card-financials-grid">
+                        <div class="card-financials-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0;">
                             <div class="fin-cell">
-                                <span class="fin-lbl">Tasación BOE</span>
-                                <span class="fin-val val-tasacion">${formatCurrency(opp.estimated_reference_value)}</span>
+                                <span class="fin-lbl">Valor Subasta / Ref.</span>
+                                <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Precio Salida</span>
-                                <span class="fin-val val-salida">${formatCurrency(opp.listing_price)}</span>
+                                <span class="fin-lbl">Superficie Total</span>
+                                <span class="fin-val" style="font-size: 0.95rem; color: #f8fafc; font-weight: 600;">${surface} m²</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Beneficio Est.</span>
-                                <span class="fin-val val-profit">+${formatCurrency(opp.potential_gross_profit)}</span>
+                                <span class="fin-lbl">€/m² ${typeLabel}</span>
+                                <span class="fin-val val-salida" style="font-size: 0.9rem; font-weight: 700;">${formatCurrency(propertyM2)}/m²</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">€/m² Zona (${typeLabel})</span>
+                                <span class="fin-val val-profit" style="font-size: 0.9rem; font-weight: 700;">${formatCurrency(areaM2)}/m²</span>
                             </div>
                         </div>
 
@@ -563,27 +574,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="modal-prop-address" style="margin-top: 8px;">
                         <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
                             <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
-                            <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps & Street View</span>
+                            <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps Satélite</span>
                         </a>
                     </div>
                 </div>
 
-                <div class="card-financials" style="padding: 16px; font-size: 1rem;">
+                <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
                     <div class="fin-item">
-                        <span class="fin-label">Precio Salida Subasta</span>
-                        <span class="fin-val price">${formatCurrency(opp.listing_price)}</span>
+                        <span class="fin-label">Valor de Tasación BOE</span>
+                        <span class="fin-val ref" style="font-weight: 700;">${formatCurrency(opp.appraisal_value || 0)}</span>
                     </div>
                     <div class="fin-item">
-                        <span class="fin-label">Valor Referencia Mercado</span>
-                        <span class="fin-val ref">${formatCurrency(opp.estimated_reference_value)}</span>
+                        <span class="fin-label">Valor de Subasta</span>
+                        <span class="fin-val price" style="font-weight: 700;">${formatCurrency(opp.starting_bid || opp.listing_price)}</span>
                     </div>
                     <div class="fin-item">
-                        <span class="fin-label">Descuento</span>
-                        <span class="fin-val profit">-${opp.discount_percentage.toFixed(1)}%</span>
+                        <span class="fin-label">Valor Ref. Tomado</span>
+                        <span class="fin-val ref" style="color: #60a5fa; font-weight: 700;">${formatCurrency(opp.property_ref_value || opp.starting_bid)}</span>
                     </div>
                     <div class="fin-item">
-                        <span class="fin-label">Beneficio Bruto</span>
-                        <span class="fin-val profit">+${formatCurrency(opp.potential_gross_profit)}</span>
+                        <span class="fin-label">Superficie Ficha</span>
+                        <span class="fin-val" style="color: #f8fafc; font-weight: 600;">${opp.surface_m2 || 110} m²</span>
+                    </div>
+                    <div class="fin-item">
+                        <span class="fin-label">Precio €/m² Inmueble</span>
+                        <span class="fin-val price" style="font-weight: 700;">${formatCurrency(opp.property_m2_price)}/m²</span>
+                    </div>
+                    <div class="fin-item">
+                        <span class="fin-label">Precio €/m² Zona</span>
+                        <span class="fin-val profit" style="font-weight: 700;">${formatCurrency(opp.area_m2_price)}/m²</span>
                     </div>
                 </div>
 
@@ -620,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modal-google-maps');
         const addrSpan = document.getElementById('modal-gmaps-address');
         const linkExt = document.getElementById('link-gmaps-external');
-        const linkStreet = document.getElementById('link-gmaps-streetview');
+        const iframe = document.getElementById('iframe-gmaps');
 
         let fullSearch = (address && address.trim() !== '') ? address.trim() : '';
         if (fullSearch && !fullSearch.toLowerCase().includes('españa') && !fullSearch.toLowerCase().includes('spain')) {
@@ -632,21 +651,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         addrSpan.textContent = address || query;
 
-        // Embed URLs
+        // Embed Satellite Map URL
         window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=18&ie=UTF8&iwloc=&output=embed`;
-        window._gmapsStreetUrl = (lat && lon) 
-            ? `https://maps.google.com/maps?q=&layer=c&cbll=${lat},${lon}&cbp=11,0,0,0,0&output=embed`
-            : `https://maps.google.com/maps?q=${encQuery}&layer=c&output=embed`;
 
-        // Direct links
-        linkExt.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}`;
-        if (lat && lon) {
-            linkStreet.href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`;
-        } else {
-            linkStreet.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}&layer=c`;
-        }
-
-        switchGmapsTab('streetview');
+        if (iframe) iframe.src = window._gmapsMapUrl;
+        if (linkExt) linkExt.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}`;
 
         modal.classList.remove('hidden');
         if (window.lucide) lucide.createIcons();

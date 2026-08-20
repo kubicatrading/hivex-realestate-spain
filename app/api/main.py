@@ -335,6 +335,42 @@ async def get_opportunities(
             full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
             full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
 
+            # Financial metrics calculation according to User Rules 5.1-5.4
+            starting_bid_val = auc.starting_bid if (auc and auc.starting_bid) else 0.0
+            appraisal_val = auc.appraisal_value if (auc and auc.appraisal_value) else 0.0
+
+            # Rule 5.1: If both exist, take the max. Else take whichever exists, or listing_price
+            if starting_bid_val > 0 and appraisal_val > 0:
+                property_ref_value = max(starting_bid_val, appraisal_val)
+            elif starting_bid_val > 0:
+                property_ref_value = starting_bid_val
+            elif appraisal_val > 0:
+                property_ref_value = appraisal_val
+            else:
+                property_ref_value = opp.listing_price or 100000.0
+
+            # Rule 5.2: Surface area m²
+            surface_m2 = 110.0
+            if auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
+                surface_m2 = auc.parcel.surface_m2
+            else:
+                desc_text = (auc.description or "") + " " + (auc.title or "") if auc else ""
+                scraper = BOESubastasScraper()
+                parsed_m2 = scraper.extract_surface_m2(desc_text)
+                if parsed_m2:
+                    surface_m2 = parsed_m2
+                else:
+                    surface_m2 = 350.0 if strategy_val == "LAND_DEVELOPMENT" else 110.0
+
+            # Rule 5.3: Property price per m² (€/m²)
+            property_m2_price = round(property_ref_value / surface_m2, 2)
+
+            # Rule 5.4: Area average price per m² (€/m²)
+            area_m2_price = round(opp.estimated_reference_value / surface_m2, 2)
+
+            # Recalculate discount based on m² comparison
+            discount_m2_pct = round(((area_m2_price - property_m2_price) / area_m2_price) * 100, 2) if area_m2_price > 0 else round(opp.discount_percentage * 100, 2)
+
             results.append({
                 "id": opp.id,
                 "id_subasta": auc.id_subasta if auc else "N/A",
@@ -347,9 +383,15 @@ async def get_opportunities(
                 "province": province_str,
                 "full_address": full_address,
                 "listing_price": opp.listing_price,
+                "appraisal_value": appraisal_val,
+                "starting_bid": starting_bid_val,
+                "property_ref_value": property_ref_value,
+                "surface_m2": surface_m2,
+                "property_m2_price": property_m2_price,
+                "area_m2_price": area_m2_price,
                 "estimated_reference_value": opp.estimated_reference_value,
-                "discount_percentage": round(opp.discount_percentage * 100, 2),
-                "potential_gross_profit": round(opp.estimated_reference_value - opp.listing_price, 2),
+                "discount_percentage": discount_m2_pct,
+                "potential_gross_profit": round(opp.estimated_reference_value - property_ref_value, 2),
                 "overall_score": opp.overall_score,
                 "poi_score": opp.poi_score,
                 "lat": lat,

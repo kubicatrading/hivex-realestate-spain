@@ -220,30 +220,24 @@
         </div>
     </div>
 
-    <!-- Modal for Google Maps & Street View -->
+    <!-- Modal for Google Maps & Satélite -->
     <div id="modal-google-maps" class="modal-backdrop hidden">
         <div class="modal-content glass-panel modal-large">
             <button id="modal-gmaps-close" class="modal-close-btn" title="Cerrar">&times;</button>
             <div class="modal-header">
-                <h3><i data-lucide="map-pin"></i> Ubicación, Fotos & Street View</h3>
+                <h3><i data-lucide="map-pin"></i> Ubicación & Mapa Satélite</h3>
                 <span id="modal-gmaps-address" class="modal-subtitle">Cargando dirección...</span>
             </div>
             
             <div class="gmaps-tab-bar" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
-                <button id="tab-btn-streetview" class="btn btn-primary btn-sm active" onclick="switchGmapsTab('streetview')">
-                    <i data-lucide="footprints"></i> Google Street View (360°)
-                </button>
-                <button id="tab-btn-map" class="btn btn-secondary btn-sm" onclick="switchGmapsTab('map')">
+                <button id="tab-btn-map" class="btn btn-primary btn-sm active">
                     <i data-lucide="map"></i> Mapa Satélite / Terreno
                 </button>
             </div>
 
             <div class="gmaps-actions" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
                 <a id="link-gmaps-external" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
-                    <i data-lucide="external-link"></i> Abrir Google Maps
-                </a>
-                <a id="link-gmaps-streetview" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
-                    <i data-lucide="footprints"></i> Abrir Street View Completo
+                    <i data-lucide="external-link"></i> Abrir en Google Maps
                 </a>
             </div>
 
