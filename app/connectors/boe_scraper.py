@@ -100,12 +100,14 @@ class BOESubastasScraper:
                     val = cols[1].get_text(strip=True)
                     full_text += f" {key} {val}"
 
-                    if "valor de tasación" in key:
+                    if "valor subasta" in key or "valor de la subasta" in key:
+                        data["starting_bid"] = self._parse_amount(val)
+                    elif "valor de tasación" in key or "tasación" in key:
                         data["appraisal_value"] = self._parse_amount(val)
                     elif "importe del depósito" in key:
                         data["deposit_amount"] = self._parse_amount(val)
-                    elif "puja mínima" in key or "tramo entre pujas" in key or "valor subasta" in key:
-                        data["starting_bid"] = self._parse_amount(val)
+                    elif "puja mínima" in key or "puja minima" in key:
+                        data["minimum_bid"] = self._parse_amount(val)
                     elif "provincia" in key:
                         data["province"] = val
                     elif "localidad" in key or "municipio" in key:
@@ -122,9 +124,11 @@ class BOESubastasScraper:
         data["description"] = full_text.strip()
         data["refcat"] = self.extract_cadastral_reference(full_text)
 
-        # Si el precio de salida sigue en 0, usar el valor de tasación como referencia
+        # Si el valor de subasta sigue en 0, usar el valor de tasación como referencia
         if data["starting_bid"] == 0.0 and data["appraisal_value"] > 0.0:
-            data["starting_bid"] = data["appraisal_value"] * 0.5 # Estimación habitual de salida del BOE
+            data["starting_bid"] = data["appraisal_value"]
+        if data["appraisal_value"] == 0.0 and data["starting_bid"] > 0.0:
+            data["appraisal_value"] = data["starting_bid"]
 
         return data
 
@@ -237,15 +241,23 @@ class BOESubastasScraper:
 
                     # 2. Datos financieros (ver=1)
                     s1 = BeautifulSoup(html_ver1, "html.parser")
-                    appraisal, starting_bid = 0.0, 0.0
+                    appraisal, starting_bid, min_bid = 0.0, 0.0, 0.0
                     for tr in s1.find_all("tr"):
                         tds = tr.find_all(["th", "td"])
                         if len(tds) >= 2:
                             k, v = tds[0].get_text(strip=True).lower(), tds[1].get_text(strip=True)
-                            if "tasación" in k or "valor subasta" in k:
-                                appraisal = self._parse_amount(v)
-                            elif "puja mínima" in k:
+                            if "valor subasta" in k or "valor de la subasta" in k:
                                 starting_bid = self._parse_amount(v)
+                            elif "tasación" in k or "valor de tasación" in k:
+                                appraisal = self._parse_amount(v)
+                            elif "puja mínima" in k or "puja minima" in k:
+                                min_bid = self._parse_amount(v)
+
+                    # Si valor subasta no vino explícito, usar tasación
+                    if starting_bid == 0.0 and appraisal > 0.0:
+                        starting_bid = appraisal
+                    if appraisal == 0.0 and starting_bid > 0.0:
+                        appraisal = starting_bid
 
                     # Geolocalización y ortofoto
                     lat, lon = self.geocode_address(address, locality, province)

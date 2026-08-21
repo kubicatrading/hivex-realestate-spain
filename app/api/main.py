@@ -343,14 +343,12 @@ async def get_opportunities(
             full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
             full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
 
-            # Financial metrics calculation according to User Rules 5.1-5.4
+            # Financial metrics calculation: Strictly take "Valor subasta" literal from BOE
             starting_bid_val = auc.starting_bid if (auc and auc.starting_bid) else 0.0
             appraisal_val = auc.appraisal_value if (auc and auc.appraisal_value) else 0.0
 
-            # Rule 5.1: If both exist, take the max. Else take whichever exists, or listing_price
-            if starting_bid_val > 0 and appraisal_val > 0:
-                property_ref_value = max(starting_bid_val, appraisal_val)
-            elif starting_bid_val > 0:
+            # "Valor subasta" literal de la ficha del BOE
+            if starting_bid_val > 0:
                 property_ref_value = starting_bid_val
             elif appraisal_val > 0:
                 property_ref_value = appraisal_val
