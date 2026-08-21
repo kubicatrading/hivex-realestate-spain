@@ -582,15 +582,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Tasación BOE</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.appraisal_value || 0)}</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Subasta</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.starting_bid || opp.listing_price)}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${opp.starting_bid > 0 ? formatCurrency(opp.starting_bid) : (opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €')}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Ref. Tomado</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; color: #60a5fa; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_ref_value || opp.starting_bid)}</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; color: #60a5fa; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_ref_value || 0)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie Ficha</span>
