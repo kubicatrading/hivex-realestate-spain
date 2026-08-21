@@ -154,38 +154,29 @@ class BOESubastasScraper:
         trasteros, aparcamientos y participaciones indivisas de anexos.
         """
         text = f"{title or ''} {desc or ''}".lower()
-        
-        annex_triggers = [
-            'plaza de garaje', 'plazas de garaje', 'garaje', 'garajes',
-            'plaza de aparcamiento', 'aparcamiento', 'estacionamiento', 'zona de estacionamiento',
-            'trastero', 'trasteros', 'cochera', 'cuota indivisa', 'participación indivisa',
-            'participacion indivisa', 'local destinado a garaje', 'local garaje', 'parking'
-        ]
-        
-        if not any(trig in text for trig in annex_triggers):
-            return False
-
         clean_desc = re.sub(r'^(urbana|rústica|rustica|finca|elemento|entidad|1/\d+|100%|pleno dominio)?\s*[\d\w\.-]*\s*[\.:,-]?\s*', '', (desc or '').lower().strip())
         
-        starts_with_annex = any(kw in clean_desc[:80] for kw in [
-            'plaza de garaje', 'plaza', 'trastero', 'garaje', 'aparcamiento', 'estacionamiento',
-            'cochera', 'local destinado a garaje', 'local garaje', 'zona de estacionamiento',
-            'participacion indivisa', 'participación indivisa', 'cuota indivisa'
+        # 1. Comprobación de si el sujeto principal de la ficha o título es un anexo
+        starts_with_annex = any(clean_desc.startswith(p) for p in [
+            'plaza de garaje', 'plaza de aparcamiento', 'plaza nº', 'plaza num', 'trastero',
+            'garaje', 'aparcamiento', 'estacionamiento', 'cochera', 'local destinado a garaje',
+            'local garaje', 'zona de estacionamiento', 'cuota indivisa de garaje',
+            'una veinteava parte indivisa', 'participación indivisa', 'participacion indivisa'
         ])
         
-        if starts_with_annex:
-            return True
-            
         title_low = (title or '').lower()
-        if any(k in title_low for k in ['garaje', 'trastero', 'aparcamiento', 'parking']):
+        title_is_annex = any(k in title_low for k in ['plaza de garaje', 'trastero', 'aparcamiento', 'parking', 'cochera'])
+
+        if starts_with_annex or title_is_annex:
             return True
 
-        main_terms = ['vivienda', 'piso', 'casa', 'chalet', 'dúplex', 'duplex', 'ático', 'atico', 'local comercial', 'nave industrial', 'solar', 'terreno', 'parcela']
-        has_main_property = any(mt in text for mt in main_terms)
-        
-        if not has_main_property:
+        # 2. Si contiene palabras de garaje/trastero pero NO menciona vivienda/piso/casa/local/solar/nave
+        has_annex_words = any(w in text for w in ['garaje', 'trastero', 'aparcamiento', 'estacionamiento', 'cochera', 'parking'])
+        has_main_property = any(w in text for w in ['vivienda', 'piso', 'casa', 'chalet', 'dúplex', 'duplex', 'ático', 'atico', 'local comercial', 'nave industrial', 'solar', 'terreno', 'parcela'])
+
+        if has_annex_words and not has_main_property:
             return True
-            
+
         return False
 
     async def async_scrape_live_auctions(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
