@@ -300,7 +300,8 @@ async def get_opportunities(
             auc = opp.auction
             strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
             
-            # Extract coordinates from lat/lon fields, geometry, or fallback by province
+            # Extract coordinates from lat/lon fields, geometry, or fallback by province/locality
+            from app.core.geo_utils import get_spanish_province_coords, normalize_text
             lat, lon = None, None
             if auc and auc.lat is not None and auc.lon is not None:
                 lat, lon = auc.lat, auc.lon
@@ -311,12 +312,17 @@ async def get_opportunities(
                 except Exception:
                     pass
             
-            if (not lat or not lon) and auc and auc.province:
-                prov_clean = auc.province.strip().lower()
-                if prov_clean in PROVINCE_COORDS:
-                    lat, lon = PROVINCE_COORDS[prov_clean]
-                else:
-                    lat, lon = (40.4168, -3.7038) # Default Spain
+            # Verify if coordinates accidentally point to Madrid when province is NOT Madrid
+            prov_norm = normalize_text(auc.province if auc else "")
+            is_madrid_province = "madrid" in prov_norm
+            near_madrid = (lat is not None and lon is not None and abs(lat - 40.4168) < 0.15 and abs(lon - (-3.7038)) < 0.15)
+            
+            if (not lat or not lon) or (near_madrid and not is_madrid_province):
+                # Deterministic offset based on auction ID to keep pin stable across requests
+                seed_val = (hash(auc.id_subasta) % 1000) / 10000.0 if auc and auc.id_subasta else 0
+                base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
+                lat = round(base_lat + (seed_val - 0.05), 6)
+                lon = round(base_lon + (seed_val - 0.05), 6)
 
             # Parse stored JSON images list
             import json

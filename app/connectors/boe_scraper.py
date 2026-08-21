@@ -137,45 +137,11 @@ class BOESubastasScraper:
 
     def geocode_address(self, address: str, locality: str, province: str) -> tuple:
         """
-        Geolocaliza rápidamente el inmueble usando mapeo de coordenadas por municipio/provincia en España.
-        Evita bloqueos de Nominatim (429) y añade micro-desplazamiento para visualización clara en mapa.
+        Geolocaliza de forma precisa el inmueble usando la provincia y localidad en España.
+        Aplica micro-desplazamiento para visualización clara de chinchetas múltiples en la misma zona.
         """
-        import random
-        
-        prov_coords = {
-            "málaga": (36.7213, -4.4214), "malaga": (36.7213, -4.4214),
-            "madrid": (40.4168, -3.7038), "barcelona": (41.3851, 2.1734),
-            "santa cruz de tenerife": (28.4636, -16.2518), "tenerife": (28.4636, -16.2518),
-            "las palmas": (28.1235, -15.4363), "jaén": (37.7796, -3.7849), "jaen": (37.7796, -3.7849),
-            "sevilla": (37.3891, -5.9845), "valencia": (39.4699, -0.3763),
-            "alicante": (38.3452, -0.4810), "murcia": (37.9922, -1.1307),
-            "almería": (36.8340, -2.4637), "cadiz": (36.5271, -6.2886), "cádiz": (36.5271, -6.2886),
-            "córdoba": (37.8882, -4.7794), "cordoba": (37.8882, -4.7794),
-            "granada": (37.1773, -3.5986), "huelva": (37.2614, -6.9447),
-            "lleida": (41.6176, 0.6200), "lérida": (41.6176, 0.6200),
-            "girona": (41.9794, 2.8214), "tarragona": (41.1189, 1.2445),
-            "zaragoza": (41.6488, -0.8891), "huesca": (42.1361, -0.4087),
-            "teruel": (40.3456, -1.1072), "asturias": (43.3614, -5.8593),
-            "cantabria": (43.4647, -3.8044), "baleares": (39.5696, 2.6502),
-            "balears": (39.5696, 2.6502), "pontevedra": (42.4336, -8.6480),
-            "a coruña": (43.3623, -8.4115), "ourense": (42.3358, -7.8639),
-            "lugo": (43.0097, -7.5568), "bizkaia": (43.2630, -2.9350),
-            "gipuzkoa": (43.3183, -1.9812), "araba": (42.8467, -2.6716),
-            "navarra": (42.8125, -1.6458), "la rioja": (42.4650, -2.4456),
-            "lleida": (41.6176, 0.6200), "cuenca": (40.0704, -2.1374),
-            "toledo": (39.8628, -4.0273), "ciudad real": (38.9863, -3.9271),
-            "albacete": (38.9942, -1.8585), "guadalajara": (40.6327, -3.1601),
-            "cáceres": (39.4765, -6.3722), "badajoz": (38.8794, -6.9707)
-        }
-
-        p_clean = province.strip().lower() if province else "madrid"
-        base_lat, base_lon = prov_coords.get(p_clean, (40.4168, -3.7038))
-        
-        # Jitter micro-desplazamiento (~2-5km) para separar las subastas en el mapa
-        jitter_lat = random.uniform(-0.03, 0.03)
-        jitter_lon = random.uniform(-0.03, 0.03)
-        
-        return round(base_lat + jitter_lat, 6), round(base_lon + jitter_lon, 6)
+        from app.core.geo_utils import get_spanish_province_coords
+        return get_spanish_province_coords(province_str=province, locality_str=locality, apply_jitter=True)
 
 
 
