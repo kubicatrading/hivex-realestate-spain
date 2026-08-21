@@ -312,15 +312,17 @@ async def get_opportunities(
                 except Exception:
                     pass
             
-            # Verify if coordinates accidentally point to Madrid when province is NOT Madrid
-            prov_norm = normalize_text(auc.province if auc else "")
-            is_madrid_province = "madrid" in prov_norm
-            near_madrid = (lat is not None and lon is not None and abs(lat - 40.4168) < 0.15 and abs(lon - (-3.7038)) < 0.15)
+            base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
             
-            if (not lat or not lon) or (near_madrid and not is_madrid_province):
-                # Deterministic offset based on auction ID to keep pin stable across requests
-                seed_val = (hash(auc.id_subasta) % 1000) / 10000.0 if auc and auc.id_subasta else 0
-                base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
+            # Check if lat/lon is missing or is significantly mismatched from the actual province center (> 40km away)
+            mismatch = False
+            if lat is not None and lon is not None:
+                if abs(lat - base_lat) > 0.4 or abs(lon - base_lon) > 0.4:
+                    mismatch = True
+
+            if (not lat or not lon) or mismatch:
+                # Deterministic micro-jitter based on auction ID to prevent overlapping pins
+                seed_val = (hash(auc.id_subasta if auc else "") % 1000) / 10000.0
                 lat = round(base_lat + (seed_val - 0.05), 6)
                 lon = round(base_lon + (seed_val - 0.05), 6)
 
