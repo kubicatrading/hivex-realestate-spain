@@ -147,7 +147,46 @@ class BOESubastasScraper:
         from app.core.geo_utils import get_spanish_province_coords
         return get_spanish_province_coords(province_str=province, locality_str=locality, apply_jitter=True)
 
+    @staticmethod
+    def is_garage_or_storage(desc: str, title: str = "") -> bool:
+        """
+        Clasificador estricto para identificar y descartar plazas de garaje, parkings,
+        trasteros, aparcamientos y participaciones indivisas de anexos.
+        """
+        text = f"{title or ''} {desc or ''}".lower()
+        
+        annex_triggers = [
+            'plaza de garaje', 'plazas de garaje', 'garaje', 'garajes',
+            'plaza de aparcamiento', 'aparcamiento', 'estacionamiento', 'zona de estacionamiento',
+            'trastero', 'trasteros', 'cochera', 'cuota indivisa', 'participación indivisa',
+            'participacion indivisa', 'local destinado a garaje', 'local garaje', 'parking'
+        ]
+        
+        if not any(trig in text for trig in annex_triggers):
+            return False
 
+        clean_desc = re.sub(r'^(urbana|rústica|rustica|finca|elemento|entidad|1/\d+|100%|pleno dominio)?\s*[\d\w\.-]*\s*[\.:,-]?\s*', '', (desc or '').lower().strip())
+        
+        starts_with_annex = any(kw in clean_desc[:80] for kw in [
+            'plaza de garaje', 'plaza', 'trastero', 'garaje', 'aparcamiento', 'estacionamiento',
+            'cochera', 'local destinado a garaje', 'local garaje', 'zona de estacionamiento',
+            'participacion indivisa', 'participación indivisa', 'cuota indivisa'
+        ])
+        
+        if starts_with_annex:
+            return True
+            
+        title_low = (title or '').lower()
+        if any(k in title_low for k in ['garaje', 'trastero', 'aparcamiento', 'parking']):
+            return True
+
+        main_terms = ['vivienda', 'piso', 'casa', 'chalet', 'dúplex', 'duplex', 'ático', 'atico', 'local comercial', 'nave industrial', 'solar', 'terreno', 'parcela']
+        has_main_property = any(mt in text for mt in main_terms)
+        
+        if not has_main_property:
+            return True
+            
+        return False
 
     async def async_scrape_live_auctions(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -193,19 +232,12 @@ class BOESubastasScraper:
                             return aid, r1.text, r3.text
                         except Exception as err:
                             logger.error(f"Error fetching subasta {aid}: {err}")
-                            return aid, "", ""
+                            return aid, None, None
 
                 tasks = [fetch_one_auction(aid) for aid in target_ids]
                 fetched_data = await asyncio.gather(*tasks)
 
                 real_auctions = []
-                # Filtros para descartar garajes, trasteros, vehículos y bienes secundarios
-                ignored_keywords = [
-                    "plaza de garaje", "garaje", "parking", "aparcamiento", "estacionamiento",
-                    "trastero", "vehiculo", "vehículo", "coche", "furgoneta", "camion", "camión",
-                    "moto", "motocicleta", "embarcación", "embarcacion", "buque", "maquinaria",
-                    "mueble", "derechos de cobro", "cuota indivisa de garaje", "plaza numero", "plaza nº"
-                ]
 
                 for aid, html_ver1, html_ver3 in fetched_data:
                     if not html_ver1 and not html_ver3:
@@ -224,18 +256,8 @@ class BOESubastasScraper:
                             elif "provincia" in k: province = v
                             elif "referencia catastral" in k: refcat = v
 
-                    desc_lower = desc.lower()
-
-                    # Verificar si es una propiedad residencial, comercial o suelo principal
-                    is_main_property = any(w in desc_lower for w in [
-                        "vivienda", "piso", "casa", "chalet", "duplex", "dúplex", "ático", "atico",
-                        "local", "nave", "solar", "terreno", "parcela", "finca", "edificio", "suelo"
-                    ])
-
-                    is_garage_or_annex = any(kw in desc_lower for kw in ignored_keywords)
-
                     # Descartar si es únicamente plaza de garaje, trastero o bien no inmobiliario
-                    if is_garage_or_annex and not is_main_property:
+                    if self.is_garage_or_storage(desc, f"Subasta de Inmueble en {locality} ({province})"):
                         logger.info(f"Subasta {aid} descartada por ser garaje/trastero/no inmueble: {desc[:60]}...")
                         continue
 

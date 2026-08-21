@@ -298,6 +298,9 @@ async def get_opportunities(
 
         for opp in opportunities:
             auc = opp.auction
+            if auc and BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or ""):
+                continue
+
             strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
             
             # Extract coordinates from lat/lon fields, geometry, or fallback by province/locality
@@ -383,7 +386,7 @@ async def get_opportunities(
                 "strategy": strategy_val,
                 "title": auc.title if auc else "N/A",
                 "description": auc.description if auc else "",
-                "property_type": auc.property_type if auc else "Vivienda",
+                "property_type": auc.property_type if (auc and auc.property_type) else "Vivienda",
                 "address": address_str,
                 "locality": locality_str,
                 "province": province_str,
