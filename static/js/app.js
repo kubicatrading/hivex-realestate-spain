@@ -579,30 +579,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
-                <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-                    <div class="fin-item">
-                        <span class="fin-label">Valor de Tasación BOE</span>
-                        <span class="fin-val ref" style="font-weight: 700;">${formatCurrency(opp.appraisal_value || 0)}</span>
+                <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Tasación BOE</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.appraisal_value || 0)}</span>
                     </div>
-                    <div class="fin-item">
-                        <span class="fin-label">Valor de Subasta</span>
-                        <span class="fin-val price" style="font-weight: 700;">${formatCurrency(opp.starting_bid || opp.listing_price)}</span>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Subasta</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.starting_bid || opp.listing_price)}</span>
                     </div>
-                    <div class="fin-item">
-                        <span class="fin-label">Valor Ref. Tomado</span>
-                        <span class="fin-val ref" style="color: #60a5fa; font-weight: 700;">${formatCurrency(opp.property_ref_value || opp.starting_bid)}</span>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Ref. Tomado</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; color: #60a5fa; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_ref_value || opp.starting_bid)}</span>
                     </div>
-                    <div class="fin-item">
-                        <span class="fin-label">Superficie Ficha</span>
-                        <span class="fin-val" style="color: #f8fafc; font-weight: 600;">${opp.surface_m2 || 110} m²</span>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie Ficha</span>
+                        <span class="fin-val" style="display: block; font-size: 1.1rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${opp.surface_m2 || 110} m²</span>
                     </div>
-                    <div class="fin-item">
-                        <span class="fin-label">Precio €/m² Inmueble</span>
-                        <span class="fin-val price" style="font-weight: 700;">${formatCurrency(opp.property_m2_price)}/m²</span>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Inmueble</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_m2_price)}/m²</span>
                     </div>
-                    <div class="fin-item">
-                        <span class="fin-label">Precio €/m² Zona</span>
-                        <span class="fin-val profit" style="font-weight: 700;">${formatCurrency(opp.area_m2_price)}/m²</span>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.area_m2_price)}/m²</span>
                     </div>
                 </div>
 

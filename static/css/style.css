@@ -707,17 +707,29 @@ body {
     flex-direction: column;
 }
 
-.fin-lbl {
-    font-size: 0.62rem;
+.fin-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+}
+
+.fin-lbl, .fin-label {
+    display: block;
+    font-size: 0.72rem;
     color: #94a3b8;
     text-transform: uppercase;
     font-weight: 600;
+    line-height: 1.2;
 }
 
 .fin-val {
+    display: block;
     font-family: var(--font-heading);
     font-size: 0.82rem;
     font-weight: 700;
+    line-height: 1.2;
 }
 
 .fin-val.val-tasacion { color: #cbd5e1; }
