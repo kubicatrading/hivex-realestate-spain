@@ -71,12 +71,25 @@ def serve_dashboard():
         "environment": settings.ENV
     }
 
+from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO
+
 @app.get("/api/v1/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
+    opp_count = 0
+    try:
+        opp_count = db.query(Opportunity).count()
+    except Exception:
+        pass
+
     return {
         "status": "online",
         "app": settings.PROJECT_NAME,
-        "environment": settings.ENV
+        "environment": settings.ENV,
+        "database": {
+            "active_engine": ACTIVE_DB_ENGINE,
+            "details": DB_STATUS_INFO,
+            "opportunities_in_db": opp_count
+        }
     }
 
 @app.post("/api/v1/auth/login")

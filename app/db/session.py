@@ -4,13 +4,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.core.config import settings
 
-db_url = os.getenv("DATABASE_URL", settings.DATABASE_URL)
-connect_args = {}
+db_url = os.getenv("DATABASE_URL", settings.DATABASE_URL).strip()
 
-if "supabase.co" in db_url or "sslmode" in db_url:
+# Direct auto-translation of legacy direct host to active Supabase Pooler host
+if "db.wxoctzvzmkavkmjwtnux.supabase.co" in db_url or "5432" in db_url and "supabase" in db_url:
+    db_url = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
+
+connect_args = {}
+if "supabase" in db_url or "pooler" in db_url or "sslmode" in db_url:
     connect_args["sslmode"] = "require"
+connect_args["connect_timeout"] = 4
 
 engine = None
+ACTIVE_DB_ENGINE = "Unknown"
+DB_STATUS_INFO = {}
 
 # Intentar conectar con PostgreSQL o la URL provista
 if not db_url.startswith("sqlite"):
@@ -18,6 +25,12 @@ if not db_url.startswith("sqlite"):
         engine = create_engine(db_url, connect_args=connect_args, pool_pre_ping=True, echo=False)
         with engine.connect() as conn:
             pass
+        ACTIVE_DB_ENGINE = "PostgreSQL (Supabase Pooler)"
+        DB_STATUS_INFO = {
+            "engine": "PostgreSQL (Supabase Pooler)",
+            "host": "aws-0-eu-central-1.pooler.supabase.com:6543",
+            "connected": True
+        }
     except Exception as e:
         print(f"Error conectando a PostgreSQL/Supabase ({e}), usando base de datos SQLite local.")
         engine = None
@@ -39,6 +52,13 @@ if engine is None or db_url.startswith("sqlite"):
     db_url = f"sqlite:///{db_path}"
     connect_args = {"check_same_thread": False}
     engine = create_engine(db_url, connect_args=connect_args, echo=False)
+
+    ACTIVE_DB_ENGINE = "SQLite (Fallback local)"
+    DB_STATUS_INFO = {
+        "engine": "SQLite (Fallback local)",
+        "host": "local",
+        "connected": True
+    }
 
     try:
         from geoalchemy2.admin.dialects import sqlite as geo_sqlite
