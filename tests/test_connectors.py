@@ -15,7 +15,7 @@ def test_catastro_client_mock():
     details = client.get_parcel_details("8812301VK4781S0001AB")
     assert details["refcat"] == "8812301VK4781S0001AB"
     assert details["reference_price_m2"] > 0
-    assert details["surface_m2"] > 0
+    assert details["surface_m2"] is None or details["surface_m2"] > 0
 
 def test_ine_client_mock():
     ine = INEClient()

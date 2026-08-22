@@ -25,7 +25,7 @@ class CatastroClient:
         
         details = {
             "refcat": refcat,
-            "surface_m2": 100.0,      # Default fallback
+            "surface_m2": None,      # No simulated data
             "land_use": "RESIDENCIAL",
             "build_year": 1995,
             "reference_price_m2": 2800.0, # Valor de referencia fiscal estimado por m2
@@ -46,7 +46,7 @@ class CatastroClient:
             resp = self.client.get(self.INSPIRE_WFS_URL, params=params)
             if resp.status_code == 200 and "<gml:" in resp.text:
                 surface = self._extract_area_from_gml(resp.text)
-                if surface:
+                if surface and surface > 0:
                     details["surface_m2"] = surface
         except Exception as e:
             logger.warning(f"Error consultando Catastro WFS para {refcat}: {e}")
@@ -56,11 +56,9 @@ class CatastroClient:
         if "MADRID" in ref_upper or "VK" in ref_upper:
             details["reference_price_m2"] = 3800.0
             details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 95.0
         elif "BARCELONA" in ref_upper or "BA" in ref_upper:
             details["reference_price_m2"] = 3500.0
             details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 88.0
         elif "MÁLAGA" in ref_upper or "MALAGA" in ref_upper or "UF" in ref_upper:
             details["reference_price_m2"] = 450.0  # Suelo edificable m2 / 2800 vivienda
             details["land_use"] = "SUELO_URBANIZABLE"

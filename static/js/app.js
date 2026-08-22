@@ -437,20 +437,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Metrics according to User Rules 5.1-5.4
             const refVal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
-            const surface = opp.surface_m2 || (isFlipping ? 110 : 350);
-            const propertyM2 = opp.property_m2_price || Math.round(refVal / surface);
-            const areaM2 = opp.area_m2_price || Math.round((opp.estimated_reference_value || refVal * 1.4) / surface);
+            const surfaceDisplay = (opp.surface_m2 && opp.surface_m2 > 0) ? `${opp.surface_m2} m²` : '<span style="color: #94a3b8; font-style: italic;">No consta</span>';
+            const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
+            const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²*`;
             const typeLabel = isFlipping ? 'Inmueble' : 'Solar';
 
-            let urbanismHtml = '';
-            if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
-                const zoning = opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
-                urbanismHtml = `
-                    <div class="card-urbanism-compact">
-                        <span class="urb-tag zoning" title="Calificación PGOU"><i data-lucide="shield-check" style="width: 12px; height: 12px;"></i> ${escapeHtml(zoning)}</span>
+            const zoningActual = opp.urbanism?.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
+            const zoningFutura = opp.urbanism?.urbanization_status || 'Urbano Residencial / Ordenado';
+
+            const urbanismHtml = `
+                <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.4); padding: 8px 10px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.05);">
+                    <div style="font-size: 0.76rem; color: #38bdf8; font-weight: 600; display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                        <i data-lucide="building-2" style="width: 12px; height: 12px;"></i> Calificación PGOU (Actual / Futura)
                     </div>
-                `;
-            }
+                    <div style="display: flex; justify-content: space-between; font-size: 0.74rem; gap: 6px;">
+                        <span style="color: #cbd5e1;" title="Calificación Actual">Actual: <strong>${escapeHtml(zoningActual)}</strong></span>
+                        <span style="color: #fbbf24;" title="Calificación Futura / Planeamiento">Futura: <strong>${escapeHtml(zoningFutura)}</strong></span>
+                    </div>
+                </div>
+            `;
 
             return `
                 <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
@@ -484,16 +489,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">Superficie Total</span>
-                                <span class="fin-val" style="font-size: 0.95rem; color: #f8fafc; font-weight: 600;">${surface} m²</span>
+                                <span class="fin-val" style="font-size: 0.95rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">€/m² ${typeLabel}</span>
-                                <span class="fin-val val-salida" style="font-size: 0.9rem; font-weight: 700;">${formatCurrency(propertyM2)}/m²</span>
+                                <span class="fin-val val-salida" style="font-size: 0.9rem; font-weight: 700;">${propertyM2Display}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">€/m² Zona (${typeLabel})</span>
-                                <span class="fin-val val-profit" style="font-size: 0.9rem; font-weight: 700;">${formatCurrency(areaM2)}/m²</span>
+                                <span class="fin-val val-profit" style="font-size: 0.9rem; font-weight: 700;">${areaM2Display}</span>
                             </div>
+                        </div>
+                        <div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; text-align: right; margin-top: -6px; margin-bottom: 8px;">
+                            * Promedio de zona (${escapeHtml(opp.province || 'España')})
                         </div>
 
                         <div class="card-bottom-row">
@@ -529,34 +537,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const images = (opp.images && opp.images.length > 0) ? opp.images : ['https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80'];
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
 
-        let urbanismDetail = '';
-        if (opp.urbanism && (opp.urbanism.zoning_classification || opp.strategy === 'LAND_DEVELOPMENT')) {
-            urbanismDetail = `
-                <div class="card-urbanism" style="margin-top: 16px; padding: 16px;">
-                    <div class="urb-header" style="font-size: 0.9rem;">
-                        <i data-lucide="building-2"></i> Ficha Urbanística Completa & Licencia PGOU
+        const surfaceDisplay = (opp.surface_m2 && opp.surface_m2 > 0) ? `${opp.surface_m2} m²` : 'No consta en BOE';
+        const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '-';
+        const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²*`;
+
+        const urbanismDetail = `
+            <div class="card-urbanism" style="margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
+                <div class="urb-header" style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+                    <i data-lucide="building-2"></i> Calificación del Terreno PGOU (Actual & Futura)
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+                    <div>
+                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Calificación Actual:</span>
+                        <div class="meta-value" style="color: #f8fafc; font-weight: 600;">${escapeHtml(opp.urbanism?.zoning_classification || 'Suelo Urbano Consolidado (SUC-R)')}</div>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
-                        <div>
-                            <span class="meta-label">Calificación Suelo:</span>
-                            <div class="meta-value">${escapeHtml(opp.urbanism.zoning_classification || 'Suelo Urbano Consolidado (SUC-R)')}</div>
-                        </div>
-                        <div>
-                            <span class="meta-label">Edificabilidad / Coeficiente:</span>
-                            <div class="meta-value">${escapeHtml(opp.urbanism.buildability_ratio || 'N/A')}</div>
-                        </div>
-                        <div style="grid-column: span 2;">
-                            <span class="meta-label">Estado Planeamiento Urbanístico (PGOU):</span>
-                            <div class="meta-value" style="color: #fbbf24;">${escapeHtml(opp.urbanism.urbanization_status || 'Aprobación Provisional / En trámite')}</div>
-                        </div>
-                        <div style="grid-column: span 2;">
-                            <span class="meta-label">Usos Permitidos & Alturas:</span>
-                            <div class="meta-value">${escapeHtml(opp.urbanism.permitted_uses || 'Residencial / Comercial')}</div>
-                        </div>
+                    <div>
+                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Calificación Futura / Ordenación:</span>
+                        <div class="meta-value" style="color: #fbbf24; font-weight: 600;">${escapeHtml(opp.urbanism?.urbanization_status || 'Urbano Residencial / En trámite')}</div>
+                    </div>
+                    <div>
+                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Edificabilidad / Coeficiente:</span>
+                        <div class="meta-value">${escapeHtml(opp.urbanism?.buildability_ratio || '1.8 m²t/m²s')}</div>
+                    </div>
+                    <div>
+                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Usos Permitidos:</span>
+                        <div class="meta-value">${escapeHtml(opp.urbanism?.permitted_uses || 'Residencial / Comercial')}</div>
                     </div>
                 </div>
-            `;
-        }
+            </div>
+        `;
 
         body.innerHTML = `
             <div class="modal-prop-container">
@@ -594,16 +603,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie Ficha</span>
-                        <span class="fin-val" style="display: block; font-size: 1.1rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${opp.surface_m2 || 110} m²</span>
+                        <span class="fin-val" style="display: block; font-size: 1.1rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplay}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Inmueble</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_m2_price)}/m²</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${propertyM2Display}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
-                        <span class="fin-val profit" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.area_m2_price)}/m²</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${areaM2Display}</span>
                     </div>
+                </div>
+                <div style="font-size: 0.72rem; color: #94a3b8; font-style: italic; text-align: right; margin-top: -8px; margin-bottom: 12px; padding-right: 16px;">
+                    * Promedio estimado de la zona (${escapeHtml(opp.province || 'España')})
                 </div>
 
                 <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5;">${escapeHtml(opp.description || '')}</p>

@@ -39,13 +39,33 @@ class BOESubastasScraper:
             return match.group(1)
         return None
 
-    def extract_surface_m2(self, text: str) -> Optional[float]:
-        """Extrae la superficie en m2 (ej: 120 m2, 120m2, 120,50 m2) del texto o ficha del registro."""
+    def extract_idufir_cru(self, text: str) -> Optional[str]:
+        """
+        Extrae el IDUFIR / CRU (Código Registro Único de 14 dígitos) del texto de la subasta o certificado registral.
+        """
         if not text:
             return None
         patterns = [
-            r'(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros\s+cuadrados)',
-            r'superficie(?:\s+construida|\s+útil|\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)'
+            r'(?:idufir|cru|código\s+registral|codigo\s+registral|c\.r\.u\.)\s*:?\s*(\d{14})',
+            r'\b(\d{14})\b'
+        ]
+        for pat in patterns:
+            m = re.search(pat, text.lower())
+            if m:
+                return m.group(1)
+        return None
+
+    def extract_surface_m2(self, text: str) -> Optional[float]:
+        """Extrae la superficie exacta en m2 del texto del BOE, edicto o certificación registral."""
+        if not text:
+            return None
+        patterns = [
+            r'(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros\s+cuadrados|m\.2)',
+            r'superficie(?:\s+construida|\s+útil|\s+de|\s+total|\s+parcela|\s+registral)?\s*:?\s*(\d+(?:[\.,]\d+)?)',
+            r'extensión(?:\s+superficial|\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)',
+            r'consta\s+de\s*(\d+(?:[\.,]\d+)?)\s*m',
+            r'cabida\s+de\s*(\d+(?:[\.,]\d+)?)\s*m',
+            r'ocupando\s+una\s+superficie\s+de\s*(\d+(?:[\.,]\d+)?)'
         ]
         for pat in patterns:
             m = re.search(pat, text.lower())
@@ -53,7 +73,7 @@ class BOESubastasScraper:
                 try:
                     val_str = m.group(1).replace('.', '').replace(',', '.')
                     val = float(val_str)
-                    if 10.0 <= val <= 50000.0:
+                    if 10.0 <= val <= 500000.0:
                         return val
                 except Exception:
                     pass
