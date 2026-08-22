@@ -43,12 +43,17 @@ if engine is None or db_url.startswith("sqlite"):
 
     if os.path.exists(seed_db):
         try:
+            if os.path.exists(tmp_db):
+                try:
+                    os.remove(tmp_db)
+                except Exception:
+                    pass
             shutil.copyfile(seed_db, tmp_db)
-            print("Sincronizada base de datos semilla hivex_local.db en /tmp/hivex_local.db")
-        except Exception as err:
-            print(f"Error copiando DB semilla: {err}")
-
-    db_path = tmp_db if os.path.exists(tmp_db) else (seed_db if os.path.exists(seed_db) else tmp_db)
+            db_path = tmp_db
+        except Exception:
+            db_path = seed_db
+    else:
+        db_path = seed_db
     db_url = f"sqlite:///{db_path}"
     connect_args = {"check_same_thread": False}
     engine = create_engine(db_url, connect_args=connect_args, echo=False)
