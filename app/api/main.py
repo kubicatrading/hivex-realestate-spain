@@ -562,9 +562,9 @@ async def get_opportunities(
                 if cat_details and cat_details.get("surface_m2"):
                     surface_m2 = round(float(cat_details["surface_m2"]), 2)
 
-            # 2. If Registry edict provides the specific unit built surface (e.g. 25.87 m² for local/flat),
-            # always prioritize it over the ground plot parcel area of the entire building block:
-            if parsed_text_m2 and parsed_text_m2 > 0:
+            # 2. Fallback: Si la API de Catastro no devuelve superficie o el expediente carece de RefCat,
+            # utilizar el extracto de la Certificación Registral / Edicto del BOE:
+            if not surface_m2 and parsed_text_m2 and parsed_text_m2 > 0:
                 surface_m2 = round(parsed_text_m2, 2)
             elif not surface_m2 and (auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0):
                 surface_m2 = round(float(auc.parcel.surface_m2), 2)

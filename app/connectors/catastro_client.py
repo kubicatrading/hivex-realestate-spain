@@ -16,6 +16,34 @@ class CatastroClient:
     def __init__(self, timeout: float = 10.0):
         self.client = httpx.Client(timeout=timeout)
 
+    @staticmethod
+    def normalize_cadastral_reference(ref: str) -> str:
+        """
+        Normaliza errores de mecanografía frecuentes en edictos del BOE
+        (ej. sustituir la letra 'O' por el dígito '0' en bloques numéricos de referencias rústicas
+        como '46900AO76000440000FO' -> '46900A076000440000FO').
+        """
+        if not ref:
+            return ""
+        clean = ref.strip().upper().replace(" ", "").replace("-", "")
+        
+        # Corrección de referencias rústicas de 20 caracteres (Estructura: 5 dígitos INE + 1 letra sector + 12 dígitos polígono/parcela + 2 letras control)
+        import re
+        if len(clean) == 20 and re.match(r'^\d{5}[A-Z]', clean):
+            prefix = clean[:6]  # 5 dígitos ine + 'A' sector
+            polygon_parcel = clean[6:18]  # 12 caracteres numéricos
+            control = clean[18:]  # 2 letras de control
+            
+            fixed_middle = (
+                polygon_parcel
+                .replace("O", "0")
+                .replace("I", "1")
+                .replace("L", "1")
+            )
+            return prefix + fixed_middle + control
+            
+        return clean
+
     def get_parcel_details(self, refcat: str) -> Dict[str, Any]:
         """
         Consulta los datos alfanuméricos y oficiales de la Sede Electrónica del Catastro (SEC) por Referencia Catastral.
@@ -35,40 +63,48 @@ class CatastroClient:
         if not refcat:
             return details
 
-        clean_refcat = refcat.strip().upper()
+        raw_refcat = refcat.strip().upper().replace(" ", "").replace("-", "")
+        clean_refcat = self.normalize_cadastral_reference(raw_refcat)
+        details["refcat"] = clean_refcat
 
-        # 1. Consulta oficial SEC REST por Referencia Catastral (20 caracteres para fincas urbanas)
-        try:
-            params = {"Provincia": "", "Municipio": "", "RC": clean_refcat}
-            resp = self.client.get(self.OVC_REST_URL, params=params)
-            if resp.status_code == 200:
-                details["land_type"] = self.detect_land_type_from_catastro(clean_refcat, resp.text)
-                surface = self._extract_surface_from_sec_xml(resp.text)
-                if surface and surface > 0:
-                    details["surface_m2"] = surface
-                    return details
-        except Exception as e:
-            logger.warning(f"Error consultando Catastro SEC REST para {clean_refcat}: {e}")
+        # Probar primero la referencia normalizada y luego la original si fuera distinta
+        candidate_refs = [clean_refcat]
+        if raw_refcat != clean_refcat:
+            candidate_refs.append(raw_refcat)
 
-        # 2. Consulta WFS INSPIRE por parcela catastral (14 caracteres)
-        try:
-            parcel_ref = clean_refcat[:14] if len(clean_refcat) >= 14 else clean_refcat
-            params = {
-                "service": "WFS",
-                "version": "2.0.0",
-                "request": "GetFeature",
-                "STOREDQUERY_ID": "GetParcel",
-                "refcat": parcel_ref,
-                "srsName": "EPSG:4326"
-            }
-            resp = self.client.get(self.INSPIRE_WFS_URL, params=params)
-            if resp.status_code == 200 and "<cp:areaValue" in resp.text:
-                details["land_type"] = self.detect_land_type_from_catastro(clean_refcat, resp.text)
-                surface = self._extract_area_from_gml(resp.text)
-                if surface and surface > 0:
-                    details["surface_m2"] = surface
-        except Exception as e:
-            logger.warning(f"Error consultando Catastro WFS para {parcel_ref}: {e}")
+        for target_ref in candidate_refs:
+            # 1. Consulta oficial SEC REST por Referencia Catastral (20 caracteres)
+            try:
+                params = {"Provincia": "", "Municipio": "", "RC": target_ref}
+                resp = self.client.get(self.OVC_REST_URL, params=params)
+                if resp.status_code == 200:
+                    details["land_type"] = self.detect_land_type_from_catastro(target_ref, resp.text)
+                    surface = self._extract_surface_from_sec_xml(resp.text)
+                    if surface and surface > 0:
+                        details["surface_m2"] = surface
+                        return details
+            except Exception as e:
+                logger.warning(f"Error consultando Catastro SEC REST para {target_ref}: {e}")
+
+            # 2. Consulta WFS INSPIRE por parcela catastral (14 caracteres)
+            try:
+                parcel_ref = target_ref[:14] if len(target_ref) >= 14 else target_ref
+                params = {
+                    "service": "WFS",
+                    "version": "2.0.0",
+                    "request": "GetFeature",
+                    "STOREDQUERY_ID": "GetParcel",
+                    "refcat": parcel_ref,
+                    "srsName": "EPSG:4326"
+                }
+                resp = self.client.get(self.INSPIRE_WFS_URL, params=params)
+                if resp.status_code == 200 and "<cp:areaValue" in resp.text:
+                    details["land_type"] = self.detect_land_type_from_catastro(target_ref, resp.text)
+                    surface = self._extract_area_from_gml(resp.text)
+                    if surface and surface > 0:
+                        details["surface_m2"] = surface
+            except Exception as e:
+                logger.warning(f"Error consultando Catastro WFS para {target_ref}: {e}")
 
         return details
 

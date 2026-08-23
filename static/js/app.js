@@ -535,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
                             <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                            <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% BOE</span>
+                            <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
                         </div>
                     </div>
 
@@ -683,11 +683,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const detailedScoresHtml = `
             <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
-                    <span style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px; color: #38bdf8;"></i> Análisis de Scoring & Indicadores INE
+                    <span style="font-weight: 700; font-size: 0.98rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8;"></i> KPIs
                     </span>
-                    <span style="font-size: 0.8rem; color: #94a3b8;">
-                        Fórmula Ponderada 2026
+                    <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
+                        Score General: <strong>${formatScore(opp.overall_score)} / 100 pts</strong>
                     </span>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.82rem;">
@@ -713,11 +713,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
-                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatScore(discountScoreVal)} / 100 pts</strong>
+                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
                     </div>
-                </div>
-                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.76rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
-                    <div><strong>(*):</strong> <span style="color: #38bdf8; font-weight: 600;">valor sección censal (ref. barrio [${escapeHtml(districtName)}])</span></div>
                 </div>
             </div>
         `;
@@ -751,16 +748,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Tasación BOE</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
+                    </div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Subasta</span>
                         <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Valor Mercado Estimado</span>
-                        <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)}</span>
-                    </div>
-                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>
-                        <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${profitValModal >= 0 ? '#4ade80' : '#f87171'}; margin-top: 2px;">${profitFormattedModal}</span>
+                        <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)} (*)</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie (Cuota Real)</span>
@@ -771,13 +768,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val price" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${propertyM2Display}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
-                        <span class="fin-val profit" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${areaM2Display} (*)</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
+                        <span class="fin-val" style="display: block; font-size: 1.05rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${areaM2Display} (*)</span>
                     </div>
+                    <div></div>
+                    <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Tasación BOE</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${profitValModal >= 0 ? '#4ade80' : '#f87171'}; margin-top: 2px;">${profitFormattedModal} (*)</span>
                     </div>
+                </div>
+
+                <div style="margin-top: 8px; font-size: 0.78rem; color: #cbd5e1; padding-left: 2px;">
+                    <strong>(*):</strong> <span style="color: #38bdf8; font-weight: 600;">valor sección censal (ref. barrio [${escapeHtml(districtName)}])</span>
                 </div>
 
                 <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin-top: 14px; text-align: left;">${escapeHtml(opp.description || '')}</p>

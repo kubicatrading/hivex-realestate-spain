@@ -59,3 +59,9 @@ def test_boe_liens_extraction():
     liens_busy = scraper.extract_liens_info(text_liens)
     assert liens_busy["has_liens"] is True
     assert liens_busy["status"] == "CON CARGAS"
+
+def test_boe_hectares_surface_parsing():
+    scraper = BOESubastasScraper()
+    text = "RUSTICA: TIERRA HUERTA. PARTIDA LLANO DE SAN BERNARDO. SUPERFICIE TERRENO: 0,783 HA."
+    surface = scraper.extract_surface_m2(text)
+    assert surface == 7830.0

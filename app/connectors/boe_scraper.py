@@ -101,11 +101,14 @@ class BOESubastasScraper:
                 else:
                     clean = s.replace(',', '')
                 return float(clean)
-            # Caso 2: Tiene sólo coma (e.g. 92,35 o 1,250)
+            # Caso 2: Tiene sólo coma (e.g. 92,35 o 0,783 ha)
             if ',' in s and '.' not in s:
                 parts = s.split(',')
-                if len(parts) == 2 and len(parts[1]) in (1, 2):
-                    clean = s.replace(',', '.')
+                if len(parts) == 2:
+                    if parts[0] == '0' or len(parts[1]) in (1, 2, 3):
+                        clean = s.replace(',', '.')
+                    else:
+                        clean = s.replace(',', '')
                 else:
                     clean = s.replace(',', '')
                 return float(clean)
@@ -246,6 +249,32 @@ class BOESubastasScraper:
             if val_m and 10.0 <= val_m <= 50000.0:
                 val_d = parse_spanish_written_number(w_d) if w_d else 0.0
                 return round(val_m + (val_d / 100.0 if val_d else 0.0), 2)
+
+        # 1.5. Búsqueda de unidades agrarias/rústicas: Hectáreas (HA), Áreas y Centiáreas
+        ha_patterns = [
+            r'(?:superficie|extensión|cabida)?\s*(?:terreno|finca|parcela|total|registral)?\s*:?\s*(\d+(?:[\.,]\d+)?)\s*(?:ha\.?|hectárea|hectáreas|hectareas)\b',
+            r'(\d+(?:[\.,]\d+)?)\s*(?:ha\.?|hectárea|hectáreas|hectareas)\b'
+        ]
+        for pat in ha_patterns:
+            m = re.search(pat, text_lower)
+            if m:
+                val_ha = self.parse_spanish_number(m.group(1))
+                if val_ha and val_ha > 0:
+                    val_m2 = round(val_ha * 10000.0, 2)
+                    if 10.0 <= val_m2 <= 50000000.0:
+                        return val_m2
+
+        areas_patterns = [
+            r'(?:superficie|extensión|cabida)?\s*(?:terreno|finca|parcela|total|registral)?\s*:?\s*(\d+(?:[\.,]\d+)?)\s*(?:área|áreas|areas)\b'
+        ]
+        for pat in areas_patterns:
+            m = re.search(pat, text_lower)
+            if m:
+                val_a = self.parse_spanish_number(m.group(1))
+                if val_a and val_a > 0:
+                    val_m2 = round(val_a * 100.0, 2)
+                    if 10.0 <= val_m2 <= 50000000.0:
+                        return val_m2
 
         # 2. Búsqueda específica de superficie de vivienda / local / inmueble principal con cifras digitales
         vivienda_patterns = [
@@ -476,7 +505,10 @@ class BOESubastasScraper:
                             elif "dirección" in k: address = v
                             elif "localidad" in k: locality = v
                             elif "provincia" in k: province = v
-                            elif "referencia catastral" in k: refcat = v
+                            elif "referencia catastral" in k or "catastral" in k or "ref. catastral" in k: refcat = v
+
+                    if not refcat:
+                        refcat = self.extract_cadastral_reference(html_ver3)
 
                     # Descartar si es únicamente plaza de garaje, trastero o bien no inmobiliario
                     if self.is_garage_or_storage(desc, f"Subasta de Inmueble en {locality} ({province})"):
