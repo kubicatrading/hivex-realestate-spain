@@ -33,7 +33,7 @@ class INEClient:
         if "madrid" in prov_lower:
             data["cusec"] = "2807904012"
             data["avg_household_income"] = 48500.0 # Nivel adquisitivo alto en Salamanca/Alcalá
-            data["avg_person_income":] = 21000.0
+            data["avg_person_income"] = 21000.0
             data["population_growth_rate"] = 2.4
         elif "málaga" in prov_lower or "malaga" in prov_lower:
             data["cusec"] = "2905101005"

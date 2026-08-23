@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
+    # Google Maps API Key for Street View Static Facade Photos
+    GOOGLE_MAPS_API_KEY: str = ""
+
     model_config = ConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

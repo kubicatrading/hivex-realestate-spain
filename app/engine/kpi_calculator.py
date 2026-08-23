@@ -57,29 +57,29 @@ class KPICalculator:
         return round(discount, 4)
 
     @staticmethod
-    def calculate_overall_opportunity_score(
+    def calculate_detailed_scores(
         discount_percentage: float,
         poi_score: float,
         income_amount: float,
-        population_growth: float
-    ) -> float:
+        population_growth: float,
+        has_property_m2_price: bool = True
+    ) -> Dict[str, float]:
         """
-        Algoritmo de puntuación ponderado (0 - 100 puntos):
-        - 50% Peso: Porcentaje de Descuento
-        - 20% Peso: Densidad de POIs (OSM)
-        - 15% Peso: Renta Media de la Sección Censal (INE)
-        - 15% Peso: Crecimiento Poblacional (INE)
+        Calcula el desglose completo de puntuaciones (0 - 100 pts) para cada dimensión:
+        - discount_score (50%) - Pondera 0 si no hay precio de inmueble por m2
+        - poi_score (20%)
+        - income_score (15%)
+        - demographic_score (15%)
+        - overall_score (Total)
         """
-        # Score por descuento (0% desc = 0 pts, 50%+ desc = 100 pts)
-        discount_score = min(100.0, max(0.0, (discount_percentage / 0.50) * 100.0))
+        if not has_property_m2_price or discount_percentage <= 0:
+            discount_score = 0.0
+        else:
+            discount_score = min(100.0, max(0.0, (discount_percentage / 0.50) * 100.0))
 
-        # Score por renta (Renta media nacional ~32.000€)
         income_score = min(100.0, max(0.0, (income_amount / 45000.0) * 100.0))
-
-        # Score por crecimiento poblacional (> 2% es excelente)
         demographic_score = min(100.0, max(0.0, (population_growth / 3.0) * 100.0))
 
-        # Ponderación final
         overall = (
             (discount_score * 0.50) +
             (poi_score * 0.20) +
@@ -87,4 +87,23 @@ class KPICalculator:
             (demographic_score * 0.15)
         )
 
-        return round(overall, 2)
+        return {
+            "discount_score": round(discount_score, 1),
+            "income_score": round(income_score, 1),
+            "demographic_score": round(demographic_score, 1),
+            "poi_score": round(poi_score, 1),
+            "overall_score": round(overall, 1)
+        }
+
+    @staticmethod
+    def calculate_overall_opportunity_score(
+        discount_percentage: float,
+        poi_score: float,
+        income_amount: float,
+        population_growth: float
+    ) -> float:
+        """
+        Algoritmo de puntuación ponderado (0 - 100 puntos)
+        """
+        scores = KPICalculator.calculate_detailed_scores(discount_percentage, poi_score, income_amount, population_growth)
+        return scores["overall_score"]

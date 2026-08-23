@@ -11,101 +11,118 @@ class CatastroClient:
     Permite obtener datos físicos, fiscales y geometría de parcelas catastrales en España.
     """
     INSPIRE_WFS_URL = "http://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
-    OVC_COORDINATES_URL = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCoordenadas.asmx/Consulta_CPORRC"
+    OVC_REST_URL = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCConsultaRC.asmx/Consulta_DNPRC"
 
     def __init__(self, timeout: float = 10.0):
         self.client = httpx.Client(timeout=timeout)
 
     def get_parcel_details(self, refcat: str) -> Dict[str, Any]:
         """
-        Consulta los datos alfanuméricos y fiscales de una parcela por Referencia Catastral.
+        Consulta los datos alfanuméricos y oficiales de la Sede Electrónica del Catastro (SEC) por Referencia Catastral.
+        Retorna la superficie oficial y la clasificación de suelo (URBANO/RÚSTICO) directamente del Catastro.
         """
-        # Formatear RefCat a 14 caracteres básicos si se proveen 20
-        clean_refcat = refcat[:14] if len(refcat) >= 14 else refcat
-        
         details = {
             "refcat": refcat,
-            "surface_m2": None,      # No simulated data
+            "surface_m2": None,
             "land_use": "RESIDENCIAL",
-            "build_year": 1995,
-            "reference_price_m2": 2800.0, # Valor de referencia fiscal estimado por m2
+            "land_type": self.detect_land_type_from_catastro(refcat),
+            "build_year": None,
+            "reference_price_m2": None, # Ref Micro si la SEC la proporciona
             "address": "España",
             "polygon_geojson": None
         }
 
+        if not refcat:
+            return details
+
+        clean_refcat = refcat.strip().upper()
+
+        # 1. Consulta oficial SEC REST por Referencia Catastral (20 caracteres para fincas urbanas)
         try:
-            # Intento de consulta WFS INSPIRE
+            params = {"Provincia": "", "Municipio": "", "RC": clean_refcat}
+            resp = self.client.get(self.OVC_REST_URL, params=params)
+            if resp.status_code == 200:
+                details["land_type"] = self.detect_land_type_from_catastro(clean_refcat, resp.text)
+                surface = self._extract_surface_from_sec_xml(resp.text)
+                if surface and surface > 0:
+                    details["surface_m2"] = surface
+                    return details
+        except Exception as e:
+            logger.warning(f"Error consultando Catastro SEC REST para {clean_refcat}: {e}")
+
+        # 2. Consulta WFS INSPIRE por parcela catastral (14 caracteres)
+        try:
+            parcel_ref = clean_refcat[:14] if len(clean_refcat) >= 14 else clean_refcat
             params = {
                 "service": "WFS",
                 "version": "2.0.0",
                 "request": "GetFeature",
                 "STOREDQUERY_ID": "GetParcel",
-                "refcat": clean_refcat,
+                "refcat": parcel_ref,
                 "srsName": "EPSG:4326"
             }
             resp = self.client.get(self.INSPIRE_WFS_URL, params=params)
-            if resp.status_code == 200 and "<gml:" in resp.text:
+            if resp.status_code == 200 and "<cp:areaValue" in resp.text:
+                details["land_type"] = self.detect_land_type_from_catastro(clean_refcat, resp.text)
                 surface = self._extract_area_from_gml(resp.text)
                 if surface and surface > 0:
                     details["surface_m2"] = surface
         except Exception as e:
-            logger.warning(f"Error consultando Catastro WFS para {refcat}: {e}")
-
-        # Asignar estimaciones fiscales y precios de mercado por provincia/zona
-        ref_upper = (refcat + clean_refcat).upper()
-        if "MADRID" in ref_upper or "VK" in ref_upper:
-            details["reference_price_m2"] = 3800.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-        elif "BARCELONA" in ref_upper or "BA" in ref_upper:
-            details["reference_price_m2"] = 3500.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-        elif "MÁLAGA" in ref_upper or "MALAGA" in ref_upper or "UF" in ref_upper:
-            details["reference_price_m2"] = 450.0  # Suelo edificable m2 / 2800 vivienda
-            details["land_use"] = "SUELO_URBANIZABLE"
-            details["surface_m2"] = 1200.0
-        elif "VALENCIA" in ref_upper or "YJ" in ref_upper:
-            details["reference_price_m2"] = 2200.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 85.0
-        elif "SEVILLA" in ref_upper:
-            details["reference_price_m2"] = 2100.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 90.0
-        elif "ALICANTE" in ref_upper:
-            details["reference_price_m2"] = 1950.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 105.0
-        elif "ZARAGOZA" in ref_upper:
-            details["reference_price_m2"] = 1850.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 92.0
-        elif "BIZKAIA" in ref_upper or "BILBAO" in ref_upper:
-            details["reference_price_m2"] = 3100.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 82.0
-        elif "BALEARES" in ref_upper or "PALMA" in ref_upper:
-            details["reference_price_m2"] = 3900.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 110.0
-        elif "MURCIA" in ref_upper:
-            details["reference_price_m2"] = 1450.0
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 100.0
-        else:
-            details["reference_price_m2"] = 2400.0  # Promedio nacional de zonas urbanadas
-            details["land_use"] = "RESIDENCIAL_URBANO"
-            details["surface_m2"] = 90.0
+            logger.warning(f"Error consultando Catastro WFS para {parcel_ref}: {e}")
 
         return details
+
+    def detect_land_type_from_catastro(self, refcat: str, xml_text: Optional[str] = None) -> str:
+        """
+        Determina estrictamente la clasificación del suelo (URBANO o RÚSTICO)
+        a partir de la estructura oficial de la Referencia Catastral y los XML de Catastro.
+        NO UTILIZA EXTRACTORES DE TEXTO.
+        """
+        if not refcat:
+            return "URBANO"
+        
+        clean = refcat.strip().upper()
+        
+        # 1. Comprobar respuesta XML de Catastro si está disponible
+        if xml_text:
+            xml_lower = xml_text.lower()
+            if "<cn>rustico" in xml_lower or "<cn>ru" in xml_lower or "<clase>rustico" in xml_lower or "<cn>agrario" in xml_lower:
+                return "RÚSTICO"
+            if "<cn>urbano" in xml_lower or "<cn>ur" in xml_lower or "<clase>urbano" in xml_lower:
+                return "URBANO"
+
+        # 2. Estructura oficial de la Referencia Catastral de Catastro España:
+        # En parcelas rústicas (ej. 16146A019001250000GQ), el carácter 6 es 'A' (Agrario/Rústico) seguido del número de polígono y parcela
+        import re
+        if re.match(r'^\d{5}[A-Z]\d{8,}', clean):
+            return "RÚSTICO"
+            
+        return "URBANO"
+
+    def _extract_surface_from_sec_xml(self, xml_text: str) -> Optional[float]:
+        """Extrae la superficie construida oficial del XML devuelto por la Sede Electrónica del Catastro."""
+        try:
+            root = ET.fromstring(xml_text)
+            for elem in root.iter():
+                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if tag in ["spt", "st", "suf"]:
+                    if elem.text and elem.text.strip():
+                        val = float(elem.text.strip().replace(",", "."))
+                        if val > 0:
+                            return val
+        except Exception:
+            pass
+        return None
 
     def _extract_area_from_gml(self, xml_text: str) -> Optional[float]:
         """Extrae la superficie en m2 del XML/GML devuelto por Catastro INSPIRE."""
         try:
             root = ET.fromstring(xml_text)
             for elem in root.iter():
-                if "officialArea" in elem.tag or "area" in elem.tag:
-                    if elem.text:
-                        return float(elem.text)
+                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if tag in ["areaValue", "officialArea", "area"]:
+                    if elem.text and elem.text.strip():
+                        return float(elem.text.strip())
         except Exception:
             pass
         return None

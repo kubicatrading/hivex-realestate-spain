@@ -399,17 +399,58 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMapMarkers(state.filteredOpportunities);
     }
 
-    // Helper function to return original image or Cadastral parcel map image if no photo exists
+    // Global tab switcher for modal media (Street View Real vs Ortofoto Aérea Catastro)
+    window.switchModalMediaTab = function(tabName) {
+        const streetviewBox = document.getElementById('modal-media-streetview');
+        const ortofotoBox = document.getElementById('modal-media-ortofoto');
+        const tabStreetview = document.getElementById('tab-btn-streetview');
+        const tabOrtofoto = document.getElementById('tab-btn-ortofoto');
+
+        if (!streetviewBox || !ortofotoBox) return;
+
+        if (tabName === 'streetview') {
+            streetviewBox.style.display = 'block';
+            ortofotoBox.style.display = 'none';
+            if (tabStreetview) {
+                tabStreetview.style.borderColor = '#38bdf8';
+                tabStreetview.style.color = '#38bdf8';
+                tabStreetview.style.background = 'rgba(56,189,248,0.15)';
+            }
+            if (tabOrtofoto) {
+                tabOrtofoto.style.borderColor = 'rgba(255,255,255,0.1)';
+                tabOrtofoto.style.color = '#94a3b8';
+                tabOrtofoto.style.background = 'transparent';
+            }
+        } else {
+            streetviewBox.style.display = 'none';
+            ortofotoBox.style.display = 'block';
+            if (tabOrtofoto) {
+                tabOrtofoto.style.borderColor = '#38bdf8';
+                tabOrtofoto.style.color = '#38bdf8';
+                tabOrtofoto.style.background = 'rgba(56,189,248,0.15)';
+            }
+            if (tabStreetview) {
+                tabStreetview.style.borderColor = 'rgba(255,255,255,0.1)';
+                tabStreetview.style.color = '#94a3b8';
+                tabStreetview.style.background = 'transparent';
+            }
+        }
+    };
+
+    // Helper function to return Street View static facade photo
     function getOpportunityMainImage(opp) {
-        if (opp.images && opp.images.length > 0 && opp.images[0]) {
-            return { url: opp.images[0], isMap: false };
+        if (opp.images && opp.images.length > 0) {
+            const realPhoto = opp.images.find(img => img && typeof img === 'string' && !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
+            if (realPhoto) {
+                return { url: realPhoto, isMap: false };
+            }
         }
-        if (opp.lat && opp.lon) {
-            const d = 0.0018;
-            const catastroWmsUrl = `https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA,ORTOFOTO&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX=${opp.lon-d},${opp.lat-d},${opp.lon+d},${opp.lat+d}&WIDTH=600&HEIGHT=300`;
-            return { url: catastroWmsUrl, isMap: true };
-        }
-        return { url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80', isMap: false };
+        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
+        const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
+        return {
+            url: `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`,
+            isMap: false
+        };
     }
 
     // Render Opportunity Cards Feed
@@ -434,40 +475,68 @@ document.addEventListener('DOMContentLoaded', () => {
             const mainImg = imgInfo.url;
             const imgCount = opp.images ? opp.images.length : 0;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
-
-            // Metrics according to User Rules 5.1-5.4
+            // Metrics according to User Rules
             const refVal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
-            const surfaceDisplay = (opp.surface_m2 && opp.surface_m2 > 0) ? `${opp.surface_m2} m²` : '<span style="color: #94a3b8; font-style: italic;">No consta</span>';
+            const totalSurface = (opp.surface_m2 && opp.surface_m2 > 0) ? opp.surface_m2 : null;
+            const effectiveSurface = (opp.effective_surface_m2 && opp.effective_surface_m2 > 0) ? opp.effective_surface_m2 : totalSurface;
+            const ownershipPct = (opp.ownership_percentage && opp.ownership_percentage > 0) ? opp.ownership_percentage : 100;
+            const ownershipFormatted = formatExactPercentage(ownershipPct);
+
+            let surfaceDisplay = '<span style="color: #94a3b8; font-style: italic;">No consta BOE</span>';
+            if (effectiveSurface) {
+                if (ownershipPct < 100 && totalSurface) {
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² <span style="font-size: 0.68rem; color: #38bdf8; display: block;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m²)</span>`;
+                } else {
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m²`;
+                }
+            }
+
             const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
-            const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²*`;
+            const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²`;
             const typeLabel = isFlipping ? 'Inmueble' : 'Solar';
 
-            const zoningActual = opp.urbanism?.zoning_classification || 'Suelo Urbano Consolidado (SUC)';
-            const zoningFutura = opp.urbanism?.urbanization_status || 'Urbano Residencial / Ordenado';
+            const estimatedMktVal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refVal);
+            const profitVal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktVal - refVal);
+            const profitFormatted = profitVal >= 0 ? `+${formatCurrency(profitVal)}` : formatCurrency(profitVal);
+
+            const landType = opp.land_type || 'URBANO';
+            const landColor = landType === 'RÚSTICO' ? '#f59e0b' : '#38bdf8';
+            const landBg = landType === 'RÚSTICO' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(56, 189, 248, 0.15)';
+            const ownershipText = (ownershipPct < 100) ? ` • ${ownershipFormatted}% PLENO DOMINIO` : '';
+
+            const liensObj = opp.liens || { status: 'SIN CARGAS', label: 'Sin Cargas', color: 'green', badge: '🟢 LIBRE DE CARGAS' };
+            const liensBadgeBg = liensObj.has_liens ? 'rgba(245, 158, 11, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+            const liensBadgeColor = liensObj.has_liens ? '#f59e0b' : '#4ade80';
+            const liensBadgeLabel = liensObj.badge || (liensObj.has_liens ? '🟠 CON CARGAS (VER EDICTO)' : '🟢 LIBRE DE CARGAS');
 
             const urbanismHtml = `
-                <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.4); padding: 8px 10px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.05);">
-                    <div style="font-size: 0.76rem; color: #38bdf8; font-weight: 600; display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
-                        <i data-lucide="building-2" style="width: 12px; height: 12px;"></i> Calificación PGOU (Actual / Futura)
+                <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="building-2" style="width: 13px; height: 13px; color: #38bdf8;"></i> Clasificación Catastral:
+                        </span>
+                        <span style="background: ${landBg}; color: ${landColor}; font-weight: 800; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
+                            ${landType}${ownershipText}
+                        </span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.74rem; gap: 6px;">
-                        <span style="color: #cbd5e1;" title="Calificación Actual">Actual: <strong>${escapeHtml(zoningActual)}</strong></span>
-                        <span style="color: #fbbf24;" title="Calificación Futura / Planeamiento">Futura: <strong>${escapeHtml(zoningFutura)}</strong></span>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                        <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="shield-alert" style="width: 13px; height: 13px; color: ${liensBadgeColor};"></i> Cargas (BOE Edicto):
+                        </span>
+                        <span style="background: ${liensBadgeBg}; color: ${liensBadgeColor}; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                            ${liensBadgeLabel}
+                        </span>
                     </div>
                 </div>
             `;
 
             return `
                 <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
-                    <div class="card-image-banner" style="background-image: url('${mainImg}');" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
-                        <div class="card-image-overlay">
+                    <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
+                        <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
                             <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                            <span class="badge-discount">-${opp.discount_percentage.toFixed(0)}% BOE</span>
+                            <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% BOE</span>
                         </div>
-                        ${imgCount > 0 
-                            ? `<span class="photo-count-badge"><i data-lucide="camera" style="width: 11px; height: 11px;"></i> ${imgCount} foto${imgCount > 1 ? 's' : ''}</span>` 
-                            : `<span class="photo-count-badge map-badge"><i data-lucide="map-pin" style="width: 11px; height: 11px;"></i> Mapa Satélite</span>`
-                        }
                     </div>
 
                     <div class="card-content-compact">
@@ -480,37 +549,52 @@ document.addEventListener('DOMContentLoaded', () => {
                             </a>
                         </div>
 
+                        <div style="font-size: 0.76rem; color: #f59e0b; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                            <i data-lucide="clock" style="width: 12px; height: 12px; display: inline;"></i> Cierre subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong>
+                        </div>
+
                         ${urbanismHtml}
 
-                        <div class="card-financials-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0;">
+                        <div class="card-financials-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; background: rgba(15, 23, 42, 0.4); padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06);">
                             <div class="fin-cell">
-                                <span class="fin-lbl">Valor Subasta / Ref.</span>
+                                <span class="fin-lbl">Valor Subasta</span>
                                 <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Superficie Total</span>
-                                <span class="fin-val" style="font-size: 0.95rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
+                                <span class="fin-lbl">Valor Mercado Estimado</span>
+                                <span class="fin-val" style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${formatCurrency(estimatedMktVal)}</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">Superficie (Cuota Real)</span>
+                                <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">Beneficio / Margen Est.</span>
+                                <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 700; color: ${profitVal >= 0 ? '#4ade80' : '#f87171'};">${profitFormatted}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">€/m² ${typeLabel}</span>
-                                <span class="fin-val val-salida" style="font-size: 0.9rem; font-weight: 700;">${propertyM2Display}</span>
+                                <span class="fin-val val-salida" style="font-size: 0.88rem; font-weight: 700;">${propertyM2Display}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">€/m² Zona (${typeLabel})</span>
-                                <span class="fin-val val-profit" style="font-size: 0.9rem; font-weight: 700;">${areaM2Display}</span>
+                                <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 700;">${areaM2Display} (*)</span>
                             </div>
                         </div>
-                        <div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; text-align: right; margin-top: -6px; margin-bottom: 8px;">
-                            * Promedio de zona (${escapeHtml(opp.province || 'España')})
-                        </div>
 
-                        <div class="card-bottom-row">
-                            <div class="scores-compact">
-                                <span class="score-chip" title="Score Global">Score: <strong>${opp.overall_score}</strong></span>
-                                <span class="score-chip poi" title="Servicios y Entorno POI">POI: <strong>${opp.poi_score}</strong></span>
+                        <div class="card-bottom-row" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%;">
+                            <div class="scores-compact" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                <span class="score-chip" title="Score Global Oportunidad" style="${getScoreBgStyle(opp.overall_score)}">Score: <strong>${formatScore(opp.overall_score)}</strong></span>
+                                <span class="score-chip" title="Score Descuento vs Mercado" style="${getScoreBgStyle((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}">Desc: <strong>${formatScore((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}</strong></span>
+                                <span class="score-chip" title="Score POIs / Entorno (OSM)" style="${getScoreBgStyle(opp.poi_score)}">POI: <strong>${formatScore(opp.poi_score)}</strong></span>
+                                <span class="score-chip" title="Score Renta INE" style="${getScoreBgStyle(opp.income_score)}">Renta: <strong>${formatScore(opp.income_score)}</strong></span>
+                                <span class="score-chip" title="Score Demografía INE" style="${getScoreBgStyle(opp.demographic_score)}">Demo: <strong>${formatScore(opp.demographic_score)}</strong></span>
                             </div>
-
-                            <div class="card-actions-group">
+                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 6px;">
+                                <span>Hogar: <strong style="color: #f8fafc;">${formatCurrency(opp.avg_household_income || 32000)}/año</strong></span>
+                                <span>Persona: <strong style="color: #f8fafc;">${formatCurrency(opp.avg_person_income || 14500)}/año</strong></span>
+                            </div>
+                            <div class="card-actions-group" style="display: flex; justify-content: flex-end; gap: 6px;">
                                 <button class="btn btn-secondary btn-xs" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                                     <i data-lucide="eye" style="width: 12px; height: 12px;"></i> Ficha
                                 </button>
@@ -534,93 +618,175 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const modal = document.getElementById('modal-property-detail');
         const body = document.getElementById('modal-prop-body');
-        const images = (opp.images && opp.images.length > 0) ? opp.images : ['https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80'];
+        const images = (opp.images && opp.images.length > 0) ? opp.images : [];
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
 
-        const surfaceDisplay = (opp.surface_m2 && opp.surface_m2 > 0) ? `${opp.surface_m2} m²` : 'No consta en BOE';
+        const totalSurface = (opp.surface_m2 && opp.surface_m2 > 0) ? opp.surface_m2 : null;
+        const effectiveSurface = (opp.effective_surface_m2 && opp.effective_surface_m2 > 0) ? opp.effective_surface_m2 : totalSurface;
+        const ownershipPct = (opp.ownership_percentage && opp.ownership_percentage > 0) ? opp.ownership_percentage : 100;
+        const ownershipFormatted = formatExactPercentage(ownershipPct);
+
+        let surfaceDisplayModal = 'No consta BOE/Catastro';
+        if (effectiveSurface) {
+            if (ownershipPct < 100 && totalSurface) {
+                surfaceDisplayModal = `
+                    <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m²</div>
+                    <div style="font-size: 0.72rem; color: #38bdf8; font-weight: 600; margin-top: 2px;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m² total)</div>
+                `;
+            } else {
+                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m²</div>`;
+            }
+        }
+
         const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '-';
-        const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²*`;
+        const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²`;
+        const districtName = opp.locality || opp.province || 'Zona';
+        const discountScoreVal = (opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0;
+        const landType = opp.land_type || 'URBANO';
+
+        const liensObj = opp.liens || {
+            status: 'SIN CARGAS',
+            label: 'Sin Cargas',
+            description: 'Sin cargas preferentes declaradas en la ficha oficial del BOE.',
+            color: 'green',
+            badge: '🟢 LIBRE DE CARGAS'
+        };
+        const liensColor = liensObj.has_liens ? '#f59e0b' : '#4ade80';
+        const liensBg = liensObj.has_liens ? 'rgba(245, 158, 11, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+        const liensBorder = liensObj.has_liens ? 'rgba(245, 158, 11, 0.3)' : 'rgba(34, 197, 94, 0.3)';
 
         const urbanismDetail = `
-            <div class="card-urbanism" style="margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
-                <div class="urb-header" style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
-                    <i data-lucide="building-2"></i> Calificación del Terreno PGOU (Actual & Futura)
+            <div style="margin-top: 14px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
+                <span style="color: #94a3b8; font-weight: 600;">Calificación del Suelo / Dominio:</span>
+                <span class="badge" style="background: ${landType === 'RÚSTICO' ? 'rgba(234,179,8,0.2)' : 'rgba(56,189,248,0.2)'}; color: ${landType === 'RÚSTICO' ? '#eab308' : '#38bdf8'}; font-weight: 800; font-size: 0.92rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
+                    ${landType} ${(ownershipPct < 100) ? `(${ownershipFormatted}% PLENO DOMINIO)` : ''}
+                </span>
+            </div>
+        `;
+
+        const liensDetailHtml = `
+            <div style="margin-top: 14px; padding: 14px 16px; background: rgba(15, 23, 42, 0.7); border: 1px solid ${liensBorder}; border-radius: 8px; width: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+                    <span style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                        <i data-lucide="shield-alert" style="width: 18px; height: 18px; color: ${liensColor};"></i> Situación Jurídica y Cargas (Edicto BOE)
+                    </span>
+                    <span class="badge" style="background: ${liensBg}; color: ${liensColor}; font-weight: 800; font-size: 0.82rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
+                        ${escapeHtml(liensObj.label || liensObj.status)}
+                    </span>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
-                    <div>
-                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Calificación Actual:</span>
-                        <div class="meta-value" style="color: #f8fafc; font-weight: 600;">${escapeHtml(opp.urbanism?.zoning_classification || 'Suelo Urbano Consolidado (SUC-R)')}</div>
+                <p style="font-size: 0.86rem; color: #cbd5e1; margin: 6px 0 0 0; line-height: 1.4;">
+                    ${escapeHtml(liensObj.description || 'Sin cargas declaradas en la ficha oficial.')}
+                </p>
+            </div>
+        `;
+
+        const detailedScoresHtml = `
+            <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+                    <span style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px; color: #38bdf8;"></i> Análisis de Scoring & Indicadores INE
+                    </span>
+                    <span style="font-size: 0.8rem; color: #94a3b8;">
+                        Fórmula Ponderada 2026
+                    </span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.82rem;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Hogar</span>
+                        <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_household_income || 32000)}/año</strong>
                     </div>
-                    <div>
-                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Calificación Futura / Ordenación:</span>
-                        <div class="meta-value" style="color: #fbbf24; font-weight: 600;">${escapeHtml(opp.urbanism?.urbanization_status || 'Urbano Residencial / En trámite')}</div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Persona</span>
+                        <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_person_income || 14500)}/año</strong>
                     </div>
-                    <div>
-                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Edificabilidad / Coeficiente:</span>
-                        <div class="meta-value">${escapeHtml(opp.urbanism?.buildability_ratio || '1.8 m²t/m²s')}</div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Renta INE</span>
+                        <strong style="color: ${getScoreColor(opp.income_score)}; font-size: 0.95rem;">${formatScore(opp.income_score)} / 100 pts</strong>
                     </div>
-                    <div>
-                        <span class="meta-label" style="color: #94a3b8; font-size: 0.8rem;">Usos Permitidos:</span>
-                        <div class="meta-value">${escapeHtml(opp.urbanism?.permitted_uses || 'Residencial / Comercial')}</div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Crecimiento Demográfico INE</span>
+                        <strong style="color: ${getScoreColor(opp.demographic_score)}; font-size: 0.95rem;">+${formatNumber(opp.population_growth_rate, 1)}% (${formatScore(opp.demographic_score)} pts)</strong>
                     </div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score POIs / Entorno (OSM)</span>
+                        <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
+                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatScore(discountScoreVal)} / 100 pts</strong>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.76rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
+                    <div><strong>(*):</strong> <span style="color: #38bdf8; font-weight: 600;">valor sección censal (ref. barrio [${escapeHtml(districtName)}])</span></div>
                 </div>
             </div>
         `;
 
+        const refValModal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
+        const estimatedMktValModal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refValModal);
+        const profitValModal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktValModal - refValModal);
+        const profitFormattedModal = profitValModal >= 0 ? `+${formatCurrency(profitValModal)}` : formatCurrency(profitValModal);
+
         body.innerHTML = `
             <div class="modal-prop-container">
-                <div class="modal-gallery-main" id="prop-main-img" style="background-image: url('${images[0]}');"></div>
-                ${images.length > 1 ? `
-                    <div class="modal-gallery-thumbs">
-                        ${images.map((img, i) => `
-                            <img src="${img}" class="thumb-img ${i === 0 ? 'active' : ''}" onclick="changeModalMainImg('${img}', this)" alt="Foto ${i+1}">
-                        `).join('')}
+                <div class="modal-media-wrapper" style="margin-bottom: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); padding: 12px;">
+                    <div style="width: 100%; height: 320px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); position: relative; background: #020617;">
+                        <img src="${getOpportunityMainImage(opp).url}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
                     </div>
-                ` : ''}
+                </div>
 
                 <div class="modal-prop-header">
                     <h2>${escapeHtml(opp.title)}</h2>
-                    <div class="modal-prop-address" style="margin-top: 8px;">
-                        <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
+                    <div class="modal-prop-address" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                        <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
                             <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
                             <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps Satélite</span>
                         </a>
+                        <div style="font-size: 0.88rem; color: #f59e0b; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
+                            <i data-lucide="clock" style="width: 15px; height: 15px;"></i>
+                            <span>Fecha Cierre Subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong></span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
-                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Tasación BOE</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
-                    </div>
+                <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Subasta</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${opp.starting_bid > 0 ? formatCurrency(opp.starting_bid) : (opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €')}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Ref. Tomado</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.1rem; color: #60a5fa; font-weight: 700; margin-top: 2px;">${formatCurrency(opp.property_ref_value || 0)}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Valor Mercado Estimado</span>
+                        <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie Ficha</span>
-                        <span class="fin-val" style="display: block; font-size: 1.1rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplay}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${profitValModal >= 0 ? '#4ade80' : '#f87171'}; margin-top: 2px;">${profitFormattedModal}</span>
+                    </div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie (Cuota Real)</span>
+                        <div class="fin-val" style="display: block; font-size: 1.05rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplayModal}</div>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Inmueble</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${propertyM2Display}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${propertyM2Display}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
-                        <span class="fin-val profit" style="display: block; font-size: 1.1rem; font-weight: 700; margin-top: 2px;">${areaM2Display}</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${areaM2Display} (*)</span>
+                    </div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Tasación BOE</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
                     </div>
                 </div>
-                <div style="font-size: 0.72rem; color: #94a3b8; font-style: italic; text-align: right; margin-top: -8px; margin-bottom: 12px; padding-right: 16px;">
-                    * Promedio estimado de la zona (${escapeHtml(opp.province || 'España')})
-                </div>
 
-                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5;">${escapeHtml(opp.description || '')}</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin-top: 14px; text-align: left;">${escapeHtml(opp.description || '')}</p>
+
+                ${detailedScoresHtml}
 
                 ${urbanismDetail}
+
+                ${liensDetailHtml}
 
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border);">
                     <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
@@ -787,16 +953,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
                 markersMap[opp.id] = marker;
 
+                const boeAppraisalText = (opp.appraisal_value && opp.appraisal_value > 0) ? formatCurrency(opp.appraisal_value) : '0 € (Sin constancia en BOE)';
                 marker.bindPopup(`
-                    <div style="font-family: sans-serif; color: #1e293b; max-width: 250px; padding: 4px;">
-                        <img src="${mainImg}" style="width: 100%; height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 8px; border: 1px solid #cbd5e1;">
+                    <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
+                        <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
+                            <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                        </div>
                         <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
                         <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
-                        <div style="margin-bottom: 4px; font-size: 11px; color: #475569;">
-                            <strong>Tasación BOE:</strong> ${formatCurrency(opp.estimated_reference_value)}
+                        <div style="margin-bottom: 2px; font-size: 11px; color: #475569;">
+                            <strong>Tasación BOE:</strong> ${boeAppraisalText}
+                        </div>
+                        <div style="margin-bottom: 4px; font-size: 11px; color: #0284c7;">
+                            <strong>Estimación Mercado:</strong> ${formatCurrency(opp.estimated_reference_value)}
                         </div>
                         <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
-                            -${opp.discount_percentage.toFixed(0)}% Descuento | Salida: ${formatCurrency(opp.listing_price)}
+                            -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price)}
                         </div>
                         <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
                             🔍 Ver Ficha Completa
@@ -888,7 +1060,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Utility Functions
     function formatCurrency(val) {
-        return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val || 0);
+        if (val === null || val === undefined || val === '' || isNaN(val)) return '0 €';
+        const num = Number(val);
+        const hasDecimals = (num % 1 !== 0);
+        const formatted = new Intl.NumberFormat('es-ES', {
+            useGrouping: true,
+            minimumFractionDigits: hasDecimals ? 2 : 0,
+            maximumFractionDigits: hasDecimals ? 2 : 0
+        }).format(num);
+        return `${formatted} €`;
+    }
+
+    function formatExactPercentage(val) {
+        if (val === null || val === undefined || val === '' || isNaN(val)) return '100';
+        return String(val);
+    }
+
+    function formatNumber(val, decimals = 1) {
+        if (val === null || val === undefined || val === '' || isNaN(val)) return '0';
+        const num = Number(val);
+        const minFrac = (decimals === 0) ? 0 : ((num % 1 === 0) ? 0 : 1);
+        const maxFrac = decimals;
+        return new Intl.NumberFormat('es-ES', {
+            useGrouping: true,
+            minimumFractionDigits: minFrac,
+            maximumFractionDigits: maxFrac
+        }).format(num);
+    }
+
+    function formatScore(val) {
+        if (val === null || val === undefined || val === '' || isNaN(val)) return '0,0';
+        const num = Number(val);
+        return new Intl.NumberFormat('es-ES', {
+            useGrouping: true,
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1
+        }).format(num);
+    }
+
+    function getScoreColor(val) {
+        if (val === null || val === undefined || isNaN(val)) return '#94a3b8';
+        const num = parseFloat(val);
+        if (num < 50) return '#f43f5e';  // Malo (Rojo)
+        if (num <= 70) return '#f97316'; // Medio (Naranja)
+        if (num <= 90) return '#eab308'; // Bueno (Amarillo)
+        return '#22c55e';               // Excelente (Verde, >90)
+    }
+
+    function getScoreBgStyle(val) {
+        const color = getScoreColor(val);
+        return `background: ${color}1a; color: ${color}; border: 1px solid ${color}55;`;
     }
 
     function escapeHtml(str) {

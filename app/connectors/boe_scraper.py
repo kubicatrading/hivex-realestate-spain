@@ -8,6 +8,35 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+SPANISH_NUMBER_WORDS = {
+    'un': 1, 'uno': 1, 'una': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10, 'once': 11, 'doce': 12,
+    'trece': 13, 'catorce': 14, 'quince': 15, 'dieciséis': 16, 'dieciseis': 16,
+    'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19, 'veinte': 20, 'veintiuno': 21,
+    'veintidós': 22, 'veintidos': 22, 'veintitrés': 23, 'veintitres': 23,
+    'veinticuatro': 24, 'veinticinco': 25, 'veintiséis': 26, 'veintisiete': 27,
+    'veintiocho': 28, 'veintinueve': 29, 'treinta': 30, 'cuarenta': 40,
+    'cincuenta': 50, 'sesenta': 60, 'setenta': 70, 'ochenta': 80, 'noventa': 90,
+    'cien': 100, 'ciento': 100, 'doscientos': 200, 'trescientos': 300,
+    'cuatrocientos': 400, 'quinientos': 500, 'seiscientos': 600,
+    'setecientos': 700, 'ochocientos': 800, 'novecientos': 900
+}
+
+def parse_spanish_written_number(words_str: str) -> Optional[float]:
+    if not words_str:
+        return None
+    tokens = words_str.lower().replace(' y ', ' ').split()
+    total = 0
+    current = 0
+    for t in tokens:
+        if t in SPANISH_NUMBER_WORDS:
+            val = SPANISH_NUMBER_WORDS[t]
+            if val == 100 and current > 0 and current < 10:
+                current *= 100
+            else:
+                current += val
+    return float(total + current) if (total + current) > 0 else None
+
 class BOESubastasScraper:
     """
     Scraper & Parser para el Portal de Subastas del BOE (Boletín Oficial del Estado).
@@ -55,28 +84,210 @@ class BOESubastasScraper:
                 return m.group(1)
         return None
 
+    @staticmethod
+    def parse_spanish_number(val_str: str) -> Optional[float]:
+        """
+        Parsea cadenas de números considerando correctamente punto o coma como separador decimal
+        o de millar. (Ej: '92.35' -> 92.35, '92,35' -> 92.35, '1.250,50' -> 1250.50)
+        """
+        if not val_str:
+            return None
+        s = val_str.strip()
+        try:
+            # Caso 1: Tiene punto y coma (e.g. 1.250,50)
+            if '.' in s and ',' in s:
+                if s.rfind(',') > s.rfind('.'):
+                    clean = s.replace('.', '').replace(',', '.')
+                else:
+                    clean = s.replace(',', '')
+                return float(clean)
+            # Caso 2: Tiene sólo coma (e.g. 92,35 o 1,250)
+            if ',' in s and '.' not in s:
+                parts = s.split(',')
+                if len(parts) == 2 and len(parts[1]) in (1, 2):
+                    clean = s.replace(',', '.')
+                else:
+                    clean = s.replace(',', '')
+                return float(clean)
+            # Caso 3: Tiene sólo punto (e.g. 92.35 o 1.250)
+            if '.' in s and ',' not in s:
+                parts = s.split('.')
+                if len(parts) == 2 and len(parts[1]) in (1, 2):
+                    clean = s # Mantener el punto decimal!
+                elif len(parts) == 2 and len(parts[1]) == 3 and len(parts[0]) <= 2:
+                    clean = s.replace('.', '')
+                else:
+                    clean = s
+                return float(clean)
+            return float(s)
+        except Exception:
+            return None
+
+    def extract_ownership_percentage(self, text: str) -> float:
+        """
+        Extrae el porcentaje de pleno dominio o participacion subastada sin redondear (precisión matemática exacta).
+        Ej: '16,66667% del pleno dominio' -> 16.66667, '100% del pleno dominio' -> 100.0
+        Ignora cuotas de participación en elementos comunes o gastos de portal (Propiedad Horizontal).
+        """
+        if not text:
+            return 100.0
+        text_lower = text.lower()
+        
+        # Eliminar menciones de cuota de participación en elementos comunes/gastos de comunidad del bloque/portal (Propiedad Horizontal)
+        cleaned_text = re.sub(
+            r'cuotas?\s+(?:de\s+participaci[oó]n|en\s+el\s+valor|en\s+los\s+elementos|en\s+los\s+gastos)[^%\n]*%\s*-?',
+            '',
+            text_lower
+        )
+        
+        m_pct = re.search(r'(\d+(?:[\.,]\d+)?)\s*%\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso|titularidad|participaci[oó]n)?', cleaned_text)
+        if m_pct:
+            val = self.parse_spanish_number(m_pct.group(1))
+            if val and 0.000001 <= val <= 100.0:
+                return float(val)
+        m_frac = re.search(r'\b(\d+/\d+)\b\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso)?', cleaned_text)
+        if m_frac:
+            try:
+                num, denom = m_frac.group(1).split('/')
+                val = (float(num) / float(denom)) * 100.0
+                return float(val)
+            except Exception:
+                pass
+        return 100.0
+
+    def extract_liens_info(self, text: str, id_subasta: str = "") -> Dict[str, Any]:
+        """
+        Extrae la información de cargas/gravámenes del texto del anuncio o edicto BOE.
+        """
+        if not text:
+            return {
+                "has_liens": False,
+                "status": "SIN CARGAS",
+                "label": "Libre de Cargas",
+                "description": "Sin cargas preferentes declaradas en la ficha oficial del BOE.",
+                "color": "green",
+                "badge": "🟢 LIBRE DE CARGAS"
+            }
+        
+        t = text.lower()
+        
+        no_liens_patterns = [
+            "sin cargas", "libre de cargas", "libre de toda carga", "sin cargas preferentes",
+            "no constan cargas", "no existen cargas", "no se aprecian cargas", "cargas: ninguna",
+            "cargas: sin cargas", "cargas: libre", "sin gravámenes", "libre de gravámenes"
+        ]
+        
+        has_liens_patterns = [
+            "con cargas", "hipoteca", "embargo", "afección fiscal", "anexo de cargas",
+            "existencia de cargas", "cargas preferentes", "cargas y gravámenes",
+            "titular de las cargas", "cancelación de cargas", "liquidación de cargas",
+            "servidumbre", "usufructo", "con gravámenes"
+        ]
+        
+        if any(pat in t for pat in no_liens_patterns):
+            return {
+                "has_liens": False,
+                "status": "SIN CARGAS",
+                "label": "Sin Cargas (Libre)",
+                "description": "Inmueble declarado libre de cargas preferentes según certificación registral en edicto BOE.",
+                "color": "green",
+                "badge": "🟢 LIBRE DE CARGAS"
+            }
+            
+        for pat in has_liens_patterns:
+            if pat in t:
+                idx = t.find(pat)
+                start_snippet = max(0, idx - 20)
+                end_snippet = min(len(text), idx + 180)
+                snippet = text[start_snippet:end_snippet].strip()
+                return {
+                    "has_liens": True,
+                    "status": "CON CARGAS",
+                    "label": "Con Cargas / Gravámenes",
+                    "description": f"Se aprecian cargas o gravámenes en edicto BOE: \"...{snippet}...\"",
+                    "color": "orange",
+                    "badge": "🟠 CON CARGAS (VER EDICTO)"
+                }
+                
+        return {
+            "has_liens": False,
+            "status": "SIN CARGAS",
+            "label": "Sin Cargas Detectadas",
+            "description": "Sin cargas preferentes explícitas en el extracto del BOE. Se recomienda verificar la certificación registral adjunta al edicto.",
+            "color": "green",
+            "badge": "🟢 LIBRE DE CARGAS"
+        }
+
+    def extract_land_classification(self, text: str) -> str:
+        """
+        Determina si el suelo/finca es RÚSTICO o URBANO.
+        """
+        if not text:
+            return "URBANO"
+        t = text.lower()
+        if "rústic" in t or "rustica" in t or "agrari" in t or "suelo no urbanizable" in t or "snu" in t or "no urbanizable" in t:
+            return "RÚSTICO"
+        return "URBANO"
+
     def extract_surface_m2(self, text: str) -> Optional[float]:
-        """Extrae la superficie exacta en m2 del texto del BOE, edicto o certificación registral."""
+        """Extrae la superficie exacta en m2 del texto del BOE, edicto o certificación registral, ignorando anejos (garaje, trastero)."""
         if not text:
             return None
-        patterns = [
-            r'(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros\s+cuadrados|m\.2)',
-            r'superficie(?:\s+construida|\s+útil|\s+de|\s+total|\s+parcela|\s+registral)?\s*:?\s*(\d+(?:[\.,]\d+)?)',
-            r'extensión(?:\s+superficial|\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)',
-            r'consta\s+de\s*(\d+(?:[\.,]\d+)?)\s*m',
-            r'cabida\s+de\s*(\d+(?:[\.,]\d+)?)\s*m',
-            r'ocupando\s+una\s+superficie\s+de\s*(\d+(?:[\.,]\d+)?)'
+        
+        text_lower = text.lower()
+
+        # 1. Búsqueda específica de superficie con números escritos en texto (Ej: 'sesenta metros noventa y cinco decímetros')
+        written_pat = r'superficie\s+(?:construida|útil|registral|total)?\s*(?:de\s*)?([a-z\s]+?)\s*metros?(?:\s+([a-z\s]+?)\s*decímetros?)?'
+        m_written = re.search(written_pat, text_lower)
+        if m_written:
+            w_m = m_written.group(1).strip() if m_written.group(1) else ''
+            w_d = m_written.group(2).strip() if m_written.group(2) else ''
+            val_m = parse_spanish_written_number(w_m)
+            if val_m and 10.0 <= val_m <= 50000.0:
+                val_d = parse_spanish_written_number(w_d) if w_d else 0.0
+                return round(val_m + (val_d / 100.0 if val_d else 0.0), 2)
+
+        # 2. Búsqueda específica de superficie de vivienda / local / inmueble principal con cifras digitales
+        vivienda_patterns = [
+            r'superficie\s+(?:construida|útil|registral|total)?\s*(?:de\s*)?[a-z\s]+?-\s*(\d+(?:[\.,]\d+)?)\s*m2-?',
+            r'-\s*(\d+(?:[\.,]\d+)?)\s*(?:m2|m²)\s*-',
+            r'vivienda(?:\s+que\s+consta\s+de|\s+de|\s+con|\s+de\s+una\s+superficie\s+de|\s+útil\s+de|\s+construida\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros)',
+            r'local(?:\s+comercial)?(?:\s+que\s+consta\s+de|\s+de|\s+con|\s+de\s+una\s+superficie\s+de|\s+útil\s+de|\s+construida\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros)',
+            r'superficie\s+(?:construida|útil|registral|total)\s*:?\s*(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros)',
+            r'piso(?:\s+de)?\s*(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros)',
+            r'ocupando\s+una\s+superficie\s+de\s*(\d+(?:[\.,]\d+)?)',
+            r'cabida\s+de\s*(\d+(?:[\.,]\d+)?)\s*m'
         ]
-        for pat in patterns:
-            m = re.search(pat, text.lower())
+        for pat in vivienda_patterns:
+            m = re.search(pat, text_lower)
             if m:
-                try:
-                    val_str = m.group(1).replace('.', '').replace(',', '.')
-                    val = float(val_str)
-                    if 10.0 <= val <= 500000.0:
+                # Verificar que no esté en una frase dedicada a garaje/trastero
+                match_start = max(0, m.start() - 30)
+                prefix = text_lower[match_start:m.start()]
+                if not any(annex in prefix for annex in ["garaje", "trastero", "aparcamiento", "cochera", "sótano", "anejo"]):
+                    val = self.parse_spanish_number(m.group(1))
+                    if val and 10.0 <= val <= 500000.0:
                         return val
-                except Exception:
-                    pass
+
+        # 3. Limpiar menciones de anejos para evitar falsos positivos
+        cleaned_text = re.sub(
+            r'(?:garaje|trastero|aparcamiento|cochera|sótano|anejo)[^,\.\n]*(?:de\s*\d+(?:[\.,]\d+)?\s*(?:m2|m²|metros)[^,\.\n]*)?',
+            '',
+            text_lower
+        )
+
+        generic_patterns = [
+            r'(\d+(?:[\.,]\d+)?)\s*(?:m2|m²|metros\s+cuadrados|m\.2)',
+            r'extensión(?:\s+superficial|\s+de)?\s*:?\s*(\d+(?:[\.,]\d+)?)',
+            r'consta\s+de\s*(\d+(?:[\.,]\d+)?)\s*m'
+        ]
+        for pat in generic_patterns:
+            m = re.search(pat, cleaned_text)
+            if m:
+                val = self.parse_spanish_number(m.group(1))
+                if val and 15.0 <= val <= 500000.0:
+                    return val
+
         return None
 
     def parse_auction_detail(self, auction_id: str, html_content: str) -> Dict[str, Any]:
