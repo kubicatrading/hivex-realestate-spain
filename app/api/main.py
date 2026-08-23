@@ -551,23 +551,28 @@ async def get_opportunities(
             ownership_pct = scraper.extract_ownership_percentage(desc_text)
             parsed_text_m2 = scraper.extract_surface_m2(desc_text)
 
-            # 1. Direct Catastro API query by Cadastral Reference (20 chars = finca urbana específica)
+            # 1. Direct Catastro API query or DB Persisted surface
             refcat = auc.refcat if (auc and auc.refcat) else None
             if not refcat:
                 refcat = scraper.extract_cadastral_reference(desc_text)
 
-            if refcat:
-                catastro = CatastroClient()
-                cat_details = catastro.get_parcel_details(refcat)
-                if cat_details and cat_details.get("surface_m2"):
-                    surface_m2 = round(float(cat_details["surface_m2"]), 2)
+            # Priority 1: DB Persisted surface (Instant response from PostgreSQL/SQLite)
+            if auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
+                surface_m2 = round(float(auc.parcel.surface_m2), 2)
 
-            # 2. Fallback: Si la API de Catastro no devuelve superficie o el expediente carece de RefCat,
-            # utilizar el extracto de la Certificación Registral / Edicto del BOE:
+            # Priority 2: Live Catastro API query by Cadastral Reference if missing in DB
+            if not surface_m2 and refcat:
+                try:
+                    catastro = CatastroClient(timeout=3.0)
+                    cat_details = catastro.get_parcel_details(refcat)
+                    if cat_details and cat_details.get("surface_m2"):
+                        surface_m2 = round(float(cat_details["surface_m2"]), 2)
+                except Exception:
+                    pass
+
+            # Priority 3: Fallback text parsing from Registry Edict / BOE description
             if not surface_m2 and parsed_text_m2 and parsed_text_m2 > 0:
                 surface_m2 = round(parsed_text_m2, 2)
-            elif not surface_m2 and (auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0):
-                surface_m2 = round(float(auc.parcel.surface_m2), 2)
 
             # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
             # Priority 1: Catastro API

@@ -53,7 +53,7 @@ class CadastralParcel(Base):
     __tablename__ = "cadastral_parcels"
 
     id = Column(Integer, primary_key=True, index=True)
-    refcat = Column(String(20), unique=True, index=True, nullable=False) # Referencia Catastral (14 o 20 chars)
+    refcat = Column(String(50), unique=True, index=True, nullable=False) # Referencia Catastral (14, 20 o pseudo-ref)
     census_section_id = Column(Integer, ForeignKey("census_sections.id"), nullable=True)
     
     address = Column(String(255), nullable=True)
@@ -89,7 +89,7 @@ class Auction(Base):
     starting_bid = Column(Float, nullable=True)        # Importe de salida / puja mínima (€)
     deposit_amount = Column(Float, nullable=True)      # Depósito requerido (€)
     
-    refcat = Column(String(20), ForeignKey("cadastral_parcels.refcat"), nullable=True, index=True)
+    refcat = Column(String(50), ForeignKey("cadastral_parcels.refcat"), nullable=True, index=True)
     status = Column(String(50), default="EJECUCION")   # EJECUCION, FINALIZADA, CANCELADA
     auction_start_date = Column(DateTime, nullable=True)
     auction_end_date = Column(DateTime, nullable=True)
