@@ -237,9 +237,30 @@ class BOESubastasScraper:
         if not text:
             return None
         
-        text_lower = text.lower()
+        text_lower = text.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
 
-        # 1. Búsqueda específica de superficie con números escritos en texto (Ej: 'sesenta metros noventa y cinco decímetros')
+        # 0. Búsqueda de Hectáreas, Áreas y Centiáreas escritas en texto
+        written_ha_match = re.search(r'([a-z\s]+?)\s+hectareas?(?:,\s*([a-z\s]+?)\s+areas?)?(?:(?:\s*y|\s*,)\s*([a-z\s]+?)\s+centiareas?)?', text_lower)
+        if written_ha_match:
+            h_str = written_ha_match.group(1).strip()
+            a_str = written_ha_match.group(2).strip() if written_ha_match.group(2) else ''
+            ca_str = written_ha_match.group(3).strip() if written_ha_match.group(3) else ''
+            val_h = parse_spanish_written_number(h_str) or 0.0
+            val_a = parse_spanish_written_number(a_str) or 0.0
+            val_ca = parse_spanish_written_number(ca_str) or 0.0
+            tot_m2 = (val_h * 10000.0) + (val_a * 100.0) + val_ca
+            if tot_m2 >= 10.0:
+                return round(tot_m2, 2)
+
+        # 1. Búsqueda específica de superficie con números escritos en texto (Ej: 'sesenta y cinco metros cuadrados', 'mide dos mil seiscienosis diez metros')
+        written_m_match = re.search(r'(?:mide|superficie|extension|cabida|de|unos)\s+(?:superficial\s+de\s+)?([a-z\s]+?)\s+metros(?:\s+cuadrados)?', text_lower)
+        if written_m_match:
+            words = written_m_match.group(1).strip()
+            words = re.sub(r'^(de|unos|una|unas|con|que|en|del|la)\s+', '', words).strip()
+            val_m = parse_spanish_written_number(words)
+            if val_m and 10.0 <= val_m <= 500000.0:
+                return round(val_m, 2)
+
         written_pat = r'superficie\s+(?:construida|útil|registral|total)?\s*(?:de\s*)?([a-z\s]+?)\s*metros?(?:\s+([a-z\s]+?)\s*decímetros?)?'
         m_written = re.search(written_pat, text_lower)
         if m_written:
