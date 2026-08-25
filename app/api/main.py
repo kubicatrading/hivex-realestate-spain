@@ -504,7 +504,7 @@ async def trigger_ingestion_pipeline(
     }
 
 @app.get("/api/v1/opportunities")
-async def get_opportunities(
+def get_opportunities(
     background_tasks: BackgroundTasks,
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(None, ge=0.0, le=100.0),
