@@ -267,6 +267,22 @@ def serve_dashboard():
         "index_found": os.path.exists(index_path)
     }
 
+@app.get("/static/css/{filename:path}")
+def serve_css(filename: str):
+    curr_static = get_static_dir()
+    file_path = os.path.join(curr_static, "css", filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="text/css")
+    raise HTTPException(status_code=404, detail="CSS file not found")
+
+@app.get("/static/js/{filename:path}")
+def serve_js(filename: str):
+    curr_static = get_static_dir()
+    file_path = os.path.join(curr_static, "js", filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="JS file not found")
+
 from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO
 
 @app.get("/api/v1/health")
