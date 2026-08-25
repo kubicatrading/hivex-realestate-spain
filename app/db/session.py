@@ -10,13 +10,17 @@ logger = logging.getLogger(__name__)
 
 def get_ipv4_db_url(raw_url: str) -> str:
     """
-    1. Escapa caracteres especiales como '#' en la contraseña por '%23' para evitar fallos de parser en SQLAlchemy.
-    2. Transforma URLs directas de Supabase (IPv6) a la URL del Pooler de Supabase (IPv4)
+    1. Convierte esquemas heredados 'postgres://' a 'postgresql://' para compatibilidad con SQLAlchemy 1.4+.
+    2. Escapa caracteres especiales como '#' en la contraseña por '%23'.
+    3. Transforma URLs directas de Supabase (IPv6) a la URL del Pooler de Supabase (IPv4)
        para evitar el error 'Cannot assign requested address' en Vercel Serverless.
     """
     if not raw_url:
         return ""
     clean_url = raw_url.strip()
+
+    if clean_url.startswith("postgres://"):
+        clean_url = clean_url.replace("postgres://", "postgresql://", 1)
 
     # Escapar '#' en la parte de usuario:contraseña si no está escapado
     if "@" in clean_url:
@@ -41,7 +45,7 @@ connect_args = {}
 if "postgresql" in db_url:
     if "sslmode" not in db_url:
         connect_args["sslmode"] = "require"
-    connect_args["connect_timeout"] = 3
+    connect_args["connect_timeout"] = 5
 
 # Motor de Producción PostgreSQL único y exclusivo (NullPool para Vercel Serverless)
 engine = create_engine(
