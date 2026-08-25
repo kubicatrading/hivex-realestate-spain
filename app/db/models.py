@@ -81,8 +81,8 @@ class Auction(Base):
     title = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     property_type = Column(String(50), nullable=True) # Vivienda, Solar, Finca Rústica, Garaje
-    province = Column(String(100), nullable=True)
-    locality = Column(String(100), nullable=True)
+    province = Column(String(100), nullable=True, index=True)
+    locality = Column(String(100), nullable=True, index=True)
     address = Column(String(255), nullable=True)
     
     appraisal_value = Column(Float, nullable=True)     # Valor de tasación (€)
@@ -116,11 +116,10 @@ class Opportunity(Base):
     id = Column(Integer, primary_key=True, index=True)
     auction_id = Column(Integer, ForeignKey("auctions.id"), nullable=False)
     
-    strategy = Column(Enum(StrategyType), nullable=False) # HOUSE_FLIPPING or LAND_DEVELOPMENT
-    
+    strategy = Column(Enum(StrategyType), nullable=False, index=True) # HOUSE_FLIPPING or LAND_DEVELOPMENT
     listing_price = Column(Float, nullable=False)       # Precio de salida en subasta (€)
     estimated_reference_value = Column(Float, nullable=False) # Valor estimado de mercado de la zona (€)
-    discount_percentage = Column(Float, nullable=False) # Descuento calculado (ej. 0.42 = 42% por debajo de mercado)
+    discount_percentage = Column(Float, nullable=False, index=True) # Descuento calculado (ej. 0.42 = 42% por debajo de mercado)
     
     poi_score = Column(Float, default=0.0)             # Puntuación de servicios (OSM: transporte, colegios, etc.)
     income_score = Column(Float, default=0.0)          # Puntuación nivel adquisitivo (INE ADREH)
