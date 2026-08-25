@@ -213,12 +213,26 @@ def resolve_meso_market_price(province_str: str, locality_str: str, full_address
     prov_price = PROVINCE_MARKET_M2_PRICES.get(prov_key, 1350.0)
     return prov_price, "MUNICIPAL", f"Municipio/Provincia MIVAU [{province_str or 'España'}]"
 
-# Calculate absolute path to project root
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-static_dir = os.path.join(BASE_DIR, "static")
 
+def get_static_dir():
+    candidates = [
+        os.path.join(BASE_DIR, "static"),
+        os.path.join(os.getcwd(), "static"),
+        "/var/task/static",
+        os.path.abspath("static")
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0]
+
+static_dir = get_static_dir()
 if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    try:
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    except Exception:
+        pass
 
 @app.on_event("startup")
 def startup_event():
@@ -229,13 +243,16 @@ def startup_event():
 
 @app.get("/")
 def serve_dashboard():
-    index_path = os.path.join(static_dir, "index.html")
+    curr_static = get_static_dir()
+    index_path = os.path.join(curr_static, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return {
         "status": "online",
         "app": settings.PROJECT_NAME,
-        "environment": settings.ENV
+        "environment": settings.ENV,
+        "static_found": os.path.exists(curr_static),
+        "index_found": os.path.exists(index_path)
     }
 
 from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO
