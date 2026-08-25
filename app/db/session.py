@@ -10,12 +10,21 @@ logger = logging.getLogger(__name__)
 
 def get_ipv4_db_url(raw_url: str) -> str:
     """
-    Transforma URLs directas de Supabase (IPv6) a la URL del Pooler de Supabase (IPv4)
-    para evitar el error 'Cannot assign requested address' en entornos Serverless de Vercel.
+    1. Escapa caracteres especiales como '#' en la contraseña por '%23' para evitar fallos de parser en SQLAlchemy.
+    2. Transforma URLs directas de Supabase (IPv6) a la URL del Pooler de Supabase (IPv4)
+       para evitar el error 'Cannot assign requested address' en Vercel Serverless.
     """
     if not raw_url:
         return ""
     clean_url = raw_url.strip()
+
+    # Escapar '#' en la parte de usuario:contraseña si no está escapado
+    if "@" in clean_url:
+        user_pass, host_part = clean_url.rsplit("@", 1)
+        if "#" in user_pass:
+            user_pass = user_pass.replace("#", "%23")
+        clean_url = f"{user_pass}@{host_part}"
+
     if "supabase.co" in clean_url and "pooler" not in clean_url:
         match = re.search(r'db\.([a-z0-9]+)\.supabase\.co', clean_url)
         if match:
