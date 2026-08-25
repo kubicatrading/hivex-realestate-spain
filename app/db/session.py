@@ -2,7 +2,6 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
-from app.core.config import settings
 
 # Locate local SQLite seed database
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,30 +13,14 @@ if not os.path.exists(seed_db):
 
 db_url = os.getenv("DATABASE_URL", "").strip()
 
-engine = None
-ACTIVE_DB_ENGINE = "SQLite (Local DB)"
-DB_STATUS_INFO = {"engine": "SQLite (Local DB)", "host": "local", "connected": True}
-
-# Attempt remote PostgreSQL connection if DATABASE_URL is explicitly set
-if db_url and "postgresql" in db_url:
-    try:
-        connect_args = {"connect_timeout": 3}
-        if "sslmode" in db_url or "supabase" in db_url:
-            connect_args["sslmode"] = "require"
-        test_engine = create_engine(db_url, connect_args=connect_args, poolclass=NullPool)
-        with test_engine.connect() as conn:
-            pass
-        engine = test_engine
-        ACTIVE_DB_ENGINE = "PostgreSQL"
-        DB_STATUS_INFO = {"engine": "PostgreSQL", "host": "remote", "connected": True}
-    except Exception as e:
-        engine = None
-
-if engine is None:
-    # Reliable local SQLite fallback
-    db_url = f"sqlite:///{seed_db}"
-    connect_args = {"check_same_thread": False}
-    engine = create_engine(db_url, connect_args=connect_args, echo=False)
+# Fast, zero-blocking engine initialization
+if db_url and "postgresql" in db_url and os.getenv("FORCE_POSTGRES", "").lower() == "true":
+    engine = create_engine(db_url, connect_args={"sslmode": "require", "connect_timeout": 2}, poolclass=NullPool, echo=False)
+    ACTIVE_DB_ENGINE = "PostgreSQL"
+    DB_STATUS_INFO = {"engine": "PostgreSQL", "host": "remote", "connected": True}
+else:
+    sqlite_url = f"sqlite:///{seed_db}"
+    engine = create_engine(sqlite_url, connect_args={"check_same_thread": False}, echo=False)
     ACTIVE_DB_ENGINE = "SQLite (Local DB)"
     DB_STATUS_INFO = {"engine": "SQLite (Local DB)", "host": "local", "connected": True}
 
