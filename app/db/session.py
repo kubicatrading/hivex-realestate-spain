@@ -38,29 +38,48 @@ def get_ipv4_db_url(raw_url: str) -> str:
             clean_url = re.sub(r'db\.[a-z0-9]+\.supabase\.co:?\d*', 'aws-0-eu-central-1.pooler.supabase.com:6543', clean_url)
     return clean_url
 
-# URL estricta de PostgreSQL convertida a la interfaz IPv4 de Supabase Pooler
-db_url = get_ipv4_db_url(os.getenv("DATABASE_URL", settings.DATABASE_URL))
+raw_db_setting = os.getenv("DATABASE_URL", getattr(settings, "DATABASE_URL", ""))
+db_url = get_ipv4_db_url(raw_db_setting)
 
 connect_args = {}
 if "postgresql" in db_url:
     if "sslmode" not in db_url:
         connect_args["sslmode"] = "require"
-    connect_args["connect_timeout"] = 5
+    connect_args["connect_timeout"] = 3
 
-# Motor de Producción PostgreSQL único y exclusivo (NullPool para Vercel Serverless)
-engine = create_engine(
-    db_url,
-    connect_args=connect_args,
-    poolclass=NullPool,
-    echo=False
-)
-
-ACTIVE_DB_ENGINE = "PostgreSQL (Producción Pooler IPv4)"
-DB_STATUS_INFO = {
-    "engine": "PostgreSQL (Producción Pooler IPv4)",
-    "host": db_url.split("@")[-1].split("/")[0] if "@" in db_url else "remote",
-    "connected": True
-}
+try:
+    if "postgresql" in db_url:
+        engine = create_engine(
+            db_url,
+            connect_args=connect_args,
+            poolclass=NullPool,
+            echo=False
+        )
+        # Test connection immediately
+        with engine.connect() as conn:
+            pass
+        ACTIVE_DB_ENGINE = "PostgreSQL (Producción Pooler IPv4)"
+        DB_STATUS_INFO = {
+            "engine": "PostgreSQL (Producción Pooler IPv4)",
+            "host": db_url.split("@")[-1].split("/")[0] if "@" in db_url else "remote",
+            "connected": True
+        }
+    else:
+        raise ValueError("Non-postgres URL, use SQLite fallback")
+except Exception as e_conn:
+    logger.warning(f"PostgreSQL no alcanzable localmente ({e_conn}). Usando fallback SQLite local: sqlite:///hivex_local.db")
+    db_url = "sqlite:///hivex_local.db"
+    engine = create_engine(
+        db_url,
+        connect_args={"check_same_thread": False},
+        echo=False
+    )
+    ACTIVE_DB_ENGINE = "SQLite (Fallback Desarrollo Local)"
+    DB_STATUS_INFO = {
+        "engine": "SQLite (Fallback Desarrollo Local)",
+        "host": "localhost",
+        "connected": True
+    }
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
