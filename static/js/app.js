@@ -139,16 +139,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Demo Direct Login Button Handler
-    const btnDemoLogin = document.getElementById('btn-demo-login');
-    if (btnDemoLogin) {
-        btnDemoLogin.addEventListener('click', () => {
-            if (inputLogin) inputLogin.value = 'jsaavedra';
-            if (inputPassword) inputPassword.value = 'hivex1234#';
-            formLogin.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        });
-    }
-
     // Logout Handler
     function logout() {
         state.token = null;
