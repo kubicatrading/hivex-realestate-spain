@@ -1,6 +1,6 @@
 import os
 import time
-from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks
+from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import urllib.request
@@ -30,6 +30,17 @@ app = FastAPI(
     description="Backend API y Dashboard para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
     version="1.0.0"
 )
+
+@app.middleware("http")
+async def fix_vercel_rewrites_middleware(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith("/api/index.py"):
+        new_path = path.replace("/api/index.py", "", 1)
+        if not new_path:
+            new_path = "/"
+        request.scope["path"] = new_path
+    response = await call_next(request)
+    return response
 
 class LoginRequest(BaseModel):
     login: str
@@ -242,6 +253,7 @@ def startup_event():
         print(f"Advertencia al crear tablas en startup: {e}")
 
 @app.get("/")
+@app.get("/api/index.py")
 def serve_dashboard():
     curr_static = get_static_dir()
     index_path = os.path.join(curr_static, "index.html")
