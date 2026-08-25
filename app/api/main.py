@@ -25,20 +25,36 @@ from app.core.auth import (
     get_current_user_optional
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API y Dashboard para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
     version="1.0.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.middleware("http")
 async def fix_vercel_rewrites_middleware(request: Request, call_next):
-    path = request.scope.get("path", "")
-    if path.startswith("/api/index.py"):
-        new_path = path.replace("/api/index.py", "", 1)
-        if not new_path:
-            new_path = "/"
-        request.scope["path"] = new_path
+    matched_path = request.headers.get("x-matched-path") or request.headers.get("x-forwarded-uri")
+    current_path = request.scope.get("path", "")
+    
+    if current_path.startswith("/api/index.py"):
+        suffix = current_path[len("/api/index.py"):]
+        if suffix:
+            request.scope["path"] = suffix
+        elif matched_path:
+            request.scope["path"] = matched_path
+        else:
+            request.scope["path"] = "/"
+            
     response = await call_next(request)
     return response
 
