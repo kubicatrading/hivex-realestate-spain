@@ -27,6 +27,11 @@ from app.core.auth import (
 
 from fastapi.middleware.cors import CORSMiddleware
 
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    pass
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API y Dashboard para monitoreo de mercado inmobiliario off-market, subastas del BOE, Catastro, INE y OSM.",
