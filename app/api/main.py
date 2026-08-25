@@ -267,21 +267,13 @@ def serve_dashboard():
         "index_found": os.path.exists(index_path)
     }
 
-@app.get("/static/css/{filename:path}")
-def serve_css(filename: str):
+@app.get("/static/{filepath:path}")
+def serve_static_file(filepath: str):
     curr_static = get_static_dir()
-    file_path = os.path.join(curr_static, "css", filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="text/css")
-    raise HTTPException(status_code=404, detail="CSS file not found")
-
-@app.get("/static/js/{filename:path}")
-def serve_js(filename: str):
-    curr_static = get_static_dir()
-    file_path = os.path.join(curr_static, "js", filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="application/javascript")
-    raise HTTPException(status_code=404, detail="JS file not found")
+    target_path = os.path.join(curr_static, filepath)
+    if os.path.exists(target_path) and os.path.isfile(target_path):
+        return FileResponse(target_path)
+    raise HTTPException(status_code=404, detail=f"Static file '{filepath}' not found")
 
 from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO
 
