@@ -8,7 +8,7 @@ from urllib.parse import quote_plus
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from geoalchemy2.shape import to_shape
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple, Any, Union
 
 from app.db.session import get_db, Base, engine
 from app.db.models import Opportunity, Auction, StrategyType
