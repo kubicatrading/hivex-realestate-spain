@@ -12,10 +12,14 @@
       "schedule": "*/15 * * * *"
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/((?!static/).*)",
-      "destination": "/api/index.py"
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
     }
   ]
 }
