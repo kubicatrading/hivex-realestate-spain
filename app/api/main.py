@@ -460,10 +460,6 @@ async def get_opportunities(
     results = []
     try:
         # Si la base de datos está vacía, activar el escáner en segundo plano
-        if db.query(Opportunity).count() == 0:
-            background_tasks.add_task(_run_background_pipeline)
-
-
         query = db.query(Opportunity).outerjoin(Auction)
 
         if strategy:
@@ -475,7 +471,7 @@ async def get_opportunities(
             query = query.filter(Auction.province.ilike(f"%{province}%"))
 
         opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
-
+        scraper = BOESubastasScraper()
         for opp in opportunities:
             auc = opp.auction
             if auc and BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or ""):
@@ -541,17 +537,11 @@ async def get_opportunities(
             else:
                 property_ref_value = 0.0
 
-            # Rule 5.2: Surface area m² resolution
-            # Primary Source: Specific property unit built surface from Catastro API or Registry Edict
-            # (Ensuring ground plot parcel area of the entire building does not override the individual unit's built surface)
             surface_m2 = None
-            cat_details = None
-            scraper = BOESubastasScraper()
             desc_text = (auc.description or "") + " " + (auc.title or "") if auc else ""
             ownership_pct = scraper.extract_ownership_percentage(desc_text)
             parsed_text_m2 = scraper.extract_surface_m2(desc_text)
 
-            # 1. Direct Catastro API query or DB Persisted surface
             refcat = auc.refcat if (auc and auc.refcat) else None
             if not refcat:
                 refcat = scraper.extract_cadastral_reference(desc_text)
@@ -560,40 +550,24 @@ async def get_opportunities(
             if auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
                 surface_m2 = round(float(auc.parcel.surface_m2), 2)
 
-            # Priority 2: Live Catastro API query by Cadastral Reference if missing in DB
-            if not surface_m2 and refcat:
-                try:
-                    catastro = CatastroClient(timeout=3.0)
-                    cat_details = catastro.get_parcel_details(refcat)
-                    if cat_details and cat_details.get("surface_m2"):
-                        surface_m2 = round(float(cat_details["surface_m2"]), 2)
-                except Exception:
-                    pass
-
-            # Priority 3: Fallback text parsing from Registry Edict / BOE description
+            # Priority 2: Fallback text parsing from Registry Edict / BOE description
             if not surface_m2 and parsed_text_m2 and parsed_text_m2 > 0:
                 surface_m2 = round(parsed_text_m2, 2)
 
             # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
-            # Priority 1: Catastro API
-            if cat_details and cat_details.get("land_type"):
-                land_type = cat_details["land_type"]
-            # Priority 2: Database Catastro parcel
-            elif auc and auc.parcel and auc.parcel.land_use:
+            if auc and auc.parcel and auc.parcel.land_use:
                 land_type = "RÚSTICO" if "RUSTICO" in auc.parcel.land_use.upper() or "AGRARIO" in auc.parcel.land_use.upper() else "URBANO"
-            # Priority 3: Catastro reference structure check
             elif refcat:
-                catastro = CatastroClient()
-                land_type = catastro.detect_land_type_from_catastro(refcat)
+                land_type = CatastroClient.detect_land_type_from_catastro(None, refcat)
+            elif "RUSTICO" in desc_text.upper() or "AGRARIO" in desc_text.upper():
+                land_type = "RÚSTICO"
             else:
                 land_type = "URBANO"
 
             # --- TWO-TIER PRICE LEVEL HIERARCHY ---
             # Tier 1: Referencia MICRO (Fincas Catastro)
             micro_price = None
-            if cat_details and cat_details.get("reference_price_m2"):
-                micro_price = float(cat_details["reference_price_m2"])
-            elif auc and auc.parcel and auc.parcel.reference_price_m2 and auc.parcel.reference_price_m2 > 0:
+            if auc and auc.parcel and auc.parcel.reference_price_m2 and auc.parcel.reference_price_m2 > 0:
                 micro_price = float(auc.parcel.reference_price_m2)
 
             # Tier 2: Referencia MESO (Barrio / Distrito / Municipio MIVAU/INE)

@@ -2,8 +2,8 @@
   "version": 2,
   "functions": {
     "api/index.py": {
-      "maxDuration": 60,
-      "includeFiles": "hivex_local.db"
+      "maxDuration": 10,
+      "includeFiles": ["hivex_local.db", "static/**"]
     }
   },
   "crons": [
@@ -12,10 +12,10 @@
       "schedule": "*/15 * * * *"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "api/index.py"
+      "source": "/(.*)",
+      "destination": "/api/index.py"
     }
   ]
 }
