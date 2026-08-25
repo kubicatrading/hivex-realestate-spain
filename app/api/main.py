@@ -536,8 +536,8 @@ def get_opportunities(
 
         opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
 
-        # Si la base de datos PostgreSQL está recién creada/vacía, poblar automáticamente las 107 oportunidades de inversión
-        if not opportunities or len(opportunities) == 0:
+        # Si la base de datos PostgreSQL tiene menos de 107 oportunidades, poblar/sincronizar automáticamente todas
+        if not opportunities or len(opportunities) < 107:
             try:
                 from app.engine.scoring_engine import OpportunityScoringEngine
                 scraper_init = BOESubastasScraper()
