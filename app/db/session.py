@@ -32,7 +32,7 @@ connect_args = {}
 if "postgresql" in db_url:
     if "sslmode" not in db_url:
         connect_args["sslmode"] = "require"
-    connect_args["connect_timeout"] = 10
+    connect_args["connect_timeout"] = 3
 
 # Motor de Producción PostgreSQL único y exclusivo (NullPool para Vercel Serverless)
 engine = create_engine(
