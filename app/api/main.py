@@ -522,7 +522,9 @@ def get_opportunities(
     try:
         # Si la base de datos está vacía, activar el escáner en segundo plano
         from sqlalchemy.orm import joinedload
-        query = db.query(Opportunity).options(joinedload(Opportunity.auction)).outerjoin(Auction)
+        query = db.query(Opportunity).options(
+            joinedload(Opportunity.auction).joinedload(Auction.parcel)
+        ).outerjoin(Auction)
 
         if strategy:
             query = query.filter(Opportunity.strategy == strategy)

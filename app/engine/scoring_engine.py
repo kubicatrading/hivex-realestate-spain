@@ -32,12 +32,17 @@ class OpportunityScoringEngine:
         """
         detected_opportunities = []
 
+        # Batch-fetch all existing auction records in 1 single query
+        target_ids = [it["id_subasta"] for it in raw_auctions if "id_subasta" in it]
+        existing_map = {}
+        if target_ids:
+            existing_list = self.db.query(Auction).filter(Auction.id_subasta.in_(target_ids)).all()
+            existing_map = {a.id_subasta: a for a in existing_list}
+
         for item in raw_auctions:
             try:
                 auction_id = item["id_subasta"]
-                
-                # Check if auction already processed
-                existing = self.db.query(Auction).filter(Auction.id_subasta == auction_id).first()
+                existing = existing_map.get(auction_id)
                 import json
                 images_list = item.get("images", [])
                 images_json_str = json.dumps(images_list) if images_list else None
