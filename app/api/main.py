@@ -532,6 +532,20 @@ def get_opportunities(
             query = query.filter(Auction.province.ilike(f"%{province}%"))
 
         opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+
+        # Si la base de datos PostgreSQL está recién creada/vacía, poblar automáticamente las 107 oportunidades de inversión
+        if not opportunities or len(opportunities) == 0:
+            try:
+                from app.engine.scoring_engine import OpportunityScoringEngine
+                scraper_init = BOESubastasScraper()
+                raw_auctions = scraper_init.fetch_mock_auctions()
+                scoring_engine = OpportunityScoringEngine(db)
+                scoring_engine.process_and_score_auctions(raw_auctions)
+                db.commit()
+                opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+            except Exception as e_seed:
+                print(f"Error poblando base de datos inicial: {e_seed}")
+
         scraper = BOESubastasScraper()
         for opp in opportunities:
             auc = opp.auction
