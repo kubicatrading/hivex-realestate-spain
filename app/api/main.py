@@ -16,6 +16,7 @@ from app.connectors.boe_scraper import BOESubastasScraper
 from app.connectors.catastro_client import CatastroClient
 from app.connectors.ine_client import INEClient
 from app.engine.scoring_engine import OpportunityScoringEngine
+from app.engine.meso_market_price import resolve_meso_market_price_2x2
 from app.services.notifier import TelegramNotifier
 from app.core.config import settings
 from app.core.auth import (
@@ -624,13 +625,12 @@ def get_opportunities(
             if not refcat:
                 refcat = scraper.extract_cadastral_reference(desc_text)
 
-            # Priority 1: DB Persisted surface (Instant response from PostgreSQL/SQLite)
-            if auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
-                surface_m2 = round(float(auc.parcel.surface_m2), 2)
-
-            # Priority 2: Fallback text parsing from Registry Edict / BOE description
-            if not surface_m2 and parsed_text_m2 and parsed_text_m2 > 0:
+            # Priority 1: Edict/BOE text surface parsing (Extracts exact unit surface being auctioned, e.g. 32 m² vs plot footprint)
+            if parsed_text_m2 and parsed_text_m2 > 0:
                 surface_m2 = round(parsed_text_m2, 2)
+            # Priority 2: DB Persisted parcel surface fallback
+            elif auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
+                surface_m2 = round(float(auc.parcel.surface_m2), 2)
 
             # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
             if auc and auc.parcel and auc.parcel.land_use:
@@ -642,22 +642,26 @@ def get_opportunities(
             else:
                 land_type = "URBANO"
 
+            # Determine strategy / property tipology for 2x2 Matrix X-axis
+            is_solar = (strategy_val == "LAND_DEVELOPMENT") or any(kw in (auc.property_type or "").lower() or kw in desc_text.lower() for kw in ["solar", "terreno", "parcela", "suelo"])
+
             # --- TWO-TIER PRICE LEVEL HIERARCHY ---
             # Tier 1: Referencia MICRO (Fincas Catastro)
             micro_price = None
             if auc and auc.parcel and auc.parcel.reference_price_m2 and auc.parcel.reference_price_m2 > 0:
                 micro_price = float(auc.parcel.reference_price_m2)
 
-            # Tier 2: Referencia MESO (Barrio / Distrito / Municipio MIVAU/INE)
-            meso_price, meso_source, meso_label = resolve_meso_market_price(province_str, locality_str, full_address, desc_text)
+            # Tier 2: Referencia MESO 2x2 (Barrio / CP / Municipio / Provincia MIVAU/INE)
+            meso_price, meso_source, meso_label = resolve_meso_market_price_2x2(
+                province_str=province_str,
+                locality_str=locality_str,
+                full_address_str=full_address,
+                desc_text=desc_text,
+                land_type=land_type,
+                is_solar=is_solar
+            )
 
-            if land_type == "RÚSTICO":
-                area_m2_price = 27.0 # Benchmark Suelo Rústico / Agrario m²
-                price_ref_level = "MESO"
-                price_ref_level_label = "Ref. Meso (Suelo Rústico Agrario)"
-                area_m2_price_source = "SECCION"
-                area_m2_price_label = "Valor Rústico / Agrario"
-            elif micro_price and micro_price > 0:
+            if micro_price and micro_price > 0:
                 area_m2_price = micro_price
                 price_ref_level = "MICRO"
                 price_ref_level_label = "Ref. Micro (Catastro Finca)"
