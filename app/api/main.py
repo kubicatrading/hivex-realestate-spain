@@ -639,6 +639,17 @@ def get_opportunities(
             if not refcat:
                 refcat = scraper.extract_cadastral_reference(desc_text)
 
+            # Module 2: CRU / Finca Registral / Address resolution to Cadastral Reference
+            if not refcat and full_address and locality_str:
+                try:
+                    resolved_rc = CatastroClient().resolve_refcat_from_address_or_cru(full_address, locality_str, province_str)
+                    if resolved_rc:
+                        refcat = resolved_rc
+                        if auc:
+                            auc.refcat = resolved_rc
+                except Exception:
+                    pass
+
             # Priority 1: Edict/BOE text surface parsing (Extracts exact unit surface being auctioned, e.g. 32 m² vs plot footprint)
             if parsed_text_m2 and parsed_text_m2 > 0:
                 surface_m2 = round(parsed_text_m2, 2)
@@ -692,6 +703,17 @@ def get_opportunities(
             effective_surface_m2 = round(surface_m2 * (ownership_pct / 100.0), 2) if (surface_m2 and surface_m2 > 0) else None
             property_m2_price = round(property_ref_value / effective_surface_m2, 2) if (effective_surface_m2 and effective_surface_m2 > 0) else None
 
+            # Notarial Mortgage Appraisal Value & Valor Micro Est. calculation
+            extracted_notarial_val = scraper.extract_notarial_appraisal_value(desc_text)
+            notarial_appraisal_val = extracted_notarial_val if extracted_notarial_val else (appraisal_val if appraisal_val > 0 else starting_bid_val)
+            
+            if effective_surface_m2 and effective_surface_m2 > 0 and notarial_appraisal_val and notarial_appraisal_val > 0:
+                valor_micro_est = round(notarial_appraisal_val / effective_surface_m2, 2)
+            elif property_m2_price and property_m2_price > 0:
+                valor_micro_est = property_m2_price
+            else:
+                valor_micro_est = None
+
             # Dynamic calculation of total estimated market value based on zone m² price and effective surface
             if effective_surface_m2 and effective_surface_m2 > 0 and area_m2_price and area_m2_price > 0:
                 estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
@@ -743,6 +765,8 @@ def get_opportunities(
                 "appraisal_value": appraisal_val,
                 "starting_bid": starting_bid_val,
                 "property_ref_value": property_ref_value,
+                "notarial_appraisal_value": notarial_appraisal_val,
+                "valor_micro_est": valor_micro_est,
                 "surface_m2": surface_m2,
                 "effective_surface_m2": effective_surface_m2,
                 "ownership_percentage": ownership_pct,

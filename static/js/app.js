@@ -724,6 +724,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const profitValModal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktValModal - refValModal);
         const profitFormattedModal = profitValModal >= 0 ? `+${formatCurrency(profitValModal)}` : formatCurrency(profitValModal);
 
+        const valorMicroVal = opp.valor_micro_est || opp.property_m2_price;
+        const valorMicroDisplay = (valorMicroVal && valorMicroVal > 0) ? `${formatCurrency(valorMicroVal)}/m²` : 'N/D';
+
         body.innerHTML = `
             <div class="modal-prop-container">
                 <div class="modal-media-wrapper" style="margin-bottom: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); padding: 12px;">
@@ -771,7 +774,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
                         <span class="fin-val" style="display: block; font-size: 1.05rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${areaM2Display} (*)</span>
                     </div>
-                    <div></div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #a855f7; font-weight: 600; line-height: 1.2;">Valor Micro Est.</span>
+                        <span class="fin-val" style="display: block; font-size: 1.05rem; font-weight: 800; color: #c084fc; margin-top: 2px;">${valorMicroDisplay}</span>
+                    </div>
                     <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>

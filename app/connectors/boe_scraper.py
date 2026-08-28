@@ -9,7 +9,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 SPANISH_NUMBER_WORDS = {
-    'un': 1, 'uno': 1, 'una': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'un': 1, 'uno': 1, 'una': 1, 'unas': 1, 'unos': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
     'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10, 'once': 11, 'doce': 12,
     'trece': 13, 'catorce': 14, 'quince': 15, 'dieciséis': 16, 'dieciseis': 16,
     'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19, 'veinte': 20, 'veintiuno': 21,
@@ -19,23 +19,33 @@ SPANISH_NUMBER_WORDS = {
     'cincuenta': 50, 'sesenta': 60, 'setenta': 70, 'ochenta': 80, 'noventa': 90,
     'cien': 100, 'ciento': 100, 'doscientos': 200, 'trescientos': 300,
     'cuatrocientos': 400, 'quinientos': 500, 'seiscientos': 600,
-    'setecientos': 700, 'ochocientos': 800, 'novecientos': 900
+    'setecientos': 700, 'ochocientos': 800, 'novecientos': 900, 'mil': 1000
 }
 
 def parse_spanish_written_number(words_str: str) -> Optional[float]:
     if not words_str:
         return None
-    tokens = words_str.lower().replace(' y ', ' ').split()
+    s = words_str.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+    s = re.sub(r'[^a-z0-9\s]', ' ', s)
+    tokens = s.replace(' y ', ' ').split()
     total = 0
     current = 0
     for t in tokens:
         if t in SPANISH_NUMBER_WORDS:
             val = SPANISH_NUMBER_WORDS[t]
-            if val == 100 and current > 0 and current < 10:
-                current *= 100
+            if val == 1000:
+                if current == 0:
+                    current = 1
+                total += current * 1000
+                current = 0
+            elif val in (100, 200, 300, 400, 500, 600, 700, 800, 900) and current > 0 and current < 10:
+                current *= val
             else:
                 current += val
-    return float(total + current) if (total + current) > 0 else None
+        elif t.isdigit():
+            current += float(t)
+    res = float(total + current)
+    return res if res > 0 else None
 
 class BOESubastasScraper:
     """
@@ -231,6 +241,35 @@ class BOESubastasScraper:
         if "rústic" in t or "rustica" in t or "agrari" in t or "suelo no urbanizable" in t or "snu" in t or "no urbanizable" in t:
             return "RÚSTICO"
         return "URBANO"
+
+    def extract_notarial_appraisal_value(self, text: str) -> Optional[float]:
+        """
+        Extrae el valor de tasación notarial / responsabilidad hipotecaria del texto del edicto BOE,
+        certificación registral o ficha del lote.
+        """
+        if not text:
+            return None
+        text_lower = text.lower()
+        patterns = [
+            r'(?:tasad\w*|tasacion|valor\s+de\s+tasacion|tasada)\s+(?:a\s+efectos\s+de\s+subasta\s+)?(?:en\s+la\s+cantidad\s+de\s+|en\s+|por\s+)?(?:[a-z\s]+)?\(?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)\s*(?:euros|€)',
+            r'(?:responsabilidad\s+hipotecaria|hipoteca\s+constituida\s+por|garantia\s+hipotecaria\s+de)\s+(?:de\s+|por\s+importe\s+de\s+)?(?:[a-z\s]+)?\(?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)\s*(?:euros|€)',
+            r'valor\s+(?:registral|escritura|tasacion)\s*:?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)\s*(?:euros|€)',
+            r'finca\s+tasada\s+en\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)\s*(?:euros|€)'
+        ]
+        for pat in patterns:
+            m = re.search(pat, text_lower)
+            if m:
+                val = self.parse_spanish_number(m.group(1))
+                if val and val >= 1000.0:
+                    return val
+
+        m_written = re.search(r'(?:tasad\w*|tasacion|responsabilidad\s+hipotecaria)\s+(?:a\s+efectos\s+de\s+subasta\s+)?(?:en\s+)?([a-z\s]+?)\s*euros', text_lower)
+        if m_written:
+            val = self.parse_spanish_written_number(m_written.group(1))
+            if val and val >= 1000.0:
+                return val
+
+        return None
 
     def extract_surface_m2(self, text: str) -> Optional[float]:
         """Extrae la superficie exacta en m2 del texto del BOE, edicto o certificación registral, ignorando anejos (garaje, trastero)."""

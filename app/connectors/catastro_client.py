@@ -162,3 +162,41 @@ class CatastroClient:
         except Exception:
             pass
         return None
+
+    def resolve_refcat_from_address_or_cru(self, address: str, locality: str, province: str) -> Optional[str]:
+        """
+        Intenta resolver la Referencia Catastral (20 caracteres) a partir de la dirección postal o localidad
+        usando los servicios de localización de Catastro.
+        """
+        if not address or not locality:
+            return None
+        import re
+        clean_addr = re.sub(r'Piso.*|Puerta.*|Portal.*|CP:.*|Escalera.*', '', address, flags=re.IGNORECASE).strip()
+        parts = clean_addr.split(',')
+        street_part = parts[0].replace('Calle', '').replace('Avda', '').replace('Avenida', '').replace('Plaza', '').replace('Paseo', '').strip()
+        m_num = re.search(r'\b(\d+)\b', street_part)
+        num = m_num.group(1) if m_num else '1'
+        street_name = re.sub(r'\b\d+\b', '', street_part).strip()
+
+        url = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCConsultaRC.asmx/Consulta_DNPPP"
+        params = {
+            "Provincia": province or "",
+            "Municipio": locality or "",
+            "TipoVia": "",
+            "NombreVia": street_name,
+            "Numero": num
+        }
+        try:
+            resp = self.client.get(url, params=params)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                for elem in root.iter():
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag in ["pc1", "lrcd"]:
+                        pc1 = elem.find("{http://www.catastro.meh.es/}pc1") or elem.find("pc1")
+                        pc2 = elem.find("{http://www.catastro.meh.es/}pc2") or elem.find("pc2")
+                        if pc1 is not None and pc2 is not None and pc1.text and pc2.text:
+                            return pc1.text + pc2.text
+        except Exception as e:
+            logger.warning(f"Error resolviendo Catastro por dirección para {locality}: {e}")
+        return None

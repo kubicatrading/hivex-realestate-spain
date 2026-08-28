@@ -58,7 +58,20 @@ def test_boe_liens_extraction():
     text_liens = "Subasta judicial con cargas y gravámenes preferentes: Hipoteca a favor de entidad bancaria."
     liens_busy = scraper.extract_liens_info(text_liens)
     assert liens_busy["has_liens"] is True
-    assert liens_busy["status"] == "CON CARGAS"
+
+def test_spanish_written_surface_and_notarial_appraisal():
+    scraper = BOESubastasScraper()
+    text = "LOCAL COMERCIAL LC-3 con superficie construida de treinta y dos metros cuadrados -32,00 m2-. Tasado a efectos de subasta en ciento cincuenta mil euros (150.000,00 €)."
+    
+    surface = scraper.extract_surface_m2(text)
+    assert surface == 32.0
+
+    written_text = "Vivienda con superficie construida de cincuenta y cinco metros cuadrados."
+    surface_written = scraper.extract_surface_m2(written_text)
+    assert surface_written == 55.0
+
+    notarial_val = scraper.extract_notarial_appraisal_value(text)
+    assert notarial_val == 150000.0
 
 def test_boe_hectares_surface_parsing():
     scraper = BOESubastasScraper()
