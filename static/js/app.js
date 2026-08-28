@@ -776,7 +776,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div></div>
                     <div></div>
-                    <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${profitValModal >= 0 ? '#4ade80' : '#f87171'}; margin-top: 2px;">${profitFormattedModal} (*)</span>
