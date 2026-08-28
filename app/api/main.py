@@ -280,7 +280,11 @@ def serve_dashboard():
     curr_static = get_static_dir()
     index_path = os.path.join(curr_static, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        })
     return {
         "status": "online",
         "app": settings.PROJECT_NAME,
