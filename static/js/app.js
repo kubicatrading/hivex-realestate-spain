@@ -557,6 +557,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         <div class="card-financials-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; background: rgba(15, 23, 42, 0.4); padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06);">
                             <div class="fin-cell">
+                                <span class="fin-lbl">€/m² ${typeLabel}</span>
+                                <span class="fin-val val-salida" style="font-size: 0.88rem; font-weight: 700;">${propertyM2Display}</span>
+                            </div>
+                            <div class="fin-cell">
+                                <span class="fin-lbl">€/m² Zona (${typeLabel})</span>
+                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">${areaM2Display} (*)</span>
+                            </div>
+                            <div class="fin-cell">
                                 <span class="fin-lbl">Valor Subasta</span>
                                 <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
                             </div>
@@ -571,14 +579,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="fin-cell">
                                 <span class="fin-lbl">Beneficio / Margen Est.</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 700; color: ${profitVal >= 0 ? '#4ade80' : '#f87171'};">${profitFormatted}</span>
-                            </div>
-                            <div class="fin-cell">
-                                <span class="fin-lbl">€/m² ${typeLabel}</span>
-                                <span class="fin-val val-salida" style="font-size: 0.88rem; font-weight: 700;">${propertyM2Display}</span>
-                            </div>
-                            <div class="fin-cell">
-                                <span class="fin-lbl">€/m² Zona (${typeLabel})</span>
-                                <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 700;">${areaM2Display} (*)</span>
                             </div>
                         </div>
 
@@ -756,7 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Valor Mercado Estimado</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Valor Mercado Est.</span>
                         <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)} (*)</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
