@@ -167,8 +167,19 @@
 
                 <!-- Deals Feed Panel -->
                 <section class="deals-panel glass-panel">
-                    <div class="panel-header">
-                        <h2><i data-lucide="list"></i> Oportunidades Inmobiliarias Detección Off-Market</h2>
+                    <div class="panel-header tabs-header">
+                        <div class="opportunity-source-tabs" role="tablist">
+                            <button id="tab-subastas" class="source-tab active" onclick="switchOpportunitySource('subastas')" role="tab" aria-selected="true" title="Ver subastas judiciales y de administraciones públicas">
+                                <i data-lucide="gavel"></i>
+                                <span>Subastas Públicas (BOE)</span>
+                                <span id="badge-subastas-count" class="tab-badge">0</span>
+                            </button>
+                            <button id="tab-pgou" class="source-tab" onclick="switchOpportunitySource('pgou')" role="tab" aria-selected="false" title="Ver desarrollos urbanísticos, PGOUs y boletines oficiales">
+                                <i data-lucide="map"></i>
+                                <span>Planeamiento & Visor PGOU</span>
+                                <span id="badge-pgou-count" class="tab-badge">0</span>
+                            </button>
+                        </div>
                     </div>
                     <div id="deals-container" class="deals-grid">
                         <!-- Cards dynamically rendered by app.js -->

@@ -519,6 +519,7 @@ def get_opportunities(
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(None, ge=0.0, le=100.0),
     province: Optional[str] = None,
+    source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas' o 'pgou'"),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
@@ -802,10 +803,40 @@ def get_opportunities(
                     "buildability_ratio": (auc.buildability_ratio if (auc and auc.buildability_ratio) else "1.8 m²t/m²s"),
                     "permitted_uses": (auc.permitted_uses if (auc and auc.permitted_uses) else "Residencial / Comercial")
                 },
+                "source_type": "subastas",
                 "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
             })
     except Exception as e:
         print(f"Error consultando oportunidades: {e}")
+
+    # Load PGOU Urban Planning Opportunities from PGOU Gazette Monitor
+    try:
+        from app.connectors.pgou_scraper import PGOUScraper
+        pgou_scraper = PGOUScraper()
+        pgou_items = pgou_scraper.fetch_pgou_opportunities()
+
+        for p_item in pgou_items:
+            if province and province.lower() not in p_item.get("province", "").lower():
+                continue
+            listing_p = p_item.get("listing_price", 0.0)
+            est_val = p_item.get("estimated_reference_value", 0.0)
+            surf = p_item.get("surface_m2", 1.0)
+            p_item["potential_gross_profit"] = round(est_val - listing_p, 2)
+            p_item["property_m2_price"] = round(listing_p / surf, 2) if surf > 0 else 0.0
+            p_item["area_m2_price"] = p_item.get("census_tract_data", {}).get("area_m2_price", 2800.0)
+            p_item["area_m2_price_source"] = "PGOU_GAZETTE"
+            p_item["area_m2_price_label"] = p_item.get("gazette_source", "Boletín Oficial")
+            p_item["price_ref_level"] = "MESO"
+            p_item["price_ref_level_label"] = p_item.get("planning_status", "PGOU")
+            results.append(p_item)
+    except Exception as e_pgou:
+        print(f"Error cargando oportunidades PGOU: {e_pgou}")
+
+    # Apply source_type filter if specified by query parameter
+    if source_type == "subastas":
+        results = [item for item in results if item.get("source_type") == "subastas"]
+    elif source_type == "pgou":
+        results = [item for item in results if item.get("source_type") == "pgou"]
 
     return {
         "total": len(results),

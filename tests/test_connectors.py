@@ -78,3 +78,15 @@ def test_boe_hectares_surface_parsing():
     text = "RUSTICA: TIERRA HUERTA. PARTIDA LLANO DE SAN BERNARDO. SUPERFICIE TERRENO: 0,783 HA."
     surface = scraper.extract_surface_m2(text)
     assert surface == 7830.0
+
+def test_pgou_scraper():
+    from app.connectors.pgou_scraper import PGOUScraper
+    pgou = PGOUScraper()
+    items = pgou.fetch_pgou_opportunities()
+    assert len(items) >= 4
+    for item in items:
+        assert item["source_type"] == "pgou"
+        assert "gazette_source" in item
+        assert "buildability_m2" in item
+        assert item["surface_m2"] > 0
+

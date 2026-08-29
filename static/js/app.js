@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentStrategy: 'ALL',
         minDiscount: 0.10,
         searchQuery: '',
+        activeSource: 'subastas',
         isLoading: false
     };
 
@@ -216,6 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const removedCount = state.allOpportunities.filter(o => !newIds.has(o.id)).length;
                 
                 state.allOpportunities = newOpps;
+                updateTabBadges(newOpps);
                 updateKPIs(newOpps);
                 applyFilters();
 
@@ -227,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 state.allOpportunities = newOpps;
+                updateTabBadges(newOpps);
                 updateKPIs(newOpps);
                 applyFilters();
             }
@@ -369,9 +372,67 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiTotalProfit.textContent = formatCurrency(totalProfit);
     }
 
+    // Update Tab Badges for Opportunity Sources
+    function updateTabBadges(opps) {
+        const subastasCount = opps.filter(o => (o.source_type || 'subastas') === 'subastas').length;
+        const pgouCount = opps.filter(o => o.source_type === 'pgou').length;
+        
+        const badgeSub = document.getElementById('badge-subastas-count');
+        const badgePgou = document.getElementById('badge-pgou-count');
+        
+        if (badgeSub) badgeSub.textContent = subastasCount;
+        if (badgePgou) badgePgou.textContent = pgouCount;
+    }
+
+    // Opportunity Source Tab Switcher (Subastas BOE vs Visor PGOU)
+    window.switchOpportunitySource = function(sourceType) {
+        state.activeSource = sourceType;
+
+        document.querySelectorAll('.source-tab').forEach(btn => {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-selected', 'false');
+        });
+
+        const activeBtn = document.getElementById(`tab-${sourceType}`);
+        if (activeBtn) {
+            activeBtn.classList.add('active');
+            activeBtn.setAttribute('aria-selected', 'true');
+        }
+
+        // Update map legend dynamically according to active tab
+        const legendEl = document.querySelector('.map-legend');
+        if (legendEl) {
+            if (sourceType === 'subastas') {
+                legendEl.innerHTML = `
+                    <span class="dot pin-flipping"></span> House Flipping
+                    <span class="dot pin-land"></span> Suelo / Desarrollo
+                `;
+            } else {
+                legendEl.innerHTML = `
+                    <span class="dot" style="background:#a855f7; box-shadow: 0 0 8px #a855f7;"></span> Aprobación PGOU / Convenio
+                    <span class="dot" style="background:#10b981; box-shadow: 0 0 8px #10b981;"></span> Reordenación / Sector
+                `;
+            }
+        }
+
+        applyFilters();
+
+        const currentCount = state.filteredOpportunities.length;
+        if (sourceType === 'subastas') {
+            showToast(`⚖️ Subastas BOE: Mostrando ${currentCount} subastas públicas activas`, 'info');
+        } else if (sourceType === 'pgou') {
+            showToast(`📐 Visor PGOU: Mostrando ${currentCount} desarrollos urbanísticos detectados en boletines oficiales (BOCM, DOGC, BOJA)`, 'success');
+        }
+    };
+
     // Apply Filter Logic
     function applyFilters() {
         state.filteredOpportunities = state.allOpportunities.filter(opp => {
+            // Source Filter (Subastas BOE vs PGOU Visor)
+            const oppSource = opp.source_type || 'subastas';
+            if (oppSource !== state.activeSource) {
+                return false;
+            }
             // Strategy Filter
             if (state.currentStrategy !== 'ALL' && opp.strategy !== state.currentStrategy) {
                 return false;
@@ -394,7 +455,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         });
 
-        filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${state.allOpportunities.length} oportunidades`;
+        const activeTotal = state.allOpportunities.filter(o => (o.source_type || 'subastas') === state.activeSource).length;
+        filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${activeTotal} oportunidades`;
         renderDeals(state.filteredOpportunities);
         renderMapMarkers(state.filteredOpportunities);
     }
@@ -945,28 +1007,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
         opps.forEach((opp, idx) => {
             if (opp.lat && opp.lon) {
-                const color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
+                const isPgou = opp.source_type === 'pgou';
+                let color = '#f59e0b';
+                if (isPgou) {
+                    color = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
+                } else {
+                    color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
+                }
+
                 const imgInfo = getOpportunityMainImage(opp);
                 const mainImg = imgInfo.url;
                 const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}`;
 
                 const customIcon = L.divIcon({
                     className: 'custom-map-pin',
-                    html: `<div style="background-color: ${color}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${color}; cursor: pointer;"></div>`,
-                    iconSize: [18, 18]
+                    html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 12px ${color}; cursor: pointer;"></div>`,
+                    iconSize: [20, 20]
                 });
 
                 const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
                 markersMap[opp.id] = marker;
 
-                const boeAppraisalText = (opp.appraisal_value && opp.appraisal_value > 0) ? formatCurrency(opp.appraisal_value) : '0 € (Sin constancia en BOE)';
-                marker.bindPopup(`
-                    <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
-                        <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
-                            <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                let popupDetailHtml = '';
+                if (isPgou) {
+                    popupDetailHtml = `
+                        <div style="margin-bottom: 2px; font-size: 11px; color: #7e22ce; font-weight: 700;">
+                            📜 <strong>Boletín:</strong> ${escapeHtml(opp.gazette_source || 'PGOU')}
                         </div>
-                        <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
-                        <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
+                        <div style="margin-bottom: 4px; font-size: 11px; color: #0284c7;">
+                            🏗️ <strong>Edificabilidad:</strong> ${formatNumber(opp.buildability_m2, 0)} m²t
+                        </div>
+                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
+                            -${formatNumber(opp.discount_percentage, 0)}% Margen Est. | Ref: ${formatCurrency(opp.listing_price)}
+                        </div>
+                    `;
+                } else {
+                    const boeAppraisalText = (opp.appraisal_value && opp.appraisal_value > 0) ? formatCurrency(opp.appraisal_value) : '0 € (Sin constancia en BOE)';
+                    popupDetailHtml = `
                         <div style="margin-bottom: 2px; font-size: 11px; color: #475569;">
                             <strong>Tasación BOE:</strong> ${boeAppraisalText}
                         </div>
@@ -976,6 +1053,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
                             -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price)}
                         </div>
+                    `;
+                }
+
+                marker.bindPopup(`
+                    <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
+                        <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
+                            <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                        </div>
+                        <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
+                        <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
+                        ${popupDetailHtml}
                         <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
                             🔍 Ver Ficha Completa
                         </button>
