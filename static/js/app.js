@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sourcesData: [],
         activeTab: 'deals',
         currentStrategy: 'ALL',
-        minDiscount: 0.10,
+        minDiscount: 0.0,
         searchQuery: '',
         activeSource: 'subastas',
         isLoading: false
@@ -707,7 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="card-bottom-row" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%;">
                             <div class="scores-compact" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
                                 <span class="score-chip" title="Score Global Oportunidad" style="${getScoreBgStyle(opp.overall_score)}">Score: <strong>${formatScore(opp.overall_score)}</strong></span>
-                                <span class="score-chip" title="Score Descuento vs Mercado" style="${getScoreBgStyle((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}">Desc: <strong>${formatScore((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}</strong></span>
+                                ${opp.source_type === 'pgou' ? '' : `<span class="score-chip" title="Score Descuento vs Mercado" style="${getScoreBgStyle((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}">Desc: <strong>${formatScore((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}</strong></span>`}
                                 <span class="score-chip" title="Score POIs / Entorno (OSM)" style="${getScoreBgStyle(opp.poi_score)}">POI: <strong>${formatScore(opp.poi_score)}</strong></span>
                                 <span class="score-chip" title="Score Renta INE" style="${getScoreBgStyle(opp.income_score)}">Renta: <strong>${formatScore(opp.income_score)}</strong></span>
                                 <span class="score-chip" title="Score Demografía INE" style="${getScoreBgStyle(opp.demographic_score)}">Demo: <strong>${formatScore(opp.demographic_score)}</strong></span>
@@ -869,8 +869,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             <strong style="color: #f59e0b; font-size: 0.95rem;">${totalUrbCost}</strong>
                         </div>
                         <div>
-                            <span style="display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Repercusión Urb. Total (€/m²t)</span>
-                            <strong style="color: #38bdf8; font-size: 1.05rem; font-weight: 800;">${landRepercussion}/m²t</strong>
+                            <span style="display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Repercusión Total (€/m²t)</span>
+                            <strong style="color: #38bdf8; font-size: 1.05rem; font-weight: 800;">${landRepercussion}/m²t (*)</strong>
                         </div>
                     </div>
 
