@@ -537,8 +537,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const mainImg = imgInfo.url;
             const imgCount = opp.images ? opp.images.length : 0;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
-            // Metrics according to User Rules
-            const refVal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
+            // Metrics according to User Rules & Source Type
+            const refVal = opp.source_type === 'pgou'
+                ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
+                : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
             const totalSurface = (opp.surface_m2 && opp.surface_m2 > 0) ? opp.surface_m2 : null;
             const effectiveSurface = (opp.effective_surface_m2 && opp.effective_surface_m2 > 0) ? opp.effective_surface_m2 : totalSurface;
             const ownershipPct = (opp.ownership_percentage && opp.ownership_percentage > 0) ? opp.ownership_percentage : 100;
@@ -964,7 +966,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
-        const refValModal = opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0;
+        const refValModal = opp.source_type === 'pgou'
+            ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
+            : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
         const estimatedMktValModal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refValModal);
         const profitValModal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktValModal - refValModal);
         const profitFormattedModal = profitValModal >= 0 ? `+${formatCurrency(profitValModal)}` : formatCurrency(profitValModal);
