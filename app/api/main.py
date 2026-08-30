@@ -828,6 +828,7 @@ def get_opportunities(
             p_item["area_m2_price_label"] = p_item.get("gazette_source", "Boletín Oficial")
             p_item["price_ref_level"] = "MESO"
             p_item["price_ref_level_label"] = p_item.get("planning_status", "PGOU")
+            p_item["boe_url"] = p_item.get("gazette_url", "")
             results.append(p_item)
     except Exception as e_pgou:
         print(f"Error cargando oportunidades PGOU: {e_pgou}")

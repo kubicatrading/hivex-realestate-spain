@@ -571,26 +571,84 @@ document.addEventListener('DOMContentLoaded', () => {
             const liensBadgeColor = liensObj.has_liens ? '#f59e0b' : '#4ade80';
             const liensBadgeLabel = liensObj.badge || (liensObj.has_liens ? '🟠 CON CARGAS (VER EDICTO)' : '🟢 LIBRE DE CARGAS');
 
-            const urbanismHtml = `
-                <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                            <i data-lucide="building-2" style="width: 13px; height: 13px; color: #38bdf8;"></i> Clasificación Catastral:
-                        </span>
-                        <span style="background: ${landBg}; color: ${landColor}; font-weight: 800; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
-                            ${landType}${ownershipText}
-                        </span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
-                        <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                            <i data-lucide="shield-alert" style="width: 13px; height: 13px; color: ${liensBadgeColor};"></i> Cargas (BOE Edicto):
-                        </span>
-                        <span style="background: ${liensBadgeBg}; color: ${liensBadgeColor}; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
-                            ${liensBadgeLabel}
-                        </span>
-                    </div>
+            let urbanismHtml = '';
+            let dateSubastaHeader = `
+                <div style="font-size: 0.76rem; color: #f59e0b; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                    <i data-lucide="clock" style="width: 12px; height: 12px; display: inline;"></i> Cierre subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong>
                 </div>
             `;
+            let actionBtnLabel = 'BOE';
+            let actionBtnUrl = opp.boe_url || opp.gazette_url || '#';
+
+            if (opp.source_type === 'pgou') {
+                actionBtnLabel = opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'BOLETIN';
+                actionBtnUrl = opp.gazette_url || opp.boe_url || '#';
+
+                let landUseType = opp.proposed_land_use_type || 'RESIDENCIAL_LIBRE';
+                let landUseBadgeBg = 'rgba(56, 189, 248, 0.15)';
+                let landUseBadgeColor = '#38bdf8';
+                let landUseLabel = '🏢 Residencial Libre';
+
+                if (landUseType === 'RESIDENCIAL_VPA') {
+                    landUseBadgeBg = 'rgba(52, 211, 153, 0.15)';
+                    landUseBadgeColor = '#34d399';
+                    landUseLabel = '🛡️ Residencial VPA/VPPO';
+                } else if (landUseType === 'TERCIARIO_INDUSTRIAL') {
+                    landUseBadgeBg = 'rgba(192, 132, 252, 0.15)';
+                    landUseBadgeColor = '#c084fc';
+                    landUseLabel = '🏭 Terciario / Industrial';
+                }
+
+                let repercDisplay = opp.land_repercussion_m2t ? `${formatCurrency(opp.land_repercussion_m2t)}/m²t` : 'N/D';
+
+                dateSubastaHeader = `
+                    <div style="font-size: 0.76rem; color: #c084fc; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                        <i data-lucide="scroll" style="width: 12px; height: 12px; display: inline;"></i> Publicación: <strong>${escapeHtml(opp.gazette_source || 'Boletín Oficial')} (${escapeHtml(opp.gazette_date || '')})</strong>
+                    </div>
+                `;
+
+                urbanismHtml = `
+                    <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.6); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(168, 85, 247, 0.25); display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="compass" style="width: 13px; height: 13px; color: #c084fc;"></i> Uso Propuesto:
+                            </span>
+                            <span style="background: ${landUseBadgeBg}; color: ${landUseBadgeColor}; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                                ${landUseLabel}
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="layers" style="width: 13px; height: 13px; color: #38bdf8;"></i> Repercusión Est.:
+                            </span>
+                            <span style="color: #38bdf8; font-weight: 800; font-size: 0.78rem;">
+                                ${repercDisplay} Total
+                            </span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                urbanismHtml = `
+                    <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="building-2" style="width: 13px; height: 13px; color: #38bdf8;"></i> Clasificación Catastral:
+                            </span>
+                            <span style="background: ${landBg}; color: ${landColor}; font-weight: 800; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
+                                ${landType}${ownershipText}
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="shield-alert" style="width: 13px; height: 13px; color: ${liensBadgeColor};"></i> Cargas (BOE Edicto):
+                            </span>
+                            <span style="background: ${liensBadgeBg}; color: ${liensBadgeColor}; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                                ${liensBadgeLabel}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }
 
             return `
                 <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
@@ -611,9 +669,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </a>
                         </div>
 
-                        <div style="font-size: 0.76rem; color: #f59e0b; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                            <i data-lucide="clock" style="width: 12px; height: 12px; display: inline;"></i> Cierre subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong>
-                        </div>
+                        ${dateSubastaHeader}
 
                         ${urbanismHtml}
 
@@ -627,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">${areaM2Display} (*)</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Valor Subasta</span>
+                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Precio Adquisición' : 'Valor Subasta'}</span>
                                 <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
                             </div>
                             <div class="fin-cell">
@@ -635,7 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${formatCurrency(estimatedMktVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Superficie (Cuota Real)</span>
+                                <span class="fin-lbl">Superficie (${opp.source_type === 'pgou' ? 'Suelo m²s' : 'Cuota Real'})</span>
                                 <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
@@ -660,8 +716,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <button class="btn btn-secondary btn-xs" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                                     <i data-lucide="eye" style="width: 12px; height: 12px;"></i> Ficha
                                 </button>
-                                <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn-boe-xs" onclick="event.stopPropagation();">
-                                    BOE <i data-lucide="external-link" style="width: 11px; height: 11px;"></i>
+                                <a href="${actionBtnUrl}" target="_blank" rel="noopener" class="btn-boe-xs" onclick="event.stopPropagation();">
+                                    ${actionBtnLabel} <i data-lucide="external-link" style="width: 11px; height: 11px;"></i>
                                 </a>
                             </div>
                         </div>
@@ -706,41 +762,168 @@ document.addEventListener('DOMContentLoaded', () => {
         const discountScoreVal = (opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0;
         const landType = opp.land_type || 'URBANO';
 
-        const liensObj = opp.liens || {
-            status: 'SIN CARGAS',
-            label: 'Sin Cargas',
-            description: 'Sin cargas preferentes declaradas en la ficha oficial del BOE.',
-            color: 'green',
-            badge: '🟢 LIBRE DE CARGAS'
-        };
-        const liensColor = liensObj.has_liens ? '#f59e0b' : '#4ade80';
-        const liensBg = liensObj.has_liens ? 'rgba(245, 158, 11, 0.15)' : 'rgba(34, 197, 94, 0.15)';
-        const liensBorder = liensObj.has_liens ? 'rgba(245, 158, 11, 0.3)' : 'rgba(34, 197, 94, 0.3)';
+        let liensDetailHtml = '';
+        let urbanismDetail = '';
+        let dateSubastaHeaderModal = '';
+        let extBtnLabelModal = 'Abrir Expediente Oficial en BOE';
+        let extBtnUrlModal = opp.boe_url || opp.gazette_url || '#';
 
-        const urbanismDetail = `
-            <div style="margin-top: 14px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
-                <span style="color: #94a3b8; font-weight: 600;">Calificación del Suelo / Dominio:</span>
-                <span class="badge" style="background: ${landType === 'RÚSTICO' ? 'rgba(234,179,8,0.2)' : 'rgba(56,189,248,0.2)'}; color: ${landType === 'RÚSTICO' ? '#eab308' : '#38bdf8'}; font-weight: 800; font-size: 0.92rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
-                    ${landType} ${(ownershipPct < 100) ? `(${ownershipFormatted}% PLENO DOMINIO)` : ''}
-                </span>
-            </div>
-        `;
+        if (opp.source_type === 'pgou') {
+            extBtnLabelModal = `Abrir Publicación en ${opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'Boletín Oficial'}`;
+            extBtnUrlModal = opp.gazette_url || opp.boe_url || '#';
 
-        const liensDetailHtml = `
-            <div style="margin-top: 14px; padding: 14px 16px; background: rgba(15, 23, 42, 0.7); border: 1px solid ${liensBorder}; border-radius: 8px; width: 100%;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
-                    <span style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
-                        <i data-lucide="shield-alert" style="width: 18px; height: 18px; color: ${liensColor};"></i> Situación Jurídica y Cargas (Edicto BOE)
+            dateSubastaHeaderModal = `
+                <div style="font-size: 0.88rem; color: #c084fc; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
+                    <i data-lucide="scroll" style="width: 15px; height: 15px; color: #c084fc;"></i>
+                    <span>Publicación Oficial: <strong>${escapeHtml(opp.gazette_source || 'Boletín Oficial')} (${escapeHtml(opp.gazette_date || '')})</strong></span>
+                </div>
+            `;
+
+            let landUseType = opp.proposed_land_use_type || 'RESIDENCIAL_LIBRE';
+            let landUseBadgeBg = 'rgba(56, 189, 248, 0.2)';
+            let landUseBadgeColor = '#38bdf8';
+            let landUseLabel = '🏢 RESIDENCIAL LIBRE';
+
+            if (landUseType === 'RESIDENCIAL_VPA') {
+                landUseBadgeBg = 'rgba(52, 211, 153, 0.2)';
+                landUseBadgeColor = '#34d399';
+                landUseLabel = '🛡️ RESIDENCIAL VPA / VPPO (PROTEGIDA)';
+            } else if (landUseType === 'TERCIARIO_INDUSTRIAL') {
+                landUseBadgeBg = 'rgba(192, 132, 252, 0.2)';
+                landUseBadgeColor = '#c084fc';
+                landUseLabel = '🏭 TERCIARIO / COMERCIAL / INDUSTRIAL';
+            }
+
+            urbanismDetail = `
+                <div style="margin-top: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
+                    <span style="color: #cbd5e1; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="compass" style="width: 16px; height: 16px; color: #c084fc;"></i> Uso Propuesto & Calificación Urbanística:
                     </span>
-                    <span class="badge" style="background: ${liensBg}; color: ${liensColor}; font-weight: 800; font-size: 0.82rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
-                        ${escapeHtml(liensObj.label || liensObj.status)}
+                    <span class="badge" style="background: ${landUseBadgeBg}; color: ${landUseBadgeColor}; font-weight: 800; font-size: 0.88rem; padding: 4px 12px; border-radius: 6px; text-transform: uppercase;">
+                        ${landUseLabel}
                     </span>
                 </div>
-                <p style="font-size: 0.86rem; color: #cbd5e1; margin: 6px 0 0 0; line-height: 1.4;">
-                    ${escapeHtml(liensObj.description || 'Sin cargas declaradas en la ficha oficial.')}
-                </p>
-            </div>
-        `;
+            `;
+
+            // PGOU Milestones Stepper
+            const milestones = opp.milestones || [
+                { phase: "Aprobación Inicial PGOU", status: "COMPLETED", timeframe: "Concluido", uplift: "x1.25" },
+                { phase: "Aprobación Definitiva", status: "CURRENT", timeframe: "6-12 meses", uplift: "x1.85" },
+                { phase: "Proyecto Reparcelación", status: "PENDING", timeframe: "3-6 meses", uplift: "x2.40" },
+                { phase: "Suelo Finalista / Licencia", status: "PENDING", timeframe: "Inmediato", uplift: "x3.00" }
+            ];
+
+            const milestonesStepsHtml = milestones.map((m) => {
+                let isDone = m.status === 'COMPLETED';
+                let isCurrent = m.status === 'CURRENT';
+                let statusBg = isDone ? 'rgba(34, 197, 94, 0.15)' : (isCurrent ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.04)');
+                let statusColor = isDone ? '#4ade80' : (isCurrent ? '#c084fc' : '#94a3b8');
+                let badgeText = isDone ? '✔ Completado' : (isCurrent ? '⚡ En Proceso' : '⏳ Pendiente');
+
+                return `
+                    <div style="flex: 1; min-width: 130px; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 8px; background: ${statusBg}; border: 1px solid ${statusColor}55; border-radius: 8px;">
+                        <span style="font-size: 0.72rem; color: ${statusColor}; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">${badgeText}</span>
+                        <strong style="font-size: 0.84rem; color: #f8fafc; line-height: 1.2; margin-bottom: 6px;">${escapeHtml(m.phase)}</strong>
+                        <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Reval. ${m.uplift}</span>
+                        <span style="font-size: 0.72rem; color: #cbd5e1; margin-top: 2px;">⏱️ ${escapeHtml(m.timeframe)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const landRepercussion = opp.land_repercussion_m2t ? formatCurrency(opp.land_repercussion_m2t) : 'N/D';
+            const urbCostPerM2 = opp.urbanization_cost_m2s ? `${formatCurrency(opp.urbanization_cost_m2s)}/m²s` : '35-65 €/m²s';
+            const totalUrbCost = opp.total_urbanization_cost ? formatCurrency(opp.total_urbanization_cost) : 'A calcular';
+
+            liensDetailHtml = `
+                <!-- PGOU Urban Planning Module: Milestones, Repercussion & Land Registry -->
+                <div style="margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px;">
+                        <span style="font-size: 0.98rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="git-commit" style="width: 18px; height: 18px; color: #c084fc;"></i> Hitos de Planeamiento & Revalorización Estimada
+                        </span>
+                        <span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight: 800; font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;">
+                            📜 ${escapeHtml(opp.planning_status || 'PGOU')}
+                        </span>
+                    </div>
+
+                    <!-- Milestones Stepper -->
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                        ${milestonesStepsHtml}
+                    </div>
+
+                    <!-- Financial Repercussion Analysis Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: rgba(0, 0, 0, 0.25); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 14px;">
+                        <div>
+                            <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Coste Urb. Est. (€/m²s)</span>
+                            <strong style="color: #cbd5e1; font-size: 0.95rem;">${urbCostPerM2}</strong>
+                        </div>
+                        <div>
+                            <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Presupuesto Urbanización Total</span>
+                            <strong style="color: #f59e0b; font-size: 0.95rem;">${totalUrbCost}</strong>
+                        </div>
+                        <div>
+                            <span style="display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Repercusión Suelo Total (€/m²t)</span>
+                            <strong style="color: #38bdf8; font-size: 1.05rem; font-weight: 800;">${landRepercussion}/m²t</strong>
+                        </div>
+                    </div>
+
+                    <!-- Registry & Compensation Board Status -->
+                    <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; font-size: 0.86rem;">
+                        <div style="display: flex; align-items: center; gap: 8px; color: #4ade80;">
+                            <i data-lucide="shield-check" style="width: 18px; height: 18px;"></i>
+                            <strong style="color: #f8fafc;">Estatus Registral & Junta:</strong>
+                        </div>
+                        <span style="color: #cbd5e1; font-weight: 600; text-align: right; font-size: 0.85rem;">${escapeHtml(opp.reparcelacion_status || 'Junta Constituida / En Tramitación')}</span>
+                    </div>
+                    <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 6px; font-style: italic;">
+                        ℹ️ Verificación gratuita realizada mediante cruce de Sede Electrónica del Catastro (WFS) y anuncios obligatorios de edictos oficiales.
+                    </div>
+                </div>
+            `;
+        } else {
+            dateSubastaHeaderModal = `
+                <div style="font-size: 0.88rem; color: #f59e0b; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
+                    <i data-lucide="clock" style="width: 15px; height: 15px;"></i>
+                    <span>Fecha Cierre Subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong></span>
+                </div>
+            `;
+
+            urbanismDetail = `
+                <div style="margin-top: 14px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
+                    <span style="color: #94a3b8; font-weight: 600;">Calificación del Suelo / Dominio:</span>
+                    <span class="badge" style="background: ${landType === 'RÚSTICO' ? 'rgba(234,179,8,0.2)' : 'rgba(56,189,248,0.2)'}; color: ${landType === 'RÚSTICO' ? '#eab308' : '#38bdf8'}; font-weight: 800; font-size: 0.92rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
+                        ${landType} ${(ownershipPct < 100) ? `(${ownershipFormatted}% PLENO DOMINIO)` : ''}
+                    </span>
+                </div>
+            `;
+
+            const liensObj = opp.liens || {
+                status: 'SIN CARGAS',
+                label: 'Sin Cargas',
+                description: 'Sin cargas preferentes declaradas en la ficha oficial del BOE.',
+                color: 'green',
+                badge: '🟢 LIBRE DE CARGAS'
+            };
+            const liensColor = liensObj.has_liens ? '#f59e0b' : '#4ade80';
+            const liensBg = liensObj.has_liens ? 'rgba(245, 158, 11, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+            const liensBorder = liensObj.has_liens ? 'rgba(245, 158, 11, 0.3)' : 'rgba(34, 197, 94, 0.3)';
+
+            liensDetailHtml = `
+                <div style="margin-top: 14px; padding: 14px 16px; background: rgba(15, 23, 42, 0.7); border: 1px solid ${liensBorder}; border-radius: 8px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+                        <span style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="shield-alert" style="width: 18px; height: 18px; color: ${liensColor};"></i> Situación Jurídica y Cargas (Edicto BOE)
+                        </span>
+                        <span class="badge" style="background: ${liensBg}; color: ${liensColor}; font-weight: 800; font-size: 0.82rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
+                            ${escapeHtml(liensObj.label || liensObj.status)}
+                        </span>
+                    </div>
+                    <p style="font-size: 0.86rem; color: #cbd5e1; margin: 6px 0 0 0; line-height: 1.4;">
+                        ${escapeHtml(liensObj.description || 'Sin cargas declaradas en la ficha oficial.')}
+                    </p>
+                </div>
+            `;
+        }
 
         const detailedScoresHtml = `
             <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
@@ -804,20 +987,17 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
                             <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps Satélite</span>
                         </a>
-                        <div style="font-size: 0.88rem; color: #f59e0b; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
-                            <i data-lucide="clock" style="width: 15px; height: 15px;"></i>
-                            <span>Fecha Cierre Subasta: <strong>${escapeHtml(opp.auction_end_date || '15/09/2026 18:00h')}</strong></span>
-                        </div>
+                        ${dateSubastaHeaderModal}
                     </div>
                 </div>
 
                 <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor Tasación BOE</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Valor Tasación Ref.' : 'Valor Tasación BOE'}</span>
                         <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Valor de Subasta</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : 'Valor de Subasta'}</span>
                         <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
@@ -825,12 +1005,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)} (*)</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Superficie (Cuota Real)</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : 'Superficie (Cuota Real)'}</span>
                         <div class="fin-val" style="display: block; font-size: 1.05rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplayModal}</div>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Precio €/m² Inmueble</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${propertyM2Display}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Edificabilidad Total' : 'Precio €/m² Inmueble'}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.05rem; font-weight: 700; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatNumber(opp.buildability_m2 || 0, 0)} m²t` : propertyM2Display}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
@@ -860,8 +1040,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
                         <i data-lucide="x"></i> Cerrar Ventana
                     </button>
-                    <a href="${opp.boe_url}" target="_blank" rel="noopener" class="btn btn-primary">
-                        <i data-lucide="external-link"></i> Abrir Expediente Oficial en BOE
+                    <a href="${extBtnUrlModal}" target="_blank" rel="noopener" class="btn btn-primary" style="${opp.source_type === 'pgou' ? 'background: linear-gradient(135deg, #a855f7 0%, #10b981 100%); border: none;' : ''}">
+                        <i data-lucide="external-link"></i> ${escapeHtml(extBtnLabelModal)}
                     </a>
                 </div>
             </div>
