@@ -282,3 +282,76 @@ def resolve_meso_market_price_2x2(
     price = prov_matrix[y_axis][x_axis]
     display_loc = locality_str.strip() if locality_str and locality_str.strip() else (province_str or 'España')
     return price, "MUNICIPAL", f"Municipio MIVAU [{display_loc}]"
+
+
+# --- MESO URBANIZATION COST BENCHMARK ENGINE (€/m²s) ---
+PROVINCE_URBANIZATION_COST: Dict[str, float] = {
+    "MADRID": 65.0,
+    "BARCELONA": 62.0,
+    "BALEARES": 75.0,
+    "BALEARS": 75.0,
+    "ILLES BALEARS": 75.0,
+    "GIPUZKOA": 70.0,
+    "BIZKAIA": 68.0,
+    "MÁLAGA": 55.0,
+    "MALAGA": 55.0,
+    "SEVILLA": 52.0,
+    "VALENCIA": 50.0,
+    "VALÈNCIA": 50.0,
+    "VALENCIA/VALÈNCIA": 50.0,
+    "ALICANTE": 48.0,
+    "GIRONA": 52.0,
+    "TARRAGONA": 45.0,
+    "ZARAGOZA": 45.0,
+    "CÁDIZ": 48.0,
+    "GRANADA": 45.0,
+    "MURCIA": 42.0,
+    "TOLEDO": 38.0,
+    "GUADALAJARA": 42.0,
+}
+
+CP_MUNICIPALITY_URBANIZATION_COST: Dict[str, Tuple[float, str]] = {
+    "28014": (75.0, "Madrid Capital (Centro/Cortes)"),
+    "28001": (85.0, "Madrid Capital (Salamanca)"),
+    "28006": (85.0, "Madrid Capital (Salamanca)"),
+    "28037": (65.0, "Madrid (San Blas-Canillejas)"),
+    "28045": (70.0, "Madrid (Arganzuela)"),
+    "08014": (68.0, "Barcelona (Sants-Montjuïc)"),
+    "08001": (75.0, "Barcelona (Ciutat Vella)"),
+    "41014": (55.0, "Sevilla (Bellavista-La Palmera)"),
+    "46011": (52.0, "Valencia (Poblats Marítims-El Grau)"),
+}
+
+def resolve_urbanization_cost_m2s(
+    province_str: str,
+    locality_str: str,
+    full_address_str: str = "",
+    desc_text: str = ""
+) -> Tuple[float, str, str]:
+    """
+    Resuelve el coste medio estimado de urbanización (€/m²s) basado en la jerarquía Meso:
+    1. Código Postal (CP)
+    2. Distrito / Municipio
+    3. Benchmark Provincial
+
+    Retorna: (coste_m2s, fuente_codigo, fuente_label)
+    """
+    combined_text = f"{full_address_str} {desc_text} {locality_str}".lower()
+    cp = extract_postal_code(combined_text)
+    
+    if cp and cp in CP_MUNICIPALITY_URBANIZATION_COST:
+        cost, label = CP_MUNICIPALITY_URBANIZATION_COST[cp]
+        return cost, "CP", f"Meso CP {cp} ({label})"
+    
+    prov_key = (province_str or "").strip().upper()
+    loc_key = (locality_str or "").strip().upper()
+    
+    # Check if locality matches any key
+    for cp_k, (cost, label) in CP_MUNICIPALITY_URBANIZATION_COST.items():
+        if loc_key and loc_key in label.upper():
+            return cost, "MUNICIPAL", f"Meso Municipio [{locality_str}]"
+            
+    cost = PROVINCE_URBANIZATION_COST.get(prov_key, 45.0)
+    display_loc = locality_str.strip() if locality_str and locality_str.strip() else (province_str or "España")
+    return cost, "MUNICIPAL", f"Meso Municipio/Provincia [{display_loc}]"
+

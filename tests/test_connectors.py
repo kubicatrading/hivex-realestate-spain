@@ -90,3 +90,13 @@ def test_pgou_scraper():
         assert "buildability_m2" in item
         assert item["surface_m2"] > 0
 
+def test_resolve_urbanization_cost_m2s():
+    from app.engine.meso_market_price import resolve_urbanization_cost_m2s
+    cost_cp, code_cp, label_cp = resolve_urbanization_cost_m2s("Barcelona", "Barcelona", "Carrer de la Constitució 19 08014", "")
+    assert cost_cp == 68.0
+    assert "08014" in label_cp
+
+    cost_prov, code_prov, label_prov = resolve_urbanization_cost_m2s("Toledo", "Toledo", "Calle Mayor 1", "")
+    assert cost_prov == 38.0
+
+

@@ -858,6 +858,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div>
                             <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Coste Urb. Est. (€/m²s)</span>
                             <strong style="color: #cbd5e1; font-size: 0.95rem;">${urbCostPerM2}</strong>
+                            <span style="font-size: 0.65rem; color: #38bdf8; display: block; margin-top: 2px;">(*): ${escapeHtml(opp.urbanization_cost_source || 'Promedio Meso CP')}</span>
                         </div>
                         <div>
                             <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Presupuesto Urbanización Total</span>

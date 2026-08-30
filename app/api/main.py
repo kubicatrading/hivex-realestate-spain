@@ -812,6 +812,7 @@ def get_opportunities(
     # Load PGOU Urban Planning Opportunities from PGOU Gazette Monitor
     try:
         from app.connectors.pgou_scraper import PGOUScraper
+        from app.engine.meso_market_price import resolve_urbanization_cost_m2s
         pgou_scraper = PGOUScraper()
         pgou_items = pgou_scraper.fetch_pgou_opportunities()
 
@@ -821,6 +822,21 @@ def get_opportunities(
             listing_p = p_item.get("listing_price", 0.0)
             est_val = p_item.get("estimated_reference_value", 0.0)
             surf = p_item.get("surface_m2", 1.0)
+            buildability = p_item.get("buildability_m2", 1.0)
+
+            # Dynamic Meso Urbanization Cost Calculation by Zip Code / Locality
+            urb_cost, urb_source_code, urb_source_label = resolve_urbanization_cost_m2s(
+                province_str=p_item.get("province", ""),
+                locality_str=p_item.get("locality", ""),
+                full_address_str=p_item.get("address", ""),
+                desc_text=p_item.get("description", "")
+            )
+            p_item["urbanization_cost_m2s"] = urb_cost
+            p_item["urbanization_cost_source"] = urb_source_label
+            p_item["total_urbanization_cost"] = round(surf * urb_cost, 2)
+            if buildability > 0:
+                p_item["land_repercussion_m2t"] = round((listing_p + p_item["total_urbanization_cost"]) / buildability, 2)
+
             p_item["potential_gross_profit"] = round(est_val - listing_p, 2)
             p_item["property_m2_price"] = round(listing_p / surf, 2) if surf > 0 else 0.0
             p_item["area_m2_price"] = p_item.get("census_tract_data", {}).get("area_m2_price", 2800.0)
