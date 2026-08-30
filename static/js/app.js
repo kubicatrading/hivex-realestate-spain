@@ -697,7 +697,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Score General Entorno' : 'Beneficio / Margen Est.'}</span>
+                                <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : 'Beneficio / Margen Est.'}</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
                                     ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : profitFormatted}
                                 </span>
@@ -801,7 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
             urbanismDetail = `
                 <div style="margin-top: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
                     <span style="color: #cbd5e1; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                        <i data-lucide="compass" style="width: 16px; height: 16px; color: #c084fc;"></i> Uso Propuesto & Calificación Urbanística:
+                        <i data-lucide="compass" style="width: 16px; height: 16px; color: #c084fc;"></i> Uso Propuesto:
                     </span>
                     <span class="badge" style="background: ${landUseBadgeBg}; color: ${landUseBadgeColor}; font-weight: 800; font-size: 0.88rem; padding: 4px 12px; border-radius: 6px; text-transform: uppercase;">
                         ${landUseLabel}
@@ -812,9 +812,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // PGOU Milestones Stepper
             const milestones = opp.milestones || [
                 { phase: "Aprobación Inicial PGOU", status: "COMPLETED", timeframe: "Concluido", uplift: "x1.25" },
-                { phase: "Aprobación Definitiva", status: "CURRENT", timeframe: "6-12 meses", uplift: "x1.85" },
-                { phase: "Proyecto Reparcelación", status: "PENDING", timeframe: "3-6 meses", uplift: "x2.40" },
-                { phase: "Suelo Finalista / Licencia", status: "PENDING", timeframe: "Inmediato", uplift: "x3.00" }
+                { phase: "Aprobación Definitiva (BOCM)", status: "CURRENT", timeframe: "Concluido", uplift: "x1.85" },
+                { phase: "Inscripción Proyecto Reparcelación", status: "PENDING", timeframe: "3-6 meses", uplift: "x2.40" },
+                { phase: "Licencia Directa / Obra Nueva", status: "PENDING", timeframe: "9-12 meses", uplift: "x3.00" }
             ];
 
             const milestonesStepsHtml = milestones.map((m) => {
@@ -822,14 +822,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 let isCurrent = m.status === 'CURRENT';
                 let statusBg = isDone ? 'rgba(34, 197, 94, 0.15)' : (isCurrent ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.04)');
                 let statusColor = isDone ? '#4ade80' : (isCurrent ? '#c084fc' : '#94a3b8');
-                let badgeText = isDone ? '✔ Completado' : (isCurrent ? '⚡ En Proceso' : '⏳ Pendiente');
+                let badgeText = isDone ? '✔ COMPLETADO' : (isCurrent ? '⚡ EN PROCESO' : '⌛ PENDIENTE');
 
                 return `
-                    <div style="flex: 1; min-width: 130px; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 8px; background: ${statusBg}; border: 1px solid ${statusColor}55; border-radius: 8px;">
-                        <span style="font-size: 0.72rem; color: ${statusColor}; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">${badgeText}</span>
-                        <strong style="font-size: 0.84rem; color: #f8fafc; line-height: 1.2; margin-bottom: 6px;">${escapeHtml(m.phase)}</strong>
-                        <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Reval. ${m.uplift}</span>
-                        <span style="font-size: 0.72rem; color: #cbd5e1; margin-top: 2px;">⏱️ ${escapeHtml(m.timeframe)}</span>
+                    <div style="flex: 1; min-width: 130px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; padding: 10px 8px; background: ${statusBg}; border: 1px solid ${statusColor}55; border-radius: 8px;">
+                        <span style="font-size: 0.72rem; color: ${statusColor}; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;">${badgeText}</span>
+                        <div style="display: flex; align-items: center; justify-content: center; min-height: 3.6em; line-height: 1.2em; margin-bottom: 6px; width: 100%;">
+                            <strong style="font-size: 0.82rem; color: #f8fafc; text-align: center;">${escapeHtml(m.phase)}</strong>
+                        </div>
+                        <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 800; display: block; margin-bottom: 2px;">Reval. ${m.uplift}</span>
+                        <span style="font-size: 0.72rem; color: #cbd5e1;">⏱️ ${escapeHtml(m.timeframe)}</span>
                     </div>
                 `;
             }).join('');
@@ -843,7 +845,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div style="margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; width: 100%;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px;">
                         <span style="font-size: 0.98rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
-                            <i data-lucide="git-commit" style="width: 18px; height: 18px; color: #c084fc;"></i> Hitos de Planeamiento & Revalorización Estimada
+                            <i data-lucide="git-commit" style="width: 18px; height: 18px; color: #c084fc;"></i> Hitos de Planeamiento
                         </span>
                         <span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight: 800; font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;">
                             📜 ${escapeHtml(opp.planning_status || 'PGOU')}
@@ -863,11 +865,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span style="font-size: 0.65rem; color: #38bdf8; display: block; margin-top: 2px;">(*): ${escapeHtml(opp.urbanization_cost_source || 'Promedio Meso CP')}</span>
                         </div>
                         <div>
-                            <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Presupuesto Urbanización Total</span>
+                            <span style="display: block; font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Presupuesto Urb. Total</span>
                             <strong style="color: #f59e0b; font-size: 0.95rem;">${totalUrbCost}</strong>
                         </div>
                         <div>
-                            <span style="display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Repercusión Suelo Total (€/m²t)</span>
+                            <span style="display: block; font-size: 0.75rem; color: #38bdf8; font-weight: 700;">Repercusión Urb. Total (€/m²t)</span>
                             <strong style="color: #38bdf8; font-size: 1.05rem; font-weight: 800;">${landRepercussion}/m²t</strong>
                         </div>
                     </div>
@@ -876,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; font-size: 0.86rem;">
                         <div style="display: flex; align-items: center; gap: 8px; color: #4ade80;">
                             <i data-lucide="shield-check" style="width: 18px; height: 18px;"></i>
-                            <strong style="color: #f8fafc;">Estatus Registral & Junta:</strong>
+                            <strong style="color: #f8fafc;">Estatus:</strong>
                         </div>
                         <span style="color: #cbd5e1; font-weight: 600; text-align: right; font-size: 0.85rem;">${escapeHtml(opp.reparcelacion_status || 'Junta Constituida / En Tramitación')}</span>
                     </div>
@@ -1033,7 +1035,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div></div>
                     <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? '#c084fc' : '#94a3b8'}; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Score General Entorno' : 'Beneficio / Margen Est.'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : 'Beneficio / Margen Est.'}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
                     </div>
                 </div>
@@ -1224,15 +1226,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let popupDetailHtml = '';
                 if (isPgou) {
+                    let landUseProposed = 'Residencial';
+                    if (opp.proposed_land_use === 'PROTECTED_HOUSING') {
+                        landUseProposed = 'Residencial VPA / VPPO (Protegida)';
+                    } else if (opp.proposed_land_use === 'FREE_HOUSING') {
+                        landUseProposed = 'Residencial Libre';
+                    } else if (opp.proposed_land_use === 'TERTIARY_INDUSTRIAL') {
+                        landUseProposed = 'Terciario / Industrial';
+                    } else if (opp.proposed_land_use) {
+                        landUseProposed = opp.proposed_land_use;
+                    }
+                    const planningStatus = opp.planning_status || 'PGOU';
+                    const scoreCol = getScoreColor(opp.overall_score);
                     popupDetailHtml = `
-                        <div style="margin-bottom: 2px; font-size: 11px; color: #7e22ce; font-weight: 700;">
-                            📜 <strong>Boletín:</strong> ${escapeHtml(opp.gazette_source || 'PGOU')}
+                        <div style="margin-bottom: 3px; font-size: 11px; color: #6b21a8; font-weight: 700;">
+                            🧭 <strong>Uso Propuesto:</strong> ${escapeHtml(landUseProposed)}
                         </div>
-                        <div style="margin-bottom: 4px; font-size: 11px; color: #0284c7;">
-                            🏗️ <strong>Edificabilidad:</strong> ${formatNumber(opp.buildability_m2, 0)} m²t
+                        <div style="margin-bottom: 3px; font-size: 11px; color: #0369a1; font-weight: 700;">
+                            📜 <strong>Estatus:</strong> ${escapeHtml(planningStatus)}
                         </div>
-                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
-                            -${formatNumber(opp.discount_percentage, 0)}% Margen Est. | Ref: ${formatCurrency(opp.listing_price)}
+                        <div style="margin-bottom: 10px; font-weight: 800; color: ${scoreCol}; font-size: 12px;">
+                            ⭐ <strong>Score General:</strong> ${formatScore(opp.overall_score)} / 100 pts
                         </div>
                     `;
                 } else {
