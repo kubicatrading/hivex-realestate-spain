@@ -820,9 +820,19 @@ def get_opportunities(
             if province and province.lower() not in p_item.get("province", "").lower():
                 continue
             listing_p = p_item.get("listing_price", 0.0)
-            est_val = p_item.get("estimated_reference_value", 0.0)
             surf = p_item.get("surface_m2", 1.0)
-            buildability = p_item.get("buildability_m2", 1.0)
+            buildability = p_item.get("buildability_m2", 0.0)
+
+            # Area market price (PVP Zona €/m²)
+            census_data = p_item.get("census_tract_data", {})
+            area_m2_price = census_data.get("area_m2_price", 2800.0)
+
+            # Dynamic Estimated Market Value based on buildable floor area (m²t * €/m² zona)
+            if buildability > 0:
+                est_val = round(buildability * area_m2_price, 2)
+            else:
+                est_val = round(surf * area_m2_price, 2)
+            p_item["estimated_reference_value"] = est_val
 
             # Dynamic Meso Urbanization Cost Calculation by Zip Code / Locality
             urb_cost, urb_source_code, urb_source_label = resolve_urbanization_cost_m2s(
@@ -837,9 +847,29 @@ def get_opportunities(
             if buildability > 0:
                 p_item["land_repercussion_m2t"] = round((listing_p + p_item["total_urbanization_cost"]) / buildability, 2)
 
+            # Map Detailed Scores & Demographics to top level for PGOU items
+            scores_comp = p_item.get("score_components", {})
+            income_score = scores_comp.get("income_score", 85.0)
+            poi_score = scores_comp.get("poi_score", 88.0)
+            demographic_score = scores_comp.get("demographic_score", 86.0)
+
+            # PGOU Overall Score Formula (excluding discount_score, redistributed 100%):
+            # Weights: Income 41.67%, POI 33.33%, Demographics 25.00%
+            overall_score = round((0.4167 * income_score) + (0.3333 * poi_score) + (0.25 * demographic_score), 1)
+
+            p_item["income_score"] = income_score
+            p_item["poi_score"] = poi_score
+            p_item["demographic_score"] = demographic_score
+            p_item["discount_score"] = 0.0
+            p_item["overall_score"] = overall_score
+
+            p_item["avg_household_income"] = census_data.get("avg_household_income", 34100)
+            p_item["avg_person_income"] = census_data.get("avg_person_income", 15800)
+            p_item["population_growth_rate"] = census_data.get("population_growth_rate", 2.1)
+
             p_item["potential_gross_profit"] = round(est_val - listing_p, 2)
             p_item["property_m2_price"] = round(listing_p / surf, 2) if surf > 0 else 0.0
-            p_item["area_m2_price"] = p_item.get("census_tract_data", {}).get("area_m2_price", 2800.0)
+            p_item["area_m2_price"] = area_m2_price
             p_item["area_m2_price_source"] = "PGOU_GAZETTE"
             p_item["area_m2_price_label"] = p_item.get("gazette_source", "Boletín Oficial")
             p_item["price_ref_level"] = "MESO"

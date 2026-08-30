@@ -697,8 +697,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Beneficio / Margen Est.</span>
-                                <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 700; color: ${profitVal >= 0 ? '#4ade80' : '#f87171'};">${profitFormatted}</span>
+                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Score General Entorno' : 'Beneficio / Margen Est.'}</span>
+                                <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
+                                    ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : profitFormatted}
+                                </span>
                             </div>
                         </div>
 
@@ -928,11 +930,21 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }
 
+        const discountScoreBoxHtml = opp.source_type === 'pgou'
+            ? `<div style="background: rgba(168, 85, 247, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.25);">
+                    <span style="color: #c084fc; display: block; font-size: 0.75rem; font-weight: 600;">Enfoque Inversor PGOU</span>
+                    <strong style="color: #c084fc; font-size: 0.9rem;">📍 Entorno Revalorizable</strong>
+               </div>`
+            : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
+                    <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
+               </div>`;
+
         const detailedScoresHtml = `
             <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
                     <span style="font-weight: 700; font-size: 0.98rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-                        <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8;"></i> KPIs
+                        <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8;"></i> KPIs ${opp.source_type === 'pgou' ? '(Entorno Urbano)' : ''}
                     </span>
                     <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
                         Score General: <strong>${formatScore(opp.overall_score)} / 100 pts</strong>
@@ -959,10 +971,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score POIs / Entorno (OSM)</span>
                         <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
-                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
-                    </div>
+                    ${discountScoreBoxHtml}
                 </div>
             </div>
         `;
@@ -1024,8 +1033,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div></div>
                     <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">Beneficio / Margen Est.</span>
-                        <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${profitValModal >= 0 ? '#4ade80' : '#f87171'}; margin-top: 2px;">${profitFormattedModal} (*)</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? '#c084fc' : '#94a3b8'}; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Score General Entorno' : 'Beneficio / Margen Est.'}</span>
+                        <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
                     </div>
                 </div>
 
