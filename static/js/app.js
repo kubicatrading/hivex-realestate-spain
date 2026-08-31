@@ -615,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let actionBtnUrl = opp.boe_url || opp.gazette_url || '#';
 
             if (opp.source_type === 'pgou') {
-                actionBtnLabel = opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'BOLETIN';
+                actionBtnLabel = opp.gazette_code || (opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'BOLETIN');
                 actionBtnUrl = opp.gazette_url || opp.boe_url || '#';
 
                 let landUseType = opp.proposed_land_use_type || 'RESIDENCIAL_LIBRE';
@@ -637,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 dateSubastaHeader = `
                     <div style="font-size: 0.76rem; color: #c084fc; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                        <i data-lucide="scroll" style="width: 12px; height: 12px; display: inline;"></i> Publicación: <strong>${escapeHtml(opp.gazette_source || 'Boletín Oficial')} (${escapeHtml(opp.gazette_date || '')})</strong>
+                        <i data-lucide="scroll" style="width: 12px; height: 12px; display: inline;"></i> Publicación: <strong>${escapeHtml(opp.gazette_code || opp.gazette_source || 'Boletín Oficial')}</strong>
                     </div>
                 `;
 
@@ -807,13 +807,13 @@ document.addEventListener('DOMContentLoaded', () => {
         let extBtnUrlModal = opp.boe_url || opp.gazette_url || '#';
 
         if (opp.source_type === 'pgou') {
-            extBtnLabelModal = `Abrir Publicación en ${opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'Boletín Oficial'}`;
+            extBtnLabelModal = `Abrir Publicación (${opp.gazette_code || (opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'Boletín Oficial')})`;
             extBtnUrlModal = opp.gazette_url || opp.boe_url || '#';
 
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: #c084fc; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
                     <i data-lucide="scroll" style="width: 15px; height: 15px; color: #c084fc;"></i>
-                    <span>Publicación Oficial: <strong>${escapeHtml(opp.gazette_source || 'Boletín Oficial')} (${escapeHtml(opp.gazette_date || '')})</strong></span>
+                    <span>Publicación Oficial: <strong>${escapeHtml(opp.gazette_code || opp.gazette_source || 'Boletín Oficial')}</strong> ${opp.gazette_date ? `<span style="color:#94a3b8; font-size: 0.8rem;">(${escapeHtml(opp.gazette_date)})</span>` : ''}</span>
                 </div>
             `;
 
