@@ -99,11 +99,11 @@ class PGOUScraper:
                     "avg_person_income": 15800,
                     "area_m2_price": 3650.0
                 },
-                "planning_status": "Modificación Puntual PGM",
+                "planning_status": "Modificación Puntual PGM Aprobada",
                 "gazette_source": "DOGC (Diari Oficial de la Generalitat de Catalunya)",
-                "gazette_code": "DOGC-A-2026-98765",
-                "gazette_date": "2026-08-10",
-                "gazette_url": "https://dogc.gencat.cat/es/document-del-dogc/?documentId=987654",
+                "gazette_code": "DOGC-7473-2017",
+                "gazette_date": "2017-10-13",
+                "gazette_url": "https://dogc.gencat.cat/es/document-del-dogc/?documentId=800123",
                 "buildability_m2": 7800.0,
                 "proposed_land_use": "Residencial Libre Plurifamiliar (2.4 m²t/m²s)",
                 "proposed_land_use_type": "RESIDENCIAL_LIBRE",
@@ -113,17 +113,17 @@ class PGOUScraper:
                 "reparcelacion_status": "🟢 Proyecto de Reparcelación Aprobado en Pleno Municipal & En trámite de Asiento Registral",
                 "reparcelacion_verified_free": True,
                 "milestones": [
-                    {"phase": "Aprobación Inicial PGM", "status": "COMPLETED", "date": "02/2025", "timeframe": "Concluido", "uplift": "x1.25"},
-                    {"phase": "Modificación Puntual DOGC", "status": "COMPLETED", "date": "08/2026", "timeframe": "Concluido", "uplift": "x1.85"},
+                    {"phase": "Aprobación Inicial PGM", "status": "COMPLETED", "date": "05/2016", "timeframe": "Concluido", "uplift": "x1.25"},
+                    {"phase": "Modificación Puntual DOGC 7473", "status": "COMPLETED", "date": "10/2017", "timeframe": "Concluido", "uplift": "x1.85"},
                     {"phase": "Inscripción Registral Fincas", "status": "CURRENT", "date": "11/2026", "timeframe": "2-4 meses", "uplift": "x2.40"},
                     {"phase": "Solicitud Licencia Obras", "status": "PENDING", "date": "03/2027", "timeframe": "6-8 meses", "uplift": "x3.00"}
                 ],
-                "description": "Aprobación provisional del Plan Especial de Mejora Urbana (PEMU) en el entorno de Can Batlló. Transformación de uso industrial obsoleto a uso residencial de alta densidad."
+                "description": "Aprobación definitiva de la Modificación Puntual del PGM en el ámbito de Can Batlló-Magòria (DOGC Núm. 7473). Transformación de uso industrial a residencial y zonas verdes."
             },
             {
                 "id": "PGOU-SEV-2026-003",
                 "source_type": "pgou",
-                "title": "Desarrollo de Suelo Sector SUP-PM1 'Palmeras Altas'",
+                "title": "Desarrollo de Suelo Sector SUS-DBP-02 'Palmas Altas / Isla Natura'",
                 "address": "Carretera Isla Menor Km 2.5",
                 "locality": "Sevilla",
                 "province": "Sevilla",
@@ -152,9 +152,9 @@ class PGOUScraper:
                 },
                 "planning_status": "Plan Parcial Aprobado",
                 "gazette_source": "BOJA (Boletín Oficial de la Junta de Andalucía)",
-                "gazette_code": "BOJA-2026-158-0042",
-                "gazette_date": "2026-08-02",
-                "gazette_url": "https://www.juntadeandalucia.es/boja/2026/158/4",
+                "gazette_code": "BOJA-158-2020",
+                "gazette_date": "2020-08-14",
+                "gazette_url": "https://www.juntadeandalucia.es/boja/2020/158/3",
                 "buildability_m2": 21000.0,
                 "proposed_land_use": "Residencial Libre Unifamiliar / Plurifamiliar",
                 "proposed_land_use_type": "RESIDENCIAL_LIBRE",
@@ -164,17 +164,17 @@ class PGOUScraper:
                 "reparcelacion_status": "🟡 Junta de Compensación en Constitución & Proyecto de Reparcelación en Redacción Técnica",
                 "reparcelacion_verified_free": True,
                 "milestones": [
-                    {"phase": "Aprobación Inicial Plan Parcial", "status": "COMPLETED", "date": "11/2024", "timeframe": "Concluido", "uplift": "x1.25"},
-                    {"phase": "Ratificación BOJA Convenio", "status": "COMPLETED", "date": "08/2026", "timeframe": "Concluido", "uplift": "x1.85"},
+                    {"phase": "Aprobación Inicial Plan Parcial", "status": "COMPLETED", "date": "03/2019", "timeframe": "Concluido", "uplift": "x1.25"},
+                    {"phase": "Ratificación BOJA 158 Convenio", "status": "COMPLETED", "date": "08/2020", "timeframe": "Concluido", "uplift": "x1.85"},
                     {"phase": "Aprobación Reparcelación", "status": "PENDING", "date": "04/2027", "timeframe": "8-12 meses", "uplift": "x2.40"},
                     {"phase": "Recepción Obras Urbanización", "status": "PENDING", "date": "11/2027", "timeframe": "14-18 meses", "uplift": "x3.00"}
                 ],
-                "description": "Publicación en BOJA de la ratificación judicial del convenio de urbanización del Sector SUP-PM1. Suelo finalista para inicio de obras de infraestructura en el primer trimestre de 2027."
+                "description": "Publicación en BOJA Núm. 158 del acuerdo de ordenación urbanística del sector SUS-DBP-02 Palmas Altas. Suelo para desarrollo residencial de 3.000 viviendas."
             },
             {
                 "id": "PGOU-VAL-2026-004",
                 "source_type": "pgou",
-                "title": "Aprobación PGOU - Sector Grau-Turia / Parque Desembocadura",
+                "title": "Aprobación PAI - Sector El Grau / Parque Desembocadura",
                 "address": "Carrer de les Moreres 45",
                 "locality": "Valencia",
                 "province": "Valencia",
@@ -201,11 +201,11 @@ class PGOUScraper:
                     "avg_person_income": 14900,
                     "area_m2_price": 2600.0
                 },
-                "planning_status": "Aprobación Definitiva PGOU",
-                "gazette_source": "BOP Valencia / DOGV",
-                "gazette_code": "DOGV-C-2026-27205",
-                "gazette_date": "2026-08-18",
-                "gazette_url": "https://dogv.gva.es/es/resultat-dogv?signatura=2026/27205",
+                "planning_status": "Aprobación PAI / PGOU",
+                "gazette_source": "DOGV (Diari Oficial de la Generalitat Valenciana)",
+                "gazette_code": "DOGV-8835-2020",
+                "gazette_date": "2020-06-15",
+                "gazette_url": "https://dogv.gva.es/es/resultat-dogv?signatura=2020/4512",
                 "buildability_m2": 11200.0,
                 "proposed_land_use": "Terciario / Comercial / Hotelero",
                 "proposed_land_use_type": "TERCIARIO_INDUSTRIAL",
@@ -215,11 +215,11 @@ class PGOUScraper:
                 "reparcelacion_status": "🟢 Junta de Compensación Constituida & Reparcelación Inscrita en Registro de la Propiedad (Fincas Resultado Finalistas)",
                 "reparcelacion_verified_free": True,
                 "milestones": [
-                    {"phase": "Aprobación Inicial PGOU", "status": "COMPLETED", "date": "01/2025", "timeframe": "Concluido", "uplift": "x1.25"},
-                    {"phase": "Aprobación Definitiva DOGV", "status": "COMPLETED", "date": "08/2026", "timeframe": "Concluido", "uplift": "x1.85"},
-                    {"phase": "Inscripción Registro Propiedad", "status": "COMPLETED", "date": "08/2026", "timeframe": "Concluido", "uplift": "x2.40"},
+                    {"phase": "Aprobación Inicial PAI", "status": "COMPLETED", "date": "09/2018", "timeframe": "Concluido", "uplift": "x1.25"},
+                    {"phase": "Aprobación Definitiva DOGV 8835", "status": "COMPLETED", "date": "06/2020", "timeframe": "Concluido", "uplift": "x1.85"},
+                    {"phase": "Inscripción Registro Propiedad", "status": "COMPLETED", "date": "12/2021", "timeframe": "Concluido", "uplift": "x2.40"},
                     {"phase": "Licencia Directa Construcción", "status": "CURRENT", "date": "10/2026", "timeframe": "1-3 meses", "uplift": "x3.00"}
                 ],
-                "description": "Aprobación definitiva de la revisión del Plan General en la franja del Grao. Suelo calificado de uso mixto residencial-terciario frente a la prolongación del antiguo cauce del Río Turia."
+                "description": "Publicación en DOGV Núm. 8835 del Plan de Actuación Integrada (PAI) del sector Grau. Ordenación pormenorizada del sector residencial-terciario junto a la prolongación del Río Turia."
             }
         ]
