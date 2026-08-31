@@ -815,11 +815,9 @@ def get_opportunities(
         from app.connectors.pgou_scraper import PGOUScraper
         from app.engine.meso_market_price import resolve_urbanization_cost_m2s
         pgou_scraper = PGOUScraper()
-        pgou_items = pgou_scraper.fetch_pgou_opportunities()
+        pgou_items = pgou_scraper.fetch_pgou_opportunities(province=province)
 
         for p_item in pgou_items:
-            if province and province.lower() not in p_item.get("province", "").lower():
-                continue
             listing_p = p_item.get("listing_price", 0.0)
             surf = p_item.get("surface_m2", 1.0)
             buildability = p_item.get("buildability_m2", 0.0)
@@ -866,16 +864,16 @@ def get_opportunities(
 
             p_item["avg_household_income"] = census_data.get("avg_household_income", 34100)
             p_item["avg_person_income"] = census_data.get("avg_person_income", 15800)
-            p_item["population_growth_rate"] = census_data.get("population_growth_rate", 2.1)
+            p_item["population_growth_rate"] = census_data.get("population_growth_rate", 3.2)
 
             p_item["potential_gross_profit"] = round(est_val - listing_p, 2)
             p_item["property_m2_price"] = round(listing_p / surf, 2) if surf > 0 else 0.0
             p_item["area_m2_price"] = area_m2_price
-            p_item["area_m2_price_source"] = "PGOU_GAZETTE"
-            p_item["area_m2_price_label"] = p_item.get("gazette_source", "Boletín Oficial")
+            p_item["area_m2_price_source"] = "PGOU_MUNICIPAL"
+            p_item["area_m2_price_label"] = p_item.get("gazette_source", "Planeamiento Municipal")
             p_item["price_ref_level"] = "MESO"
             p_item["price_ref_level_label"] = p_item.get("planning_status", "PGOU")
-            p_item["boe_url"] = p_item.get("gazette_url", "")
+            p_item["boe_url"] = None
             results.append(p_item)
     except Exception as e_pgou:
         print(f"Error cargando oportunidades PGOU: {e_pgou}")

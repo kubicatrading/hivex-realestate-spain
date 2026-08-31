@@ -637,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 dateSubastaHeader = `
                     <div style="font-size: 0.76rem; color: #c084fc; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                        <i data-lucide="scroll" style="width: 12px; height: 12px; display: inline;"></i> Publicación: <strong>${escapeHtml(opp.gazette_code || opp.gazette_source || 'Boletín Oficial')}</strong>
+                        <i data-lucide="layers" style="width: 12px; height: 12px; display: inline;"></i> Ámbito: <strong>${escapeHtml(opp.gazette_code || opp.planning_status || 'Planeamiento Urbanístico')}</strong>
                     </div>
                 `;
 
@@ -754,9 +754,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <button class="btn btn-secondary btn-xs" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                                     <i data-lucide="eye" style="width: 12px; height: 12px;"></i> Ficha
                                 </button>
+                                ${opp.source_type === 'pgou' ? '' : `
                                 <a href="${actionBtnUrl}" target="_blank" rel="noopener" class="btn-boe-xs" onclick="event.stopPropagation();">
                                     ${actionBtnLabel} <i data-lucide="external-link" style="width: 11px; height: 11px;"></i>
                                 </a>
+                                `}
                             </div>
                         </div>
                     </div>
@@ -807,13 +809,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let extBtnUrlModal = opp.boe_url || opp.gazette_url || '#';
 
         if (opp.source_type === 'pgou') {
-            extBtnLabelModal = `Abrir Publicación (${opp.gazette_code || (opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'Boletín Oficial')})`;
-            extBtnUrlModal = opp.gazette_url || opp.boe_url || '#';
-
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: #c084fc; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
-                    <i data-lucide="scroll" style="width: 15px; height: 15px; color: #c084fc;"></i>
-                    <span>Publicación Oficial: <strong>${escapeHtml(opp.gazette_code || opp.gazette_source || 'Boletín Oficial')}</strong> ${opp.gazette_date ? `<span style="color:#94a3b8; font-size: 0.8rem;">(${escapeHtml(opp.gazette_date)})</span>` : ''}</span>
+                    <i data-lucide="layers" style="width: 15px; height: 15px; color: #c084fc;"></i>
+                    <span>Ámbito / Expediente: <strong>${escapeHtml(opp.gazette_code || opp.planning_status || 'Planeamiento Urbanístico')}</strong></span>
                 </div>
             `;
 
@@ -1086,13 +1085,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 ${liensDetailHtml}
 
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border);">
+                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border);">
                     <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
                         <i data-lucide="x"></i> Cerrar Ventana
                     </button>
-                    <a href="${extBtnUrlModal}" target="_blank" rel="noopener" class="btn btn-primary" style="${opp.source_type === 'pgou' ? 'background: linear-gradient(135deg, #a855f7 0%, #10b981 100%); border: none;' : ''}">
+                    ${opp.source_type === 'pgou' ? '' : `
+                    <a href="${extBtnUrlModal}" target="_blank" rel="noopener" class="btn btn-primary">
                         <i data-lucide="external-link"></i> ${escapeHtml(extBtnLabelModal)}
                     </a>
+                    `}
                 </div>
             </div>
         `;
