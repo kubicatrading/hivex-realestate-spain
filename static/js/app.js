@@ -373,9 +373,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Update Tab Badges for Opportunity Sources
-    function updateTabBadges(opps) {
-        const subastasCount = opps.filter(o => (o.source_type || 'subastas') === 'subastas').length;
-        const pgouCount = opps.filter(o => o.source_type === 'pgou').length;
+    // Update Tab Badges for Opportunity Sources (Subastas counts active discount filter; PGOU ignores discount filter)
+    function updateTabBadges() {
+        const q = (state.searchQuery || '').trim().toLowerCase();
+
+        const subastasCount = state.allOpportunities.filter(o => {
+            const isSub = (o.source_type || 'subastas') === 'subastas';
+            if (!isSub) return false;
+            if (state.currentStrategy !== 'ALL' && o.strategy !== state.currentStrategy) return false;
+            if ((o.discount_percentage / 100) < state.minDiscount) return false;
+            if (q !== '') {
+                const title = (o.title || '').toLowerCase();
+                const prov = (o.province || '').toLowerCase();
+                const loc = (o.locality || '').toLowerCase();
+                if (!title.includes(q) && !prov.includes(q) && !loc.includes(q)) return false;
+            }
+            return true;
+        }).length;
+
+        const pgouCount = state.allOpportunities.filter(o => {
+            const isPgou = o.source_type === 'pgou';
+            if (!isPgou) return false;
+            if (state.currentStrategy !== 'ALL' && o.strategy !== state.currentStrategy) return false;
+            if (q !== '') {
+                const title = (o.title || '').toLowerCase();
+                const prov = (o.province || '').toLowerCase();
+                const loc = (o.locality || '').toLowerCase();
+                if (!title.includes(q) && !prov.includes(q) && !loc.includes(q)) return false;
+            }
+            return true;
+        }).length;
         
         const badgeSub = document.getElementById('badge-subastas-count');
         const badgePgou = document.getElementById('badge-pgou-count');
@@ -437,10 +464,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.currentStrategy !== 'ALL' && opp.strategy !== state.currentStrategy) {
                 return false;
             }
-            // Discount Filter
-            const discDecimal = opp.discount_percentage / 100;
-            if (discDecimal < state.minDiscount) {
-                return false;
+            // Discount Filter (Only for Subastas; PGOU ignores auction discount filter)
+            if (oppSource === 'subastas') {
+                const discDecimal = opp.discount_percentage / 100;
+                if (discDecimal < state.minDiscount) {
+                    return false;
+                }
             }
             // Search Query Filter
             if (state.searchQuery.trim() !== '') {
@@ -455,8 +484,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         });
 
+        updateTabBadges();
         const activeTotal = state.allOpportunities.filter(o => (o.source_type || 'subastas') === state.activeSource).length;
-        filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${activeTotal} oportunidades`;
+        if (filteredCount) {
+            filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${activeTotal} oportunidades`;
+        }
         renderDeals(state.filteredOpportunities);
         renderMapMarkers(state.filteredOpportunities);
     }
@@ -656,8 +688,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
                     <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
-                            <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                            <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                            ${opp.source_type === 'pgou' ? '' : `
+                                <span class="badge-strategy ${stratClass}">${stratLabel}</span>
+                                <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                            `}
                         </div>
                     </div>
 
