@@ -542,18 +542,19 @@ def get_opportunities(
 
         opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
 
-        # Si la base de datos PostgreSQL tiene menos de 107 oportunidades, poblar/sincronizar automáticamente todas
-        if not opportunities or len(opportunities) < 107:
+        # Si la base de datos no tiene oportunidades, ejecutar el raspador BOE en tiempo real (100% datos reales)
+        if not opportunities:
             try:
                 from app.engine.scoring_engine import OpportunityScoringEngine
                 scraper_init = BOESubastasScraper()
-                raw_auctions = scraper_init.fetch_mock_auctions()
-                scoring_engine = OpportunityScoringEngine(db)
-                scoring_engine.process_and_score_auctions(raw_auctions)
-                db.commit()
-                opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+                raw_auctions = scraper_init.scrape_live_auctions(limit=50)
+                if raw_auctions:
+                    scoring_engine = OpportunityScoringEngine(db)
+                    scoring_engine.process_and_score_auctions(raw_auctions)
+                    db.commit()
+                    opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
             except Exception as e_seed:
-                print(f"Error poblando base de datos inicial: {e_seed}")
+                print(f"Error poblando subastas BOE en tiempo real: {e_seed}")
 
         scraper = BOESubastasScraper()
         for opp in opportunities:

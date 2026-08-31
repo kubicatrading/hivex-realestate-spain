@@ -603,6 +603,7 @@ class BOESubastasScraper:
                         cat_url = f"https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX={lon-d},{lat-d},{lon+d},{lat+d}&WIDTH=800&HEIGHT=600"
                         images.append(cat_url)
 
+                    desc_lower = desc.lower()
                     ptype = "Solar" if any(w in desc_lower for w in ["solar", "terreno", "parcela", "finca rústica", "rustica", "suelo"]) else "Vivienda"
 
                     item = {

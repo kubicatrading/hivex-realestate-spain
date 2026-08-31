@@ -33,8 +33,11 @@ class KPICalculator:
         Para House Flipping: Superficie * Precio Referencia m2
         Para Land/Solar: Superficie parcelaria * Precio Suelo m2 (edificabilidad)
         """
-        if surface_m2 <= 0:
+        if not surface_m2 or surface_m2 <= 0:
             surface_m2 = 90.0 # Fallback estándar vivienda en España
+
+        if not reference_price_m2 or reference_price_m2 <= 0:
+            reference_price_m2 = 1850.0 # Fallback precio medio España m2
 
         if strategy == StrategyType.LAND_DEVELOPMENT:
             # En suelo se aplica ratio de repercusión de edificabilidad habitual (~1.1 a 1.25)
