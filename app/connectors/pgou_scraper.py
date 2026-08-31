@@ -48,26 +48,26 @@ class PGOUScraper:
                     "avg_person_income": 16200,
                     "area_m2_price": 2800.0
                 },
-                "planning_status": "Aprobación Definitiva PGOU",
+                "planning_status": "Proyecto de Urbanización Aprobado",
                 "gazette_source": "BOCM (Boletín Oficial de la Comunidad de Madrid)",
-                "gazette_code": "BOCM-20260815-14",
-                "gazette_date": "2026-08-15",
-                "gazette_url": "https://www.bocm.es/bocm-20260815-14",
+                "gazette_code": "BOCM-20230530-127",
+                "gazette_date": "2023-05-30",
+                "gazette_url": "https://www.bocm.es/boletin/bocm-20230530-127",
                 "buildability_m2": 52000.0,
                 "proposed_land_use": "Residencial VPA / VPPO (1.2 m²t/m²s)",
                 "proposed_land_use_type": "RESIDENCIAL_VPA",
                 "urbanization_cost_m2s": 65.0,
                 "total_urbanization_cost": 2925000.0,
                 "land_repercussion_m2t": 80.29, # (1250000 + 2925000) / 52000
-                "reparcelacion_status": "🟢 Junta de Compensación Constituida & Reparcelación Inscrita en Registro de la Propiedad (Fincas Resultado Finalistas)",
+                "reparcelacion_status": "🟢 Junta de Compensación Constituida & Reparcelación Inscrita en Registro de la Propiedad (BOCM Núm. 16, 19/01/2023)",
                 "reparcelacion_verified_free": True,
                 "milestones": [
-                    {"phase": "Aprobación Inicial PGOU", "status": "COMPLETED", "date": "10/2024", "timeframe": "Concluido", "uplift": "x1.25"},
-                    {"phase": "Aprobación Definitiva (BOCM)", "status": "COMPLETED", "date": "08/2026", "timeframe": "Concluido", "uplift": "x1.85"},
-                    {"phase": "Inscripción Proyecto Reparcelación", "status": "CURRENT", "date": "12/2026", "timeframe": "3-6 meses", "uplift": "x2.40"},
-                    {"phase": "Licencia Directa / Obra Nueva", "status": "PENDING", "date": "06/2027", "timeframe": "9-12 meses", "uplift": "x3.00"}
+                    {"phase": "Aprobación Reparcelación (BOCM 16)", "status": "COMPLETED", "date": "01/2023", "timeframe": "Concluido", "uplift": "x1.25"},
+                    {"phase": "Aprobación Urbanización (BOCM 127)", "status": "COMPLETED", "date": "05/2023", "timeframe": "Concluido", "uplift": "x1.85"},
+                    {"phase": "Simultaneidad de Obras", "status": "CURRENT", "date": "06/2024", "timeframe": "En curso", "uplift": "x2.40"},
+                    {"phase": "Licencia Directa / Obra Nueva", "status": "PENDING", "date": "12/2026", "timeframe": "3-6 meses", "uplift": "x3.00"}
                 ],
-                "description": "Aprobación definitiva de Modificación Puntual de PGOU para la delimitación y ordenación detallada de la Etapa 3 del Sector S-14. Cesiones gratuitas fijadas del 10% y proyecto de urbanización con visto bueno municipal. Alta rentabilidad proyectada."
+                "description": "Aprobación definitiva del Proyecto de Urbanización del Ámbito UZPp 02.04 'Desarrollo del Este-Los Berrocales' (Expediente municipal 714/2003/03039, Presupuesto total: 782,8 M€). Publicado en el BOCM Núm. 127 de 30 de mayo de 2023."
             },
             {
                 "id": "PGOU-BCN-2026-002",
