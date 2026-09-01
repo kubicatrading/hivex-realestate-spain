@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "hivex_realestate"
-    DATABASE_URL: str = "postgresql://postgres:hivex1234%23@db.wxoctzvzmkavkmjwtnux.supabase.co:5432/postgres"
+    DATABASE_URL: str = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
