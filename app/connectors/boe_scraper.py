@@ -47,6 +47,9 @@ def parse_spanish_written_number(words_str: str) -> Optional[float]:
     res = float(total + current)
     return res if res > 0 else None
 
+import os
+import certifi
+
 class BOESubastasScraper:
     """
     Scraper & Parser para el Portal de Subastas del BOE (Boletín Oficial del Estado).
@@ -56,13 +59,18 @@ class BOESubastasScraper:
     SEARCH_URL = "https://subastas.boe.es/subastas_buscar.php"
 
     def __init__(self, timeout: float = 15.0):
-        self.client = httpx.Client(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            },
-            timeout=timeout,
-            follow_redirects=True
-        )
+        try:
+            ca_bundle = certifi.where() if os.path.exists(certifi.where()) else True
+            self.client = httpx.Client(
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                },
+                timeout=timeout,
+                verify=ca_bundle,
+                follow_redirects=True
+            )
+        except Exception:
+            self.client = None
 
     def extract_cadastral_reference(self, text: str) -> Optional[str]:
         """

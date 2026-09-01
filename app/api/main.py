@@ -1,4 +1,14 @@
 import os
+import certifi
+
+# Sanitize SSL environment
+if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+elif "SSL_CERT_FILE" not in os.environ and os.path.exists(certifi.where()):
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"]):
+    del os.environ["SSL_CERT_DIR"]
+
 import time
 from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
@@ -478,15 +488,22 @@ def get_sources_status(current_user: Optional[dict] = Depends(get_current_user_o
     }
 
 async def _run_background_pipeline():
-    """Ejecuta la captura de subastas e ingesta en segundo plano."""
+    """Ejecuta la captura de subastas e ingesta de PGOU en segundo plano."""
     try:
         from app.db.session import SessionLocal
         db = SessionLocal()
+        
+        # 1. Ingesta y cálculo de Subastas BOE
         scraper = BOESubastasScraper()
         raw_auctions = await scraper.async_scrape_live_auctions(limit=None)
         
         scoring_engine = OpportunityScoringEngine(db_session=db)
         opportunities = scoring_engine.process_and_score_auctions(raw_auctions)
+
+        # 2. Ingesta y actualización de Desarrollos PGOU en boletines oficiales
+        from app.connectors.pgou_scraper import PGOUScraper
+        pgou_scraper = PGOUScraper()
+        pgou_items = pgou_scraper.fetch_pgou_opportunities()
 
         notifier = TelegramNotifier()
         alerts_sent = 0
@@ -498,7 +515,7 @@ async def _run_background_pipeline():
 
         db.commit()
         db.close()
-        print(f"Pipeline en segundo plano completado: {len(raw_auctions)} subastas procesadas, {len(opportunities)} oportunidades.")
+        print(f"Pipeline en segundo plano completado: {len(raw_auctions)} subastas procesadas, {len(opportunities)} oportunidades calificadas, {len(pgou_items)} sectores PGOU actualizados.")
     except Exception as e:
         print(f"Error ejecutando pipeline en segundo plano: {e}")
 
@@ -506,11 +523,11 @@ async def _run_background_pipeline():
 async def trigger_ingestion_pipeline(
     background_tasks: BackgroundTasks
 ):
-    """Ejecuta la captura de subastas reales y actualización de oportunidades en segundo plano de forma silenciosa."""
+    """Ejecuta la captura de subastas reales y planeamientos PGOU en segundo plano de forma silenciosa."""
     background_tasks.add_task(_run_background_pipeline)
     return {
         "status": "processing",
-        "message": "Escáner de subastas en vivo activado en segundo plano de forma silenciosa."
+        "message": "Escáner en vivo de Subastas BOE y Desarrollos PGOU activado en segundo plano."
     }
 
 @app.get("/api/v1/opportunities")
@@ -520,6 +537,10 @@ def get_opportunities(
     min_discount: Optional[float] = Query(None, ge=0.0, le=100.0),
     province: Optional[str] = None,
     source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas' o 'pgou'"),
+    bbox: Optional[str] = Query(None, description="Cuadrante visible BBOX: min_lat,min_lon,max_lat,max_lon"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Límite de resultados por página"),
+    page: int = Query(1, ge=1, description="Número de página para paginación"),
+    offset: Optional[int] = Query(None, ge=0, description="Offset de resultados"),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
@@ -540,7 +561,7 @@ def get_opportunities(
         if province:
             query = query.filter(Auction.province.ilike(f"%{province}%"))
 
-        opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+        opportunities = query.all()
 
         # Si la base de datos no tiene oportunidades, ejecutar el raspador BOE en tiempo real (100% datos reales)
         if not opportunities:
@@ -552,262 +573,267 @@ def get_opportunities(
                     scoring_engine = OpportunityScoringEngine(db)
                     scoring_engine.process_and_score_auctions(raw_auctions)
                     db.commit()
-                    opportunities = query.order_by(Opportunity.discount_percentage.desc()).all()
+                    opportunities = query.all()
             except Exception as e_seed:
                 print(f"Error poblando subastas BOE en tiempo real: {e_seed}")
 
         scraper = BOESubastasScraper()
+        ine_client = INEClient()
+        from app.engine.kpi_calculator import KPICalculator
+        from app.core.geo_utils import get_spanish_province_coords, normalize_text
+        import json
+
         for opp in opportunities:
-            auc = opp.auction
-            if auc and BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or ""):
-                continue
+            try:
+                auc = opp.auction
+                if auc and BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or ""):
+                    continue
 
-            # Auto-sync description for Calle Tejedores 21 in DB if description is abbreviated in PostgreSQL
-            if auc and (auc.id_subasta == 'SUB-JA-2026-263868' or 'tejedores' in (auc.address or '').lower()):
-                if "32,00 m2" not in (auc.description or ""):
-                    auc.description = "CIENTO DIECIOCHO.- LOCAL COMERCIAL LC-3, situado en planta baja del portal número 21 de la calle Tejedores, San Blas, término municipal de Madrid. Tiene una superficie construida de treinta y dos metros cuadrados -32,00 m2- y una superficie útil de veintitrés metros cuarenta decímetros cuadrados -23,40 m2-. LINDA: al FRENTE, por donde tiene su entrada, con calle Alberique; por la DERECHA, entrando, con vivienda derecha de su misma planta y portal 19; por la IZQUIERDA, entrando, con paso peatonal; y por el FONDO con calle de su situación. CUOTA: Se le asigna una cuotas de participación en el valor total y elementos comunes del bloque al que pertenece de cero enteros veintiuna centésimas por ciento -0,21%-, y una cuotas de participación en los gastos del portal al que pertenece de cuatro enteros sesenta y tres centésimas por ciento -4,63%."
-                    auc.refcat = '7657111VK4775F0003PR'
+                # Auto-sync description for Calle Tejedores 21 in DB if description is abbreviated in PostgreSQL
+                if auc and (auc.id_subasta == 'SUB-JA-2026-263868' or 'tejedores' in (auc.address or '').lower()):
+                    if "32,00 m2" not in (auc.description or ""):
+                        auc.description = "CIENTO DIECIOCHO.- LOCAL COMERCIAL LC-3, situado en planta baja del portal número 21 de la calle Tejedores, San Blas, término municipal de Madrid. Tiene una superficie construida de treinta y dos metros cuadrados -32,00 m2- y una superficie útil de veintitrés metros cuarenta decímetros cuadrados -23,40 m2-. LINDA: al FRENTE, por donde tiene su entrada, con calle Alberique; por la DERECHA, entrando, con vivienda derecha de su misma planta y portal 19; por la IZQUIERDA, entrando, con paso peatonal; y por el FONDO con calle de su situación. CUOTA: Se le asigna una cuotas de participación en el valor total y elementos comunes del bloque al que pertenece de cero enteros veintiuna centésimas por ciento -0,21%-, y una cuotas de participación en los gastos del portal al que pertenece de cuatro enteros sesenta y tres centésimas por ciento -4,63%."
+                        auc.refcat = '7657111VK4775F0003PR'
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+
+                strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
+                
+                # Extract coordinates from lat/lon fields, geometry, or fallback by province/locality
+                lat, lon = None, None
+                if auc and auc.lat is not None and auc.lon is not None:
+                    lat, lon = auc.lat, auc.lon
+                elif auc and auc.location:
                     try:
-                        db.commit()
+                        point = to_shape(auc.location)
+                        lat, lon = point.y, point.x
                     except Exception:
-                        db.rollback()
-
-            strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
-            
-            # Extract coordinates from lat/lon fields, geometry, or fallback by province/locality
-            from app.core.geo_utils import get_spanish_province_coords, normalize_text
-            lat, lon = None, None
-            if auc and auc.lat is not None and auc.lon is not None:
-                lat, lon = auc.lat, auc.lon
-            elif auc and auc.location:
-                try:
-                    point = to_shape(auc.location)
-                    lat, lon = point.y, point.x
-                except Exception:
-                    pass
-            
-            base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
-            
-            # Check if lat/lon is missing or is significantly mismatched from the actual province center (> 40km away)
-            mismatch = False
-            if lat is not None and lon is not None:
-                if abs(lat - base_lat) > 0.4 or abs(lon - base_lon) > 0.4:
-                    mismatch = True
-
-            if (not lat or not lon) or mismatch:
-                # Deterministic micro-jitter based on auction ID to prevent overlapping pins
-                seed_val = (hash(auc.id_subasta if auc else "") % 1000) / 10000.0
-                lat = round(base_lat + (seed_val - 0.05), 6)
-                lon = round(base_lon + (seed_val - 0.05), 6)
-
-            # Parse stored JSON images list (excluding legacy Catastro Ortofoto URLs)
-            import json
-            images_list = []
-            if auc and auc.images_json:
-                try:
-                    raw_images = json.loads(auc.images_json)
-                    images_list = [img for img in raw_images if isinstance(img, str) and "catastro" not in img.lower() and "cartografia/wms" not in img.lower()]
-                except Exception:
-                    images_list = []
-
-            # Address formatting
-            address_str = auc.address if (auc and auc.address) else ""
-            locality_str = auc.locality if (auc and auc.locality) else ""
-            province_str = auc.province if (auc and auc.province) else ""
-            
-            full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
-            full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
-
-            # Financial metrics calculation: Strictly take "Valor subasta" literal from BOE
-            starting_bid_val = auc.starting_bid if (auc and auc.starting_bid and auc.starting_bid > 0) else 0.0
-            appraisal_val = auc.appraisal_value if (auc and auc.appraisal_value and auc.appraisal_value > 0) else 0.0
-
-            # "Valor subasta" literal de la ficha del BOE (NO SIMULATED 100.000 € FALLBACK)
-            if starting_bid_val > 0:
-                property_ref_value = starting_bid_val
-            elif appraisal_val > 0:
-                property_ref_value = appraisal_val
-            elif opp.listing_price and opp.listing_price > 0:
-                property_ref_value = opp.listing_price
-            else:
-                property_ref_value = 0.0
-
-            surface_m2 = None
-            desc_text = (auc.description or "") + " " + (auc.title or "") if auc else ""
-            ownership_pct = scraper.extract_ownership_percentage(desc_text)
-            parsed_text_m2 = scraper.extract_surface_m2(desc_text)
-
-            refcat = auc.refcat if (auc and auc.refcat) else None
-            if not refcat:
-                refcat = scraper.extract_cadastral_reference(desc_text)
-
-            # Module 2: CRU / Finca Registral / Address resolution to Cadastral Reference
-            if not refcat and full_address and locality_str:
-                try:
-                    resolved_rc = CatastroClient().resolve_refcat_from_address_or_cru(full_address, locality_str, province_str)
-                    if resolved_rc:
-                        refcat = resolved_rc
-                        if auc:
-                            auc.refcat = resolved_rc
-                except Exception:
-                    pass
-
-            # Priority 1: Edict/BOE text surface parsing (Extracts exact unit surface being auctioned, e.g. 32 m² vs plot footprint)
-            if parsed_text_m2 and parsed_text_m2 > 0:
-                surface_m2 = round(parsed_text_m2, 2)
-            # Priority 2: DB Persisted parcel surface fallback
-            elif auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
-                surface_m2 = round(float(auc.parcel.surface_m2), 2)
-
-            # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
-            if auc and auc.parcel and auc.parcel.land_use:
-                land_type = "RÚSTICO" if "RUSTICO" in auc.parcel.land_use.upper() or "AGRARIO" in auc.parcel.land_use.upper() else "URBANO"
-            elif refcat:
-                land_type = CatastroClient.detect_land_type_from_catastro(None, refcat)
-            elif "RUSTICO" in desc_text.upper() or "AGRARIO" in desc_text.upper():
-                land_type = "RÚSTICO"
-            else:
-                land_type = "URBANO"
-
-            # Determine strategy / property tipology for 2x2 Matrix X-axis
-            is_solar = (strategy_val == "LAND_DEVELOPMENT") or any(kw in (auc.property_type or "").lower() or kw in desc_text.lower() for kw in ["solar", "terreno", "parcela", "suelo"])
-
-            # --- TWO-TIER PRICE LEVEL HIERARCHY ---
-            # Tier 1: Referencia MICRO (Fincas Catastro)
-            micro_price = None
-            if auc and auc.parcel and auc.parcel.reference_price_m2 and auc.parcel.reference_price_m2 > 0:
-                micro_price = float(auc.parcel.reference_price_m2)
-
-            # Tier 2: Referencia MESO 2x2 (Barrio / CP / Municipio / Provincia MIVAU/INE)
-            meso_price, meso_source, meso_label = resolve_meso_market_price_2x2(
-                province_str=province_str,
-                locality_str=locality_str,
-                full_address_str=full_address,
-                desc_text=desc_text,
-                land_type=land_type,
-                is_solar=is_solar
-            )
-
-            if micro_price and micro_price > 0:
-                area_m2_price = micro_price
-                price_ref_level = "MICRO"
-                price_ref_level_label = "Ref. Micro (Catastro Finca)"
-                area_m2_price_source = "MICRO"
-                area_m2_price_label = "Valor Finca Catastral"
-            else:
-                area_m2_price = meso_price
-                price_ref_level = "MESO"
-                price_ref_level_label = f"Ref. Meso ({meso_label})"
-                area_m2_price_source = meso_source
-                area_m2_price_label = meso_label
-
-            # Rule 5.3: Property price per m² (€/m²) adjusted by ownership percentage
-            effective_surface_m2 = round(surface_m2 * (ownership_pct / 100.0), 2) if (surface_m2 and surface_m2 > 0) else None
-            property_m2_price = round(property_ref_value / effective_surface_m2, 2) if (effective_surface_m2 and effective_surface_m2 > 0) else None
-
-            # Notarial Mortgage Appraisal Value & Valor Micro Est. calculation
-            extracted_notarial_val = scraper.extract_notarial_appraisal_value(desc_text)
-            notarial_appraisal_val = extracted_notarial_val if extracted_notarial_val else (appraisal_val if appraisal_val > 0 else starting_bid_val)
-            
-            if effective_surface_m2 and effective_surface_m2 > 0 and notarial_appraisal_val and notarial_appraisal_val > 0:
-                valor_micro_est = round(notarial_appraisal_val / effective_surface_m2, 2)
-            elif property_m2_price and property_m2_price > 0:
-                valor_micro_est = property_m2_price
-            else:
-                valor_micro_est = None
-
-            # Dynamic calculation of total estimated market value based on zone m² price and effective surface
-            if effective_surface_m2 and effective_surface_m2 > 0 and area_m2_price and area_m2_price > 0:
-                estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
-            else:
-                estimated_market_value = opp.estimated_reference_value or property_ref_value
-
-            potential_gross_profit = round(estimated_market_value - property_ref_value, 2) if (estimated_market_value and property_ref_value) else 0.0
-
-            # Discount calculation based on market value vs auction reference value
-            has_property_m2 = bool(property_m2_price and property_m2_price > 0)
-            if estimated_market_value and estimated_market_value > 0 and property_ref_value and property_ref_value > 0:
-                discount_m2_pct = round(((estimated_market_value - property_ref_value) / estimated_market_value) * 100, 2)
-            elif has_property_m2 and area_m2_price > 0:
-                discount_m2_pct = round(((area_m2_price - property_m2_price) / area_m2_price) * 100, 2)
-            else:
-                discount_m2_pct = 0.0
-
-            # INE Stats and Detailed Score Breakdown
-            ine_client = INEClient()
-            ine_stats = ine_client.get_census_section_stats(province_str, locality_str)
-            avg_household_income = ine_stats.get("avg_household_income", 32000.0)
-            avg_person_income = ine_stats.get("avg_person_income", 14500.0)
-            population_growth_rate = ine_stats.get("population_growth_rate", 1.8)
-
-            from app.engine.kpi_calculator import KPICalculator
-            discount_frac = (discount_m2_pct / 100.0) if discount_m2_pct > 0 else 0.0
-            detailed_scores = KPICalculator.calculate_detailed_scores(
-                discount_percentage=discount_frac,
-                poi_score=opp.poi_score or 75.0,
-                income_amount=avg_household_income,
-                population_growth=population_growth_rate,
-                has_property_m2_price=has_property_m2
-            )
-
-
-
-            results.append({
-                "id": opp.id,
-                "id_subasta": auc.id_subasta if auc else "N/A",
-                "strategy": strategy_val,
-                "title": auc.title if auc else "N/A",
-                "description": auc.description if auc else "",
-                "property_type": auc.property_type if (auc and auc.property_type) else "Vivienda",
-                "address": address_str,
-                "locality": locality_str,
-                "province": province_str,
-                "full_address": full_address,
-                "listing_price": opp.listing_price,
-                "appraisal_value": appraisal_val,
-                "starting_bid": starting_bid_val,
-                "property_ref_value": property_ref_value,
-                "notarial_appraisal_value": notarial_appraisal_val,
-                "valor_micro_est": valor_micro_est,
-                "surface_m2": surface_m2,
-                "effective_surface_m2": effective_surface_m2,
-                "ownership_percentage": ownership_pct,
-                "land_type": land_type,
-                "property_m2_price": property_m2_price,
-                "area_m2_price": area_m2_price,
-                "area_m2_price_source": area_m2_price_source,
-                "area_m2_price_label": area_m2_price_label,
-                "price_ref_level": price_ref_level,
-                "price_ref_level_label": price_ref_level_label,
-                "estimated_reference_value": estimated_market_value,
-                "discount_percentage": discount_m2_pct,
-                "potential_gross_profit": potential_gross_profit,
+                        pass
                 
-                # Detailed Scores Breakdown (2.1 - 2.7)
-                "avg_household_income": avg_household_income,
-                "avg_person_income": avg_person_income,
-                "population_growth_rate": population_growth_rate,
-                "income_score": detailed_scores["income_score"],
-                "demographic_score": detailed_scores["demographic_score"],
-                "poi_score": detailed_scores["poi_score"],
-                "discount_score": detailed_scores["discount_score"],
-                "overall_score": detailed_scores["overall_score"],
+                base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
                 
-                "lat": lat,
-                "lon": lon,
-                "auction_end_date": (auc.auction_end_date if (auc and auc.auction_end_date) else "15/09/2026 18:00h"),
-                "images": images_list,
-                "liens": scraper.extract_liens_info(desc_text, auc.id_subasta if auc else ""),
-                "urbanism": {
-                    "zoning_classification": (auc.zoning_classification if (auc and auc.zoning_classification) else "Suelo Urbano Consolidado (SUC)"),
-                    "urbanization_status": (auc.urbanization_status if (auc and auc.urbanization_status) else "Urbano Residencial / Ordenado (PGOU)"),
-                    "buildability_ratio": (auc.buildability_ratio if (auc and auc.buildability_ratio) else "1.8 m²t/m²s"),
-                    "permitted_uses": (auc.permitted_uses if (auc and auc.permitted_uses) else "Residencial / Comercial")
-                },
-                "source_type": "subastas",
-                "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
-            })
+                # Check if lat/lon is missing or is significantly mismatched from the actual province center (> 40km away)
+                mismatch = False
+                if lat is not None and lon is not None:
+                    if abs(lat - base_lat) > 0.4 or abs(lon - base_lon) > 0.4:
+                        mismatch = True
+
+                if (not lat or not lon) or mismatch:
+                    # Deterministic micro-jitter based on auction ID to prevent overlapping pins
+                    seed_val = (hash(auc.id_subasta if auc else "") % 1000) / 10000.0
+                    lat = round(base_lat + (seed_val - 0.05), 6)
+                    lon = round(base_lon + (seed_val - 0.05), 6)
+
+                # Parse stored JSON images list (excluding legacy Catastro Ortofoto URLs)
+                images_list = []
+                if auc and auc.images_json:
+                    try:
+                        raw_images = json.loads(auc.images_json)
+                        images_list = [img for img in raw_images if isinstance(img, str) and "catastro" not in img.lower() and "cartografia/wms" not in img.lower()]
+                    except Exception:
+                        images_list = []
+
+                # Address formatting
+                address_str = auc.address if (auc and auc.address) else ""
+                locality_str = auc.locality if (auc and auc.locality) else ""
+                province_str = auc.province if (auc and auc.province) else ""
+                
+                full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
+                full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
+
+                # Financial metrics calculation: Strictly take "Valor subasta" literal from BOE
+                starting_bid_val = auc.starting_bid if (auc and auc.starting_bid and auc.starting_bid > 0) else 0.0
+                appraisal_val = auc.appraisal_value if (auc and auc.appraisal_value and auc.appraisal_value > 0) else 0.0
+
+                # "Valor subasta" literal de la ficha del BOE (NO SIMULATED 100.000 € FALLBACK)
+                if starting_bid_val > 0:
+                    property_ref_value = starting_bid_val
+                elif appraisal_val > 0:
+                    property_ref_value = appraisal_val
+                elif opp.listing_price and opp.listing_price > 0:
+                    property_ref_value = opp.listing_price
+                else:
+                    property_ref_value = 0.0
+
+                surface_m2 = None
+                desc_text = (auc.description or "") + " " + (auc.title or "") if auc else ""
+                ownership_pct = scraper.extract_ownership_percentage(desc_text)
+                parsed_text_m2 = scraper.extract_surface_m2(desc_text)
+
+                refcat = auc.refcat if (auc and auc.refcat) else None
+                if not refcat:
+                    refcat = scraper.extract_cadastral_reference(desc_text)
+
+                # Module 2: CRU / Finca Registral / Address resolution to Cadastral Reference
+                if not refcat and full_address and locality_str:
+                    try:
+                        resolved_rc = CatastroClient().resolve_refcat_from_address_or_cru(full_address, locality_str, province_str)
+                        if resolved_rc:
+                            refcat = resolved_rc
+                            if auc:
+                                auc.refcat = resolved_rc
+                    except Exception:
+                        pass
+
+                # Priority 1: Edict/BOE text surface parsing (Extracts exact unit surface being auctioned, e.g. 32 m² vs plot footprint)
+                if parsed_text_m2 and parsed_text_m2 > 0:
+                    surface_m2 = round(parsed_text_m2, 2)
+                # Priority 2: DB Persisted parcel surface fallback
+                elif auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
+                    surface_m2 = round(float(auc.parcel.surface_m2), 2)
+
+                # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
+                if auc and auc.parcel and auc.parcel.land_use:
+                    land_type = "RÚSTICO" if "RUSTICO" in auc.parcel.land_use.upper() or "AGRARIO" in auc.parcel.land_use.upper() else "URBANO"
+                elif refcat:
+                    land_type = CatastroClient.detect_land_type_from_catastro(None, refcat)
+                elif "RUSTICO" in desc_text.upper() or "AGRARIO" in desc_text.upper():
+                    land_type = "RÚSTICO"
+                else:
+                    land_type = "URBANO"
+
+                # Determine strategy / property tipology for 2x2 Matrix X-axis
+                is_solar = (strategy_val == "LAND_DEVELOPMENT") or any(kw in (auc.property_type or "").lower() or kw in desc_text.lower() for kw in ["solar", "terreno", "parcela", "suelo"])
+
+                # --- TWO-TIER PRICE LEVEL HIERARCHY ---
+                # Tier 1: Referencia MICRO (Fincas Catastro)
+                micro_price = None
+                if auc and auc.parcel and auc.parcel.reference_price_m2 and auc.parcel.reference_price_m2 > 0:
+                    micro_price = float(auc.parcel.reference_price_m2)
+
+                # Tier 2: Referencia MESO 2x2 (Barrio / CP / Municipio / Provincia MIVAU/INE)
+                meso_price, meso_source, meso_label = resolve_meso_market_price_2x2(
+                    province_str=province_str,
+                    locality_str=locality_str,
+                    full_address_str=full_address,
+                    desc_text=desc_text,
+                    land_type=land_type,
+                    is_solar=is_solar
+                )
+
+                if micro_price and micro_price > 0:
+                    area_m2_price = micro_price
+                    price_ref_level = "MICRO"
+                    price_ref_level_label = "Ref. Micro (Catastro Finca)"
+                    area_m2_price_source = "MICRO"
+                    area_m2_price_label = "Valor Finca Catastral"
+                else:
+                    area_m2_price = meso_price
+                    price_ref_level = "MESO"
+                    price_ref_level_label = f"Ref. Meso ({meso_label})"
+                    area_m2_price_source = meso_source
+                    area_m2_price_label = meso_label
+
+                # Rule 5.3: Property price per m² (€/m²) adjusted by ownership percentage
+                effective_surface_m2 = round(surface_m2 * (ownership_pct / 100.0), 2) if (surface_m2 and surface_m2 > 0) else None
+                property_m2_price = round(property_ref_value / effective_surface_m2, 2) if (effective_surface_m2 and effective_surface_m2 > 0) else None
+
+                # Notarial Mortgage Appraisal Value & Valor Micro Est. calculation
+                extracted_notarial_val = scraper.extract_notarial_appraisal_value(desc_text)
+                notarial_appraisal_val = extracted_notarial_val if extracted_notarial_val else (appraisal_val if appraisal_val > 0 else starting_bid_val)
+                
+                if effective_surface_m2 and effective_surface_m2 > 0 and notarial_appraisal_val and notarial_appraisal_val > 0:
+                    valor_micro_est = round(notarial_appraisal_val / effective_surface_m2, 2)
+                elif property_m2_price and property_m2_price > 0:
+                    valor_micro_est = property_m2_price
+                else:
+                    valor_micro_est = None
+
+                # Dynamic calculation of total estimated market value based on zone m² price and effective surface
+                if effective_surface_m2 and effective_surface_m2 > 0 and area_m2_price and area_m2_price > 0:
+                    estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
+                else:
+                    estimated_market_value = opp.estimated_reference_value or property_ref_value
+
+                potential_gross_profit = round(estimated_market_value - property_ref_value, 2) if (estimated_market_value and property_ref_value) else 0.0
+
+                # Discount calculation based on market value vs auction reference value
+                has_property_m2 = bool(property_m2_price and property_m2_price > 0)
+                if estimated_market_value and estimated_market_value > 0 and property_ref_value and property_ref_value > 0:
+                    discount_m2_pct = round(((estimated_market_value - property_ref_value) / estimated_market_value) * 100, 2)
+                elif has_property_m2 and area_m2_price > 0:
+                    discount_m2_pct = round(((area_m2_price - property_m2_price) / area_m2_price) * 100, 2)
+                else:
+                    discount_m2_pct = 0.0
+
+                # INE Stats and Detailed Score Breakdown
+                ine_stats = ine_client.get_census_section_stats(province_str, locality_str)
+                avg_household_income = ine_stats.get("avg_household_income", 32000.0)
+                avg_person_income = ine_stats.get("avg_person_income", 14500.0)
+                population_growth_rate = ine_stats.get("population_growth_rate", 1.8)
+
+                discount_frac = (discount_m2_pct / 100.0) if discount_m2_pct > 0 else 0.0
+                detailed_scores = KPICalculator.calculate_detailed_scores(
+                    discount_percentage=discount_frac,
+                    poi_score=opp.poi_score or 75.0,
+                    income_amount=avg_household_income,
+                    population_growth=population_growth_rate,
+                    has_property_m2_price=has_property_m2
+                )
+
+                results.append({
+                    "id": opp.id,
+                    "id_subasta": auc.id_subasta if auc else "N/A",
+                    "strategy": strategy_val,
+                    "title": auc.title if auc else "N/A",
+                    "description": auc.description if auc else "",
+                    "property_type": auc.property_type if (auc and auc.property_type) else "Vivienda",
+                    "address": address_str,
+                    "locality": locality_str,
+                    "province": province_str,
+                    "full_address": full_address,
+                    "listing_price": opp.listing_price,
+                    "appraisal_value": appraisal_val,
+                    "starting_bid": starting_bid_val,
+                    "property_ref_value": property_ref_value,
+                    "notarial_appraisal_value": notarial_appraisal_val,
+                    "valor_micro_est": valor_micro_est,
+                    "surface_m2": surface_m2,
+                    "effective_surface_m2": effective_surface_m2,
+                    "ownership_percentage": ownership_pct,
+                    "land_type": land_type,
+                    "property_m2_price": property_m2_price,
+                    "area_m2_price": area_m2_price,
+                    "area_m2_price_source": area_m2_price_source,
+                    "area_m2_price_label": area_m2_price_label,
+                    "price_ref_level": price_ref_level,
+                    "price_ref_level_label": price_ref_level_label,
+                    "estimated_reference_value": estimated_market_value,
+                    "discount_percentage": discount_m2_pct,
+                    "potential_gross_profit": potential_gross_profit,
+                    
+                    # Detailed Scores Breakdown (2.1 - 2.7)
+                    "avg_household_income": avg_household_income,
+                    "avg_person_income": avg_person_income,
+                    "population_growth_rate": population_growth_rate,
+                    "income_score": detailed_scores["income_score"],
+                    "demographic_score": detailed_scores["demographic_score"],
+                    "poi_score": detailed_scores["poi_score"],
+                    "discount_score": detailed_scores["discount_score"],
+                    "overall_score": detailed_scores["overall_score"],
+                    
+                    "lat": lat,
+                    "lon": lon,
+                    "auction_end_date": (auc.auction_end_date if (auc and auc.auction_end_date) else "15/09/2026 18:00h"),
+                    "images": images_list,
+                    "liens": scraper.extract_liens_info(desc_text, auc.id_subasta if auc else ""),
+                    "urbanism": {
+                        "zoning_classification": (auc.zoning_classification if (auc and auc.zoning_classification) else "Suelo Urbano Consolidado (SUC)"),
+                        "urbanization_status": (auc.urbanization_status if (auc and auc.urbanization_status) else "Urbano Residencial / Ordenado (PGOU)"),
+                        "buildability_ratio": (auc.buildability_ratio if (auc and auc.buildability_ratio) else "1.8 m²t/m²s"),
+                        "permitted_uses": (auc.permitted_uses if (auc and auc.permitted_uses) else "Residencial / Comercial")
+                    },
+                    "source_type": "subastas",
+                    "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
+                })
+            except Exception as e_item:
+                print(f"Error procesando oportunidad {getattr(opp, 'id', 'N/A')}: {e_item}")
+                continue
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Error consultando oportunidades: {e}")
 
     # Load PGOU Urban Planning Opportunities from PGOU Gazette Monitor
@@ -878,15 +904,50 @@ def get_opportunities(
     except Exception as e_pgou:
         print(f"Error cargando oportunidades PGOU: {e_pgou}")
 
+    # Apply strategy filter if specified
+    if strategy:
+        strategy_val = strategy.value if hasattr(strategy, "value") else str(strategy)
+        results = [item for item in results if item.get("strategy") == strategy_val]
+
+    # Apply min_discount filter if specified
+    if min_discount is not None and min_discount > 0:
+        results = [item for item in results if (item.get("discount_percentage") or 0.0) >= min_discount]
+
     # Apply source_type filter if specified by query parameter
     if source_type == "subastas":
         results = [item for item in results if item.get("source_type") == "subastas"]
     elif source_type == "pgou":
         results = [item for item in results if item.get("source_type") == "pgou"]
 
+    # Apply Bounding Box (BBOX) filter if specified for visible map area
+    if bbox:
+        try:
+            bbox_parts = [float(coord.strip()) for coord in bbox.split(",")]
+            if len(bbox_parts) == 4:
+                min_lat, min_lon, max_lat, max_lon = bbox_parts
+                results = [
+                    item for item in results
+                    if item.get("lat") is not None and item.get("lon") is not None
+                    and min_lat <= item["lat"] <= max_lat
+                    and min_lon <= item["lon"] <= max_lon
+                ]
+        except Exception as e_bbox:
+            print(f"Error procesando BBOX {bbox}: {e_bbox}")
+
+    total_count = len(results)
+
+    # Server-side pagination (LIMIT / OFFSET / PAGE)
+    if limit is not None:
+        start_idx = offset if offset is not None else ((page - 1) * limit)
+        paginated_results = results[start_idx : start_idx + limit]
+    else:
+        paginated_results = results
+
     return {
-        "total": len(results),
-        "opportunities": results
+        "total": total_count,
+        "page": page if limit is not None else 1,
+        "limit": limit if limit is not None else total_count,
+        "opportunities": paginated_results
     }
 
 @app.get("/api/v1/streetview_photo")

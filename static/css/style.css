@@ -664,6 +664,12 @@ body {
     border-radius: var(--radius-sm);
     overflow: hidden;
     border: 1px solid var(--glass-border);
+    background: #0f172a;
+}
+
+/* Dark Mode GIS styling for Leaflet tiles (Free from watermarks and API keys) */
+.map-container .leaflet-tile-pane {
+    filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
 }
 
 /* Deals Grid Feed */

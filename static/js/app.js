@@ -67,9 +67,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function initMap() {
         if (!map) {
             map = L.map('map').setView([40.4168, -3.7038], 6); // Centered on Madrid / Spain
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                subdomains: 'abcd',
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                subdomains: 'abc',
                 maxZoom: 19
             }).addTo(map);
 
@@ -352,27 +352,29 @@ document.addEventListener('DOMContentLoaded', () => {
         modalSample.classList.add('hidden');
     });
 
-    // Calculate & Update Header KPIs
+    // Calculate & Update Header KPIs (Exclusively for Subastas Públicas BOE)
     function updateKPIs(opps) {
-        const totalCount = opps.length;
-        const activeCount = opps.filter(o => (o.discount_percentage / 100) >= 0.10).length;
+        const subastas = (opps || []).filter(o => (o.source_type || 'subastas') === 'subastas');
+        const activeSubastas = subastas.filter(o => (o.discount_percentage / 100) >= 0.10);
+        
+        const totalCount = subastas.length;
+        const activeCount = activeSubastas.length;
         
         let avgDisc = 0;
         let totalProfit = 0;
 
-        if (opps.length > 0) {
-            const sumDisc = opps.reduce((acc, curr) => acc + curr.discount_percentage, 0);
-            avgDisc = sumDisc / opps.length;
-            totalProfit = opps.reduce((acc, curr) => acc + (curr.potential_gross_profit || 0), 0);
+        if (activeSubastas.length > 0) {
+            const sumDisc = activeSubastas.reduce((acc, curr) => acc + curr.discount_percentage, 0);
+            avgDisc = sumDisc / activeSubastas.length;
+            totalProfit = activeSubastas.reduce((acc, curr) => acc + (curr.potential_gross_profit || 0), 0);
         }
 
-        kpiScanned.textContent = totalCount;
-        kpiActive.textContent = activeCount;
-        kpiAvgDiscount.textContent = `${avgDisc.toFixed(1)}%`;
-        kpiTotalProfit.textContent = formatCurrency(totalProfit);
+        if (kpiScanned) kpiScanned.textContent = totalCount;
+        if (kpiActive) kpiActive.textContent = activeCount;
+        if (kpiAvgDiscount) kpiAvgDiscount.textContent = `${avgDisc.toFixed(1)}%`;
+        if (kpiTotalProfit) kpiTotalProfit.textContent = formatCurrency(totalProfit);
     }
 
-    // Update Tab Badges for Opportunity Sources
     // Update Tab Badges for Opportunity Sources (Subastas counts active discount filter; PGOU ignores discount filter)
     function updateTabBadges() {
         const q = (state.searchQuery || '').trim().toLowerCase();
@@ -381,7 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSub = (o.source_type || 'subastas') === 'subastas';
             if (!isSub) return false;
             if (state.currentStrategy !== 'ALL' && o.strategy !== state.currentStrategy) return false;
-            if ((o.discount_percentage / 100) < state.minDiscount) return false;
+            if (state.minDiscount > 0.0 && (o.discount_percentage / 100) < state.minDiscount) return false;
             if (q !== '') {
                 const title = (o.title || '').toLowerCase();
                 const prov = (o.province || '').toLowerCase();
@@ -465,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             // Discount Filter (Only for Subastas; PGOU ignores auction discount filter)
-            if (oppSource === 'subastas') {
+            if (oppSource === 'subastas' && state.minDiscount > 0.0) {
                 const discDecimal = opp.discount_percentage / 100;
                 if (discDecimal < state.minDiscount) {
                     return false;
@@ -1339,7 +1341,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnRunPipeline.disabled = true;
             document.getElementById('text-run').textContent = 'Escaneando...';
 
-            showToast('🔍 Escáner activado. Rastreando el BOE en segundo plano sin interrumpir la pantalla...', 'info');
+            showToast('🔍 Escáner activado. Sincronizando Subastas BOE y Planeamientos PGOU en segundo plano sin interrumpir la navegación...', 'info');
 
             // 1. Lanzar la captura en segundo plano en el servidor
             const res = await fetch('/api/v1/pipeline/run', {

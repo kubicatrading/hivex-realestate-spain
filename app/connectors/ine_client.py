@@ -1,3 +1,5 @@
+import os
+import certifi
 import httpx
 import logging
 from typing import Dict, Any, Optional
@@ -12,7 +14,11 @@ class INEClient:
     INE_BASE_URL = "https://servicios.ine.es/wstempus/js/es"
 
     def __init__(self, timeout: float = 10.0):
-        self.client = httpx.Client(timeout=timeout)
+        try:
+            ca_bundle = certifi.where() if os.path.exists(certifi.where()) else True
+            self.client = httpx.Client(timeout=timeout, verify=ca_bundle)
+        except Exception:
+            self.client = None
 
     def get_census_section_stats(self, province: str, locality: str) -> Dict[str, Any]:
         """

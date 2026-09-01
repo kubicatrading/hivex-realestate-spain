@@ -67,8 +67,10 @@ try:
     else:
         raise ValueError("Non-postgres URL, use SQLite fallback")
 except Exception as e_conn:
-    logger.warning(f"PostgreSQL no alcanzable localmente ({e_conn}). Usando fallback SQLite local: sqlite:///hivex_local.db")
-    db_url = "sqlite:///hivex_local.db"
+    _root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _local_db_path = os.path.join(_root_dir, "hivex_local.db")
+    logger.warning(f"PostgreSQL no alcanzable localmente ({e_conn}). Usando fallback SQLite local: sqlite:///{_local_db_path}")
+    db_url = f"sqlite:///{_local_db_path}"
     engine = create_engine(
         db_url,
         connect_args={"check_same_thread": False},

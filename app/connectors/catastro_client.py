@@ -1,3 +1,5 @@
+import os
+import certifi
 import httpx
 import xml.etree.ElementTree as ET
 import logging
@@ -14,7 +16,11 @@ class CatastroClient:
     OVC_REST_URL = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCConsultaRC.asmx/Consulta_DNPRC"
 
     def __init__(self, timeout: float = 10.0):
-        self.client = httpx.Client(timeout=timeout)
+        try:
+            ca_bundle = certifi.where() if os.path.exists(certifi.where()) else True
+            self.client = httpx.Client(timeout=timeout, verify=ca_bundle)
+        except Exception:
+            self.client = None
 
     @staticmethod
     def normalize_cadastral_reference(ref: str) -> str:

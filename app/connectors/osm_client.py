@@ -1,3 +1,5 @@
+import os
+import certifi
 import httpx
 import logging
 from typing import Dict, Any
@@ -13,7 +15,11 @@ class OSMOverpassClient:
     OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
     def __init__(self, timeout: float = 0.2):
-        self.client = httpx.Client(timeout=timeout)
+        try:
+            ca_bundle = certifi.where() if os.path.exists(certifi.where()) else True
+            self.client = httpx.Client(timeout=timeout, verify=ca_bundle)
+        except Exception:
+            self.client = None
 
     def get_poi_metrics(self, lat: float, lon: float, radius_meters: int = 500) -> Dict[str, Any]:
         """

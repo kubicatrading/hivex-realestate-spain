@@ -1,6 +1,16 @@
 import os
+import certifi
 from pydantic_settings import BaseSettings
 from pydantic import Field, ConfigDict
+
+# Ensure SSL certificate environment variables point to valid certificate bundles
+if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+elif "SSL_CERT_FILE" not in os.environ and os.path.exists(certifi.where()):
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+
+if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"]):
+    del os.environ["SSL_CERT_DIR"]
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "HIVEX Real Estate Spain Monitoring Engine"
