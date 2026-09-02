@@ -336,19 +336,23 @@ def health_check(db: Session = Depends(get_db)):
     }
 
 @app.api_route("/api/v1/auth/login", methods=["POST", "GET", "OPTIONS"])
-def login(request: Optional[LoginRequest] = None):
-    """Autentica un usuario por nombre de usuario O correo electrónico."""
+def login(request: Optional[LoginRequest] = None, db: Session = Depends(get_db)):
+    """Autentica un usuario por nombre de usuario O correo electrónico contra la tabla de usuarios."""
     login_val = request.login if (request and request.login) else ""
     pass_val = request.password if (request and request.password) else ""
 
-    user = verify_credentials(login_val, pass_val)
+    user = verify_credentials(db, login_val, pass_val)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario/Email o contraseña incorrectos"
         )
     
-    access_token = create_access_token(data={"sub": user["username"], "email": user["email"]})
+    access_token = create_access_token(data={
+        "sub": user["username"],
+        "email": user["email"],
+        "is_admin": user.get("is_admin", True)
+    })
     return {
         "access_token": access_token,
         "token_type": "bearer",

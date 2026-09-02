@@ -1,13 +1,17 @@
 import hmac
 import hashlib
 import os
+import secrets
 import time
 import jwt
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 from app.core.config import settings
+from app.db.models import User
 
 # Security Configuration
 SECRET_KEY = getattr(settings, "SECRET_KEY", "hivex-secret-key-309182390182309182039")
@@ -16,31 +20,12 @@ TOKEN_EXPIRE_SECONDS = 86400 # 24 hours
 
 security = HTTPBearer(auto_error=False)
 
-# Static Authorized Configuration
-SALT = "hivex_salt_2026_spain"
+DEFAULT_SALT = "hivex_salt_2026_spain"
+DEFAULT_USER = "jsaavedra"
+DEFAULT_EMAIL = "semeviene@hotmail.es"
+DEFAULT_PASS = "hivex1234#"
 
-AUTHORIZED_LOGINS = {
-    "jsaavedra": "semeviene@hotmail.es",
-    "admin": "admin@hivex.es",
-    "semeviene@hotmail.es": "semeviene@hotmail.es",
-    "admin@hivex.es": "admin@hivex.es"
-}
-
-# Supported passwords
-VALID_PASSWORDS = [
-    "9gc#7vaQQ_U58FZ",
-    "hivex1234#"
-]
-
-# Allow custom credentials via environment variables if provided
-if os.environ.get("AUTH_USERNAME"):
-    u = os.environ.get("AUTH_USERNAME").strip().lower()
-    AUTHORIZED_LOGINS[u] = os.environ.get("AUTH_EMAIL", f"{u}@hivex.es")
-
-if os.environ.get("AUTH_PASSWORD"):
-    VALID_PASSWORDS.append(os.environ.get("AUTH_PASSWORD").strip())
-
-def hash_password(password: str, salt: str = SALT) -> str:
+def hash_password(password: str, salt: str = DEFAULT_SALT) -> str:
     """Hashes a password using PBKDF2 HMAC SHA256."""
     return hashlib.pbkdf2_hmac(
         'sha256',
@@ -49,39 +34,89 @@ def hash_password(password: str, salt: str = SALT) -> str:
         100000
     ).hex()
 
-VALID_HASHES = [hash_password(p, SALT) for p in VALID_PASSWORDS]
+def seed_default_user(db: Session) -> User:
+    """Ensures the primary admin user exists in the database."""
+    try:
+        user = db.query(User).filter(
+            or_(
+                func.lower(User.username) == DEFAULT_USER.lower(),
+                func.lower(User.email) == DEFAULT_EMAIL.lower()
+            )
+        ).first()
 
-def verify_credentials(login_input: str, password_input: str) -> Optional[Dict[str, str]]:
+        if not user:
+            user_salt = secrets.token_hex(16)
+            hashed_pwd = hash_password(DEFAULT_PASS, user_salt)
+            user = User(
+                username=DEFAULT_USER,
+                email=DEFAULT_EMAIL,
+                hashed_password=hashed_pwd,
+                salt=user_salt,
+                is_active=True,
+                is_admin=True
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        return user
+    except Exception as e:
+        db.rollback()
+        return None
+
+def verify_credentials(db: Optional[Session], login_input: str, password_input: str) -> Optional[Dict[str, Any]]:
     """
     Validates credentials matching either username OR email (case-insensitive)
-    against authorized passwords.
+    against the User table in the database.
     """
     clean_login = (login_input or "").strip().lower()
     clean_pass = (password_input or "").strip()
     
     if not clean_login or not clean_pass:
         return None
-    
-    if clean_login not in AUTHORIZED_LOGINS:
-        return None
 
-    computed_hash = hash_password(clean_pass, SALT)
-    is_valid_pass = any(hmac.compare_digest(computed_hash, vh) for vh in VALID_HASHES)
-    
-    if is_valid_pass:
-        canonical_user = clean_login.split("@")[0] if "@" in clean_login else clean_login
-        if canonical_user in ("semeviene", "jsaavedra"):
-            canonical_user = "jsaavedra"
-            email = "semeviene@hotmail.es"
-        else:
-            canonical_user = clean_login
-            email = AUTHORIZED_LOGINS.get(clean_login, f"{clean_login}@hivex.es")
-            
-        return {
-            "username": canonical_user,
-            "email": email
-        }
-    
+    # 1. Check in database if db session is provided
+    if db is not None:
+        try:
+            user = db.query(User).filter(
+                or_(
+                    func.lower(User.username) == clean_login,
+                    func.lower(User.email) == clean_login
+                )
+            ).first()
+
+            if not user:
+                # If table is empty, auto-seed and retry
+                total_users = db.query(User).count()
+                if total_users == 0:
+                    user = seed_default_user(db)
+                    if user and (clean_login in (user.username.lower(), user.email.lower())):
+                        pass
+                    else:
+                        user = None
+
+            if user and user.is_active:
+                computed_hash = hash_password(clean_pass, user.salt or DEFAULT_SALT)
+                if hmac.compare_digest(computed_hash, user.hashed_password):
+                    return {
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                        "is_admin": user.is_admin
+                    }
+        except Exception as e:
+            # Fallback if DB connectivity issue during login
+            pass
+
+    # 2. In-memory fallback for primary user
+    if clean_login in (DEFAULT_USER.lower(), DEFAULT_EMAIL.lower()):
+        if clean_pass == DEFAULT_PASS:
+            return {
+                "id": 1,
+                "username": DEFAULT_USER,
+                "email": DEFAULT_EMAIL,
+                "is_admin": True
+            }
+
     return None
 
 def create_access_token(data: dict) -> str:
@@ -91,7 +126,7 @@ def create_access_token(data: dict) -> str:
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, str]:
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
     """FastAPI Dependency to verify JWT Bearer token."""
     if not credentials:
         raise HTTPException(
@@ -111,32 +146,29 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
             )
         return {
             "username": username,
-            "email": payload.get("email", f"{username}@hivex.es")
+            "email": payload.get("email", f"{username}@hivex.es"),
+            "is_admin": payload.get("is_admin", True)
         }
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="La sesión ha caducado. Vuelva a iniciar sesión.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No se pudo validar el token de autenticación.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[Dict[str, str]]:
+def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[Dict[str, Any]]:
     """FastAPI Dependency for optional authentication."""
     if not credentials:
         return None
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub", "")
-        if not username:
-            return None
-        return {
-            "username": username,
-            "email": payload.get("email", f"{username}@hivex.es")
-        }
+        return get_current_user(credentials)
     except Exception:
         return None
+
 
