@@ -13,7 +13,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- App CSS -->
-    <link rel="stylesheet" href="/static/css/style.css?v=2.3.1">
+    <link rel="stylesheet" href="/static/css/style.css?v=2.3.2">
 </head>
 <body>
     <!-- Background Glow Blobs -->
@@ -31,17 +31,17 @@
                 <p>Plataforma de Inteligencia Inmobiliaria Off-Market</p>
             </div>
 
-            <form id="form-login" class="login-form">
+            <form id="form-login" class="login-form" autocomplete="off">
                 <div id="login-error" class="login-error-banner hidden"></div>
 
                 <div class="form-group">
                     <label for="input-login"><i data-lucide="user"></i> Usuario o Correo Electrónico</label>
-                    <input type="text" id="input-login" placeholder="Usuario o correo electrónico" required autocomplete="off">
+                    <input type="text" id="input-login" name="hivex_sec_user" placeholder="Usuario o correo electrónico" required autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" value="">
                 </div>
 
                 <div class="form-group">
                     <label for="input-password"><i data-lucide="key-round"></i> Contraseña</label>
-                    <input type="password" id="input-password" placeholder="••••••••" required autocomplete="off">
+                    <input type="password" id="input-password" name="hivex_sec_password" placeholder="••••••••" required autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" value="">
                 </div>
 
                 <button type="submit" id="btn-login-submit" class="btn btn-primary btn-full btn-glow">
@@ -271,6 +271,6 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <!-- App JS -->
-    <script src="/static/js/app.js?v=2.9.2"></script>
+    <script src="/static/js/app.js?v=2.9.3"></script>
 </body>
 </html>

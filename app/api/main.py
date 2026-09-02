@@ -28,12 +28,15 @@ from app.connectors.ine_client import INEClient
 from app.engine.scoring_engine import OpportunityScoringEngine
 from app.engine.meso_market_price import resolve_meso_market_price_2x2
 from app.services.notifier import TelegramNotifier
+import jwt
 from app.core.config import settings
 from app.core.auth import (
     verify_credentials,
     create_access_token,
     get_current_user,
-    get_current_user_optional
+    get_current_user_optional,
+    SECRET_KEY,
+    ALGORITHM
 )
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -358,7 +361,7 @@ def get_me(current_user: dict = Depends(get_current_user)):
     return {"status": "authenticated", "user": current_user}
 
 @app.get("/api/v1/sources/status")
-def get_sources_status(current_user: Optional[dict] = Depends(get_current_user_optional)):
+def get_sources_status(current_user: dict = Depends(get_current_user)):
     """Devuelve el estado de salud, latencia y muestra de datos reales de cada fuente web."""
     sources = []
 
@@ -521,9 +524,29 @@ async def _run_background_pipeline():
 
 @app.api_route("/api/v1/pipeline/run", methods=["GET", "POST"])
 async def trigger_ingestion_pipeline(
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    request: Request
 ):
     """Ejecuta la captura de subastas reales y planeamientos PGOU en segundo plano de forma silenciosa."""
+    # Permitir cron de Vercel o llamada autenticada
+    cron_header = request.headers.get("x-vercel-cron", "")
+    auth_header = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
+    
+    if not cron_header:
+        if not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Autenticación requerida para ejecutar el escáner."
+            )
+        token = auth_header.split(" ", 1)[1]
+        try:
+            jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token de autenticación no válido."
+            )
+
     background_tasks.add_task(_run_background_pipeline)
     return {
         "status": "processing",
@@ -542,7 +565,7 @@ def get_opportunities(
     page: int = Query(1, ge=1, description="Número de página para paginación"),
     offset: Optional[int] = Query(None, ge=0, description="Offset de resultados"),
     db: Session = Depends(get_db),
-    current_user: Optional[dict] = Depends(get_current_user_optional)
+    current_user: dict = Depends(get_current_user)
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []

@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // App State
     let state = {
-        token: localStorage.getItem('hivex_token') || null,
+        token: sessionStorage.getItem('hivex_token') || localStorage.getItem('hivex_token') || null,
         user: null,
         allOpportunities: [],
         filteredOpportunities: [],
@@ -105,11 +105,18 @@ document.addEventListener('DOMContentLoaded', () => {
     formLogin.addEventListener('submit', async (e) => {
         e.preventDefault();
         loginError.classList.add('hidden');
-        btnLoginSubmit.disabled = true;
-        btnLoginSubmit.innerHTML = 'Verificando...';
-
+        
         const loginVal = inputLogin.value.trim();
         const passVal = inputPassword.value;
+
+        if (!loginVal || !passVal) {
+            loginError.textContent = 'Por favor, introduce usuario y contraseña.';
+            loginError.classList.remove('hidden');
+            return;
+        }
+
+        btnLoginSubmit.disabled = true;
+        btnLoginSubmit.innerHTML = 'Verificando credenciales...';
 
         try {
             const res = await fetch('/api/v1/auth/login', {
@@ -123,15 +130,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok && data.access_token) {
                 state.token = data.access_token;
                 state.user = data.user;
+                sessionStorage.setItem('hivex_token', data.access_token);
                 localStorage.setItem('hivex_token', data.access_token);
                 showDashboard();
                 showToast(`¡Bienvenido ${data.user.username}!`, 'success');
             } else {
-                loginError.textContent = data.detail || 'Error de autenticación';
+                loginError.textContent = data.detail || 'Credenciales no válidas. Verifique usuario y contraseña.';
                 loginError.classList.remove('hidden');
             }
         } catch (err) {
-            loginError.textContent = 'Error de conexión con el servidor.';
+            loginError.textContent = 'Error de conexión con el servidor de autenticación.';
             loginError.classList.remove('hidden');
         } finally {
             btnLoginSubmit.disabled = false;
@@ -144,7 +152,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function logout() {
         state.token = null;
         state.user = null;
+        sessionStorage.removeItem('hivex_token');
         localStorage.removeItem('hivex_token');
+        state.allOpportunities = [];
+        state.filteredOpportunities = [];
+        if (dealsContainer) dealsContainer.innerHTML = '';
         showLoginOverlay();
     }
 
@@ -153,11 +165,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function showLoginOverlay() {
         loginOverlay.classList.remove('hidden');
         dashboardApp.classList.add('hidden');
+        inputLogin.value = '';
+        inputPassword.value = '';
+        loginError.classList.add('hidden');
+        if (window.lucide) lucide.createIcons();
     }
 
     function showDashboard() {
         loginOverlay.classList.add('hidden');
         dashboardApp.classList.remove('hidden');
+        inputLogin.value = '';
+        inputPassword.value = '';
         setTimeout(() => {
             initMap();
             map.invalidateSize();
