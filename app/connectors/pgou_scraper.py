@@ -250,6 +250,46 @@ class PGOUScraper:
                 ],
                 "description": "Sector ARPO en Pozuelo de Alarcón (más de 5.500 viviendas). Desarrollo residencial de alto standing con resolución del colector interceptor y conexión con la M-40."
             },
+            {
+                "id": "PGOU-MAD-2026-005B",
+                "source_type": "pgou",
+                "title": "Desarrollo Residencial & Dotacional - Sector 'Las Vegas'",
+                "address": "Avenida de las Vegas / Camino Real",
+                "locality": "Villanueva del Pardillo",
+                "province": "Madrid",
+                "lat": 40.4935,
+                "lon": -3.9610,
+                "strategy": "SUELO_DESARROLLO",
+                "property_type": "SUELO_URBANIZABLE",
+                "listing_price": 920000.0,
+                "estimated_reference_value": 2800000.0,
+                "appraisal_value": 2600000.0,
+                "discount_percentage": 64.6,
+                "surface_m2": 28500.0,
+                "ownership_percentage": 100.0,
+                "final_score": 90.8,
+                "score_components": {"discount_score": 90.0, "poi_score": 88.0, "income_score": 94.0, "demographic_score": 91.0},
+                "census_tract_data": {"district": "Las Vegas - Casco Urbano", "avg_household_income": 48500, "avg_person_income": 21200, "area_m2_price": 2650.0, "population_growth_rate": 3.8},
+                "planning_status": "Plan Parcial Aprobado Definitivamente & Junta de Compensación",
+                "gazette_source": "BOCM / Ayuntamiento de Villanueva del Pardillo",
+                "gazette_code": "Sector Las Vegas Villanueva del Pardillo",
+                "gazette_date": "2024-03-15",
+                "buildability_m2": 22000.0,
+                "proposed_land_use": "Residencial Unifamiliar / Colectivo de Media-Baja Densidad",
+                "proposed_land_use_type": "RESIDENCIAL_LIBRE",
+                "urbanization_cost_m2s": 52.0,
+                "total_urbanization_cost": 1482000.0,
+                "land_repercussion_m2t": 109.18,
+                "reparcelacion_status": "🟢 Proyecto de Reparcelación y Convenio Urbanístico en Ejecución",
+                "reparcelacion_verified_free": True,
+                "milestones": [
+                    {"phase": "Aprobación Definitiva Plan Parcial", "status": "COMPLETED", "date": "11/2022", "timeframe": "Concluido", "uplift": "x1.25"},
+                    {"phase": "Constitución Junta de Compensación", "status": "COMPLETED", "date": "03/2024", "timeframe": "Concluido", "uplift": "x1.80"},
+                    {"phase": "Proyecto de Urbanización", "status": "CURRENT", "date": "10/2026", "timeframe": "En trámite", "uplift": "x2.35"},
+                    {"phase": "Licencias de Obra Nueva", "status": "PENDING", "date": "06/2027", "timeframe": "8-10 meses", "uplift": "x2.90"}
+                ],
+                "description": "Sector urbanístico 'Las Vegas' en el término municipal de Villanueva del Pardillo (Madrid). Desarrollo de media-baja densidad residencial en un entorno de alta demanda del noroeste madrileño, con rápida conexión a la M-503 y M-50."
+            },
 
             # ==========================================
             # CATALUÑA (BARCELONA, GIRONA, TARRAGONA)
