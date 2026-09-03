@@ -494,7 +494,7 @@ def get_sources_status(current_user: dict = Depends(get_current_user)):
         "sources": sources
     }
 
-async def _run_background_pipeline() -> Dict[str, Any]:
+async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]:
     """Ejecuta la captura de subastas e ingesta de PGOU garantizando persistencia en base de datos."""
     t_start = time.time()
     try:
@@ -503,7 +503,7 @@ async def _run_background_pipeline() -> Dict[str, Any]:
         
         # 1. Ingesta y cálculo de Subastas BOE
         scraper = BOESubastasScraper()
-        raw_auctions = await scraper.async_scrape_live_auctions(limit=None)
+        raw_auctions = await scraper.async_scrape_live_auctions(limit=limit)
         
         scoring_engine = OpportunityScoringEngine(db_session=db)
         opportunities = scoring_engine.process_and_score_auctions(raw_auctions)
