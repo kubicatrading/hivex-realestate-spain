@@ -1353,16 +1353,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Trigger Ingestion Pipeline (Silent non-blocking execution)
+    // Trigger Ingestion Pipeline (Guaranteed execution without serverless freezing)
     btnRunPipeline.addEventListener('click', async () => {
         try {
             btnRunPipeline.disabled = true;
             document.getElementById('text-run').textContent = 'Escaneando...';
 
-            showToast('🔍 Escáner activado. Sincronizando Subastas BOE y Planeamientos PGOU en segundo plano sin interrumpir la navegación...', 'info');
+            showToast('🔍 Escáner activado. Sincronizando Subastas BOE y Desarrollos PGOU con la base de datos...', 'info');
 
-            // 1. Lanzar la captura en segundo plano en el servidor
-            const res = await fetch('/api/v1/pipeline/run', {
+            // 1. Lanzar la sincronización garantizada en el servidor
+            const res = await fetch('/api/v1/pipeline/run?sync=true', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${state.token}` }
             });
@@ -1372,22 +1372,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!res.ok) throw new Error('Falló la activación del escáner');
+            if (!res.ok) throw new Error('Error durante el escaneado');
+            const data = await res.json();
+            const count = data?.result?.raw_auctions_processed || 'varias';
 
-            // 2. Ejecutar lectura silenciosa inmediata sin alterar los resultados cargados
+            showToast(`✅ Escáner completado con éxito (${count} subastas analizadas). Oportunidades sincronizadas y actualizadas.`, 'success');
+
+            // 2. Refrescar datos en el mapa y listado
             await fetchOpportunities(true);
 
-            // 3. Consultas de reconciliación silenciosa progresivas a los 4s, 10s y 18s
-            setTimeout(() => fetchOpportunities(true), 4000);
-            setTimeout(() => fetchOpportunities(true), 10000);
-            setTimeout(() => {
-                fetchOpportunities(true);
-                btnRunPipeline.disabled = false;
-                document.getElementById('text-run').textContent = 'Ejecutar Escáner';
-            }, 18000);
-
         } catch (err) {
-            showToast(`Error activando escáner: ${err.message}`, 'error');
+            showToast(`Aviso: ${err.message}`, 'info');
+            await fetchOpportunities(true);
+        } finally {
             btnRunPipeline.disabled = false;
             document.getElementById('text-run').textContent = 'Ejecutar Escáner';
         }
