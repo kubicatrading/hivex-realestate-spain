@@ -99,4 +99,26 @@ def test_resolve_urbanization_cost_m2s():
     cost_prov, code_prov, label_prov = resolve_urbanization_cost_m2s("Toledo", "Toledo", "Calle Mayor 1", "")
     assert cost_prov == 38.0
 
+def test_edictos_scraper():
+    from app.connectors.edictos_scraper import EdictosScraper
+    scraper = EdictosScraper()
+    items = scraper.fetch_edictos_opportunities(limit=10)
+    assert len(items) > 0
+
+    herencias = [it for it in items if it.get("category") == "HERENCIA_YACENTE"]
+    proindivisos = [it for it in items if it.get("category") == "DIVISION_COSA_COMUN"]
+
+    assert len(herencias) > 0
+    assert len(proindivisos) > 0
+
+    first_item = items[0]
+    assert first_item["source_type"] == "edictos"
+    assert "court_or_notary" in first_item
+    assert "expediente_num" in first_item
+    assert "ownership_percentage" in first_item
+    assert "milestones" in first_item
+    assert len(first_item["milestones"]) >= 3
+    assert first_item["ownership_percentage"] > 0
+
+
 

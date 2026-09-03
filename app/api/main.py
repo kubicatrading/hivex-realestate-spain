@@ -513,6 +513,11 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         pgou_scraper = PGOUScraper()
         pgou_items = pgou_scraper.fetch_pgou_opportunities()
 
+        # 3. Ingesta y monitorización de Edictos Judiciales/Notariales y Proindivisos
+        from app.connectors.edictos_scraper import EdictosScraper
+        edictos_scraper = EdictosScraper()
+        edictos_items = edictos_scraper.fetch_edictos_opportunities()
+
         notifier = TelegramNotifier()
         alerts_sent = 0
         for opp in opportunities:
@@ -529,6 +534,7 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
             "raw_auctions_processed": len(raw_auctions),
             "opportunities_scored": len(opportunities),
             "pgou_sectors_total": len(pgou_items),
+            "edictos_total": len(edictos_items),
             "alerts_sent": alerts_sent,
             "duration_seconds": elapsed
         }
@@ -580,7 +586,7 @@ async def trigger_ingestion_pipeline(
     background_tasks.add_task(_run_background_pipeline)
     return {
         "status": "processing",
-        "message": "Escáner en vivo de Subastas BOE y Desarrollos PGOU activado en segundo plano."
+        "message": "Escáner en vivo de Subastas BOE, Desarrollos PGOU y Edictos/Registros activado en segundo plano."
     }
 
 @app.get("/api/v1/opportunities")
@@ -589,7 +595,7 @@ def get_opportunities(
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(None, ge=0.0, le=100.0),
     province: Optional[str] = None,
-    source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas' o 'pgou'"),
+    source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas', 'pgou' o 'edictos'"),
     bbox: Optional[str] = Query(None, description="Cuadrante visible BBOX: min_lat,min_lon,max_lat,max_lon"),
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Límite de resultados por página"),
     page: int = Query(1, ge=1, description="Número de página para paginación"),
@@ -957,6 +963,54 @@ def get_opportunities(
     except Exception as e_pgou:
         print(f"Error cargando oportunidades PGOU: {e_pgou}")
 
+    # 3. Merging Edictos y Registros (Herencias Yacentes & División de Cosa Común)
+    try:
+        from app.connectors.edictos_scraper import EdictosScraper
+        edictos_scraper = EdictosScraper()
+        edictos_items = edictos_scraper.fetch_edictos_opportunities(province=province)
+
+        for e_item in edictos_items:
+            listing_p = e_item.get("listing_price", 0.0)
+            surf = e_item.get("surface_m2", 1.0)
+            effective_surf = e_item.get("effective_surface_m2") or surf
+            census_data = e_item.get("census_tract_data", {})
+            area_m2_price = census_data.get("area_m2_price", 3500.0)
+
+            est_val = e_item.get("estimated_reference_value")
+            if not est_val:
+                est_val = round(effective_surf * area_m2_price, 2)
+            e_item["estimated_reference_value"] = est_val
+
+            if est_val > 0 and listing_p > 0:
+                e_item["discount_percentage"] = round(((est_val - listing_p) / est_val) * 100, 1)
+
+            e_item["potential_gross_profit"] = round(est_val - listing_p, 2)
+            e_item["property_m2_price"] = round(listing_p / effective_surf, 2) if effective_surf > 0 else 0.0
+            e_item["area_m2_price"] = area_m2_price
+            e_item["area_m2_price_source"] = "INE_CATASTRO"
+            e_item["area_m2_price_label"] = f"Ref. Mercado ({e_item.get('locality', '')})"
+            e_item["price_ref_level"] = "MESO"
+            e_item["price_ref_level_label"] = e_item.get("proceedings_type", "Edicto Judicial / Notarial")
+
+            scores_comp = e_item.get("score_components", {})
+            e_item["income_score"] = scores_comp.get("income_score", 90.0)
+            e_item["poi_score"] = scores_comp.get("poi_score", 90.0)
+            e_item["demographic_score"] = scores_comp.get("demographic_score", 88.0)
+            e_item["discount_score"] = scores_comp.get("discount_score", 95.0)
+
+            e_item["avg_household_income"] = census_data.get("avg_household_income", 38000)
+            e_item["avg_person_income"] = census_data.get("avg_person_income", 17500)
+            e_item["population_growth_rate"] = census_data.get("population_growth_rate", 1.5)
+
+            # Enlace al BOE TEJU o portal judicial si procede
+            teju_code = e_item.get("teju_boe_code")
+            if teju_code and not e_item.get("boe_url"):
+                e_item["boe_url"] = f"https://boe.es/buscar/notificaciones.php?id={teju_code}"
+
+            results.append(e_item)
+    except Exception as e_edictos:
+        print(f"Error cargando oportunidades de Edictos: {e_edictos}")
+
     # Apply strategy filter if specified
     if strategy:
         strategy_val = strategy.value if hasattr(strategy, "value") else str(strategy)
@@ -971,6 +1025,8 @@ def get_opportunities(
         results = [item for item in results if item.get("source_type") == "subastas"]
     elif source_type == "pgou":
         results = [item for item in results if item.get("source_type") == "pgou"]
+    elif source_type in ("edictos", "edictos_reg"):
+        results = [item for item in results if item.get("source_type") == "edictos"]
 
     # Apply Bounding Box (BBOX) filter if specified for visible map area
     if bbox:

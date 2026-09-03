@@ -424,14 +424,29 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         }).length;
         
+        const edictosCount = state.allOpportunities.filter(o => {
+            const isEdicto = o.source_type === 'edictos';
+            if (!isEdicto) return false;
+            if (state.currentStrategy !== 'ALL' && o.strategy !== state.currentStrategy) return false;
+            if (q !== '') {
+                const title = (o.title || '').toLowerCase();
+                const prov = (o.province || '').toLowerCase();
+                const loc = (o.locality || '').toLowerCase();
+                if (!title.includes(q) && !prov.includes(q) && !loc.includes(q)) return false;
+            }
+            return true;
+        }).length;
+        
         const badgeSub = document.getElementById('badge-subastas-count');
         const badgePgou = document.getElementById('badge-pgou-count');
+        const badgeEdictos = document.getElementById('badge-edictos-count');
         
         if (badgeSub) badgeSub.textContent = subastasCount;
         if (badgePgou) badgePgou.textContent = pgouCount;
+        if (badgeEdictos) badgeEdictos.textContent = edictosCount;
     }
 
-    // Opportunity Source Tab Switcher (Subastas BOE vs Visor PGOU)
+    // Opportunity Source Tab Switcher (Subastas BOE vs Visor PGOU vs Edictos/Reg.)
     window.switchOpportunitySource = function(sourceType) {
         state.activeSource = sourceType;
 
@@ -454,10 +469,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="dot pin-flipping"></span> House Flipping
                     <span class="dot pin-land"></span> Suelo / Desarrollo
                 `;
-            } else {
+            } else if (sourceType === 'pgou') {
                 legendEl.innerHTML = `
                     <span class="dot" style="background:#a855f7; box-shadow: 0 0 8px #a855f7;"></span> Aprobación PGOU / Convenio
                     <span class="dot" style="background:#10b981; box-shadow: 0 0 8px #10b981;"></span> Reordenación / Sector
+                `;
+            } else if (sourceType === 'edictos') {
+                legendEl.innerHTML = `
+                    <span class="dot" style="background:#eab308; box-shadow: 0 0 8px #eab308;"></span> Herencia Yacente (TEJU)
+                    <span class="dot" style="background:#6366f1; box-shadow: 0 0 8px #6366f1;"></span> División Cosa Común (Proindiviso)
                 `;
             }
         }
@@ -469,13 +489,15 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`⚖️ Subastas BOE: Mostrando ${currentCount} subastas públicas activas`, 'info');
         } else if (sourceType === 'pgou') {
             showToast(`📐 Visor PGOU: Mostrando ${currentCount} desarrollos urbanísticos detectados en boletines oficiales (BOCM, DOGC, BOJA)`, 'success');
+        } else if (sourceType === 'edictos') {
+            showToast(`⚖️ Edictos y Registros: Mostrando ${currentCount} herencias y procedimientos de proindiviso`, 'info');
         }
     };
 
     // Apply Filter Logic
     function applyFilters() {
         state.filteredOpportunities = state.allOpportunities.filter(opp => {
-            // Source Filter (Subastas BOE vs PGOU Visor)
+            // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg.)
             const oppSource = opp.source_type || 'subastas';
             if (oppSource !== state.activeSource) {
                 return false;
@@ -484,8 +506,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.currentStrategy !== 'ALL' && opp.strategy !== state.currentStrategy) {
                 return false;
             }
-            // Discount Filter (Only for Subastas; PGOU ignores auction discount filter)
-            if (oppSource === 'subastas' && state.minDiscount > 0.0) {
+            // Discount Filter (Subastas and Edictos; PGOU ignores auction discount filter)
+            if ((oppSource === 'subastas' || oppSource === 'edictos') && state.minDiscount > 0.0) {
                 const discDecimal = opp.discount_percentage / 100;
                 if (discDecimal < state.minDiscount) {
                     return false;
@@ -681,6 +703,37 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                 `;
+            } else if (opp.source_type === 'edictos') {
+                const isHerencia = opp.category === 'HERENCIA_YACENTE';
+                actionBtnLabel = isHerencia ? 'TEJU BOE' : 'SUB. JUDICIAL';
+                actionBtnUrl = opp.boe_url || (opp.teju_boe_code ? `https://boe.es/buscar/notificaciones.php?id=${opp.teju_boe_code}` : '#');
+
+                dateSubastaHeader = `
+                    <div style="font-size: 0.76rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                        <i data-lucide="scale" style="width: 12px; height: 12px; display: inline;"></i> <strong>${escapeHtml(opp.proceedings_type || 'Procedimiento Edictal')}</strong>
+                    </div>
+                `;
+
+                urbanismHtml = `
+                    <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.6); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid ${isHerencia ? 'rgba(251, 191, 36, 0.3)' : 'rgba(129, 140, 248, 0.3)'}; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="landmark" style="width: 13px; height: 13px; color: ${isHerencia ? '#fbbf24' : '#818cf8'};"></i> Origen:
+                            </span>
+                            <span style="background: ${isHerencia ? 'rgba(251, 191, 36, 0.15)' : 'rgba(129, 140, 248, 0.15)'}; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; font-weight: 700; font-size: 0.74rem; padding: 2px 8px; border-radius: 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(opp.court_or_notary || '')}">
+                                ${escapeHtml(opp.court_or_notary || 'Notaría / Juzgado')}
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="file-text" style="width: 13px; height: 13px; color: #38bdf8;"></i> Autos / Cuota:
+                            </span>
+                            <span style="color: #38bdf8; font-weight: 800; font-size: 0.76rem;">
+                                ${escapeHtml(opp.expediente_num || 'TEJU')} • <strong>${ownershipFormatted}%</strong>
+                            </span>
+                        </div>
+                    </div>
+                `;
             } else {
                 urbanismHtml = `
                     <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
@@ -708,10 +761,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
                     <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
-                            ${opp.source_type === 'pgou' ? '' : `
+                            ${opp.source_type === 'pgou' ? '' : (opp.source_type === 'edictos' ? `
+                                <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff;">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
+                                <span class="badge-discount" style="background: #10b981; color: #fff;">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                            ` : `
                                 <span class="badge-strategy ${stratClass}">${stratLabel}</span>
                                 <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
-                            `}
+                            `)}
                         </div>
                     </div>
 
@@ -739,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">${areaM2Display} (*)</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Precio Adquisición' : 'Valor Subasta'}</span>
+                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Precio Adquisición' : (opp.source_type === 'edictos' ? 'Salida / Tipo' : 'Valor Subasta')}</span>
                                 <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
                             </div>
                             <div class="fin-cell">
@@ -747,11 +803,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${formatCurrency(estimatedMktVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Superficie (${opp.source_type === 'pgou' ? 'Suelo m²s' : 'Cuota Real'})</span>
+                                <span class="fin-lbl">Superficie (${opp.source_type === 'pgou' ? 'Suelo m²s' : (opp.source_type === 'edictos' ? 'Útil / Cuota' : 'Cuota Real')})</span>
                                 <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : 'Beneficio / Margen Est.'}</span>
+                                <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : 'Beneficio / Margen Est.')}</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
                                     ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : profitFormatted}
                                 </span>
@@ -774,11 +830,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <button class="btn btn-secondary btn-xs" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                                     <i data-lucide="eye" style="width: 12px; height: 12px;"></i> Ficha
                                 </button>
-                                ${opp.source_type === 'pgou' ? '' : `
+                                ${actionBtnUrl && actionBtnUrl !== '#' ? `
                                 <a href="${actionBtnUrl}" target="_blank" rel="noopener" class="btn-boe-xs" onclick="event.stopPropagation();">
                                     ${actionBtnLabel} <i data-lucide="external-link" style="width: 11px; height: 11px;"></i>
                                 </a>
-                                `}
+                                ` : ''}
                             </div>
                         </div>
                     </div>
@@ -829,6 +885,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let extBtnUrlModal = opp.boe_url || opp.gazette_url || '#';
 
         if (opp.source_type === 'pgou') {
+            extBtnLabelModal = `Abrir Boletín Oficial (${opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'BOCM'})`;
+            extBtnUrlModal = opp.gazette_url || opp.boe_url || '#';
+
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: #c084fc; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
                     <i data-lucide="layers" style="width: 15px; height: 15px; color: #c084fc;"></i>
@@ -940,6 +999,83 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
             `;
+        } else if (opp.source_type === 'edictos') {
+            const isHerencia = opp.category === 'HERENCIA_YACENTE';
+            extBtnLabelModal = isHerencia ? 'Abrir Anuncio Oficial en TEJU - BOE' : 'Abrir Subasta Judicial de Condominio';
+            extBtnUrlModal = opp.boe_url || (opp.teju_boe_code ? `https://boe.es/buscar/notificaciones.php?id=${opp.teju_boe_code}` : '#');
+
+            dateSubastaHeaderModal = `
+                <div style="font-size: 0.88rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
+                    <i data-lucide="scale" style="width: 15px; height: 15px;"></i>
+                    <span>Expediente / Edicto: <strong>${escapeHtml(opp.expediente_num || opp.teju_boe_code || 'Edicto Judicial/Notarial')}</strong></span>
+                </div>
+            `;
+
+            urbanismDetail = `
+                <div style="margin-top: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.65); border: 1px solid ${isHerencia ? 'rgba(251, 191, 36, 0.3)' : 'rgba(129, 140, 248, 0.3)'}; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
+                    <span style="color: #cbd5e1; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="landmark" style="width: 16px; height: 16px; color: ${isHerencia ? '#fbbf24' : '#818cf8'};"></i> Origen Legal:
+                    </span>
+                    <span class="badge" style="background: ${isHerencia ? 'rgba(251, 191, 36, 0.2)' : 'rgba(129, 140, 248, 0.2)'}; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; font-weight: 800; font-size: 0.85rem; padding: 4px 12px; border-radius: 6px;">
+                        ${escapeHtml(opp.court_or_notary || 'Juzgado / Notaría')}
+                    </span>
+                </div>
+            `;
+
+            // Edictos Milestones Stepper
+            const milestones = opp.milestones || [
+                { phase: "Publicación Edicto TEJU", status: "COMPLETED", timeframe: "Concluido", uplift: "Base" },
+                { phase: "Fin Plazo Comparecencia Herederos", status: "CURRENT", timeframe: "30 días", uplift: "+15%" },
+                { phase: "Declaración Abintestato / Subasta", status: "PENDING", timeframe: "2-3 meses", uplift: "+35%" },
+                { phase: "Adjudicación y Posesión Judicial", status: "PENDING", timeframe: "4-6 meses", uplift: "+50%" }
+            ];
+
+            const milestonesStepsHtml = milestones.map((m) => {
+                let isDone = m.status === 'COMPLETED';
+                let isCurrent = m.status === 'CURRENT';
+                let statusBg = isDone ? 'rgba(34, 197, 94, 0.15)' : (isCurrent ? 'rgba(251, 191, 36, 0.25)' : 'rgba(255, 255, 255, 0.04)');
+                let statusColor = isDone ? '#4ade80' : (isCurrent ? '#fbbf24' : '#94a3b8');
+                let badgeText = isDone ? '✔ COMPLETADO' : (isCurrent ? '⚡ EN PROCESO' : '⌛ PENDIENTE');
+
+                return `
+                    <div style="flex: 1; min-width: 130px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; padding: 10px 8px; background: ${statusBg}; border: 1px solid ${statusColor}55; border-radius: 8px;">
+                        <span style="font-size: 0.72rem; color: ${statusColor}; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;">${badgeText}</span>
+                        <div style="display: flex; align-items: center; justify-content: center; min-height: 3.6em; line-height: 1.2em; margin-bottom: 6px; width: 100%;">
+                            <strong style="font-size: 0.82rem; color: #f8fafc; text-align: center;">${escapeHtml(m.phase)}</strong>
+                        </div>
+                        <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 800; display: block; margin-bottom: 2px;">Margen ${escapeHtml(m.uplift || '')}</span>
+                        <span style="font-size: 0.72rem; color: #cbd5e1;">⏱️ ${escapeHtml(m.timeframe)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            liensDetailHtml = `
+                <!-- Edictos & Proindivisos Module: Milestones, Legal Proceedings & Strategy -->
+                <div style="margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, 0.75); border: 1px solid ${isHerencia ? 'rgba(251, 191, 36, 0.35)' : 'rgba(129, 140, 248, 0.35)'}; border-radius: 10px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px;">
+                        <span style="font-size: 0.98rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="git-commit" style="width: 18px; height: 18px; color: ${isHerencia ? '#fbbf24' : '#818cf8'};"></i> Fases del Procedimiento Legal
+                        </span>
+                        <span class="badge" style="background: ${isHerencia ? 'rgba(251, 191, 36, 0.2)' : 'rgba(129, 140, 248, 0.2)'}; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; font-weight: 800; font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;">
+                            ${escapeHtml(opp.category_label || (isHerencia ? '⚖️ Herencia Yacente' : '👥 Proindiviso'))}
+                        </span>
+                    </div>
+
+                    <!-- Milestones Stepper -->
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                        ${milestonesStepsHtml}
+                    </div>
+
+                    <!-- Legal & Operational Summary -->
+                    <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; font-size: 0.86rem; color: #e2e8f0; line-height: 1.45;">
+                        <div style="margin-bottom: 6px;"><strong style="color: #fbbf24;">Estado Jurídico:</strong> ${escapeHtml(opp.legal_status || 'En tramitación procesal')}</div>
+                        <div><strong style="color: #38bdf8;">Tesis Operativa:</strong> ${escapeHtml(opp.opportunity_summary || 'Monitoreo preventivo mediante edictos judiciales y notariales')}</div>
+                    </div>
+                    <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 6px; font-style: italic;">
+                        ℹ️ Monitoreo preventivo de Edictos Judiciales Únicos (TEJU-BOE) y subastas de disolución de condominio (Art. 400 CC) sin coste en notas simples registrales.
+                    </div>
+                </div>
+            `;
         } else {
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: #f59e0b; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
@@ -990,10 +1126,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span style="color: #c084fc; display: block; font-size: 0.75rem; font-weight: 600;">Enfoque Inversor PGOU</span>
                     <strong style="color: #c084fc; font-size: 0.9rem;">📍 Entorno Revalorizable</strong>
                </div>`
-            : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                    <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
-                    <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
-               </div>`;
+            : (opp.source_type === 'edictos'
+                ? `<div style="background: rgba(251, 191, 36, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(251, 191, 36, 0.25);">
+                        <span style="color: #fbbf24; display: block; font-size: 0.75rem; font-weight: 600;">Estrategia Legal & Descuento</span>
+                        <strong style="color: #4ade80; font-size: 0.95rem;">-${formatNumber(opp.discount_percentage, 0)}% vs Mercado</strong>
+                   </div>`
+                : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
+                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
+                   </div>`);
 
         const detailedScoresHtml = `
             <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
@@ -1066,7 +1207,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : 'Valor de Subasta'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : (opp.source_type === 'edictos' ? 'Salida / Tipo Estimado' : 'Valor de Subasta')}</span>
                         <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
@@ -1074,7 +1215,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)} (*)</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : 'Superficie (Cuota Real)'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : (opp.source_type === 'edictos' ? 'Superficie Útil / Cuota' : 'Superficie (Cuota Real)')}</span>
                         <div class="fin-val" style="display: block; font-size: 1.05rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplayModal}</div>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
@@ -1088,7 +1229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div></div>
                     <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : 'Beneficio / Margen Est.'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : 'Beneficio / Margen Est.')}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
                     </div>
                 </div>
@@ -1109,11 +1250,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
                         <i data-lucide="x"></i> Cerrar Ventana
                     </button>
-                    ${opp.source_type === 'pgou' ? '' : `
+                    ${extBtnUrlModal && extBtnUrlModal !== '#' ? `
                     <a href="${extBtnUrlModal}" target="_blank" rel="noopener" class="btn btn-primary">
                         <i data-lucide="external-link"></i> ${escapeHtml(extBtnLabelModal)}
                     </a>
-                    `}
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -1259,9 +1400,12 @@ document.addEventListener('DOMContentLoaded', () => {
         opps.forEach((opp, idx) => {
             if (opp.lat && opp.lon) {
                 const isPgou = opp.source_type === 'pgou';
+                const isEdictos = opp.source_type === 'edictos';
                 let color = '#f59e0b';
                 if (isPgou) {
                     color = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
+                } else if (isEdictos) {
+                    color = opp.category === 'HERENCIA_YACENTE' ? '#eab308' : '#6366f1';
                 } else {
                     color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
                 }
@@ -1302,6 +1446,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         <div style="margin-bottom: 10px; font-weight: 800; color: ${scoreCol}; font-size: 12px;">
                             ⭐ <strong>Score General:</strong> ${formatScore(opp.overall_score)} / 100 pts
+                        </div>
+                    `;
+                } else if (isEdictos) {
+                    const isHerencia = opp.category === 'HERENCIA_YACENTE';
+                    popupDetailHtml = `
+                        <div style="margin-bottom: 3px; font-size: 11px; color: ${isHerencia ? '#b45309' : '#4338ca'}; font-weight: 700;">
+                            ⚖️ <strong>Procedimiento:</strong> ${escapeHtml(opp.proceedings_type || 'Edicto')}
+                        </div>
+                        <div style="margin-bottom: 3px; font-size: 11px; color: #0284c7; font-weight: 700;">
+                            🏛️ <strong>Origen:</strong> ${escapeHtml(opp.court_or_notary || 'Notaría / Juzgado')}
+                        </div>
+                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
+                            -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid || opp.property_ref_value)}
                         </div>
                     `;
                 } else {
