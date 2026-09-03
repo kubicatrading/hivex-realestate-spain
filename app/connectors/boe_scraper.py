@@ -541,17 +541,22 @@ class BOESubastasScraper:
                 target_ids = auction_ids[:limit] if (limit and limit > 0) else auction_ids
 
                 # Semáforo para controlar la velocidad de peticiones y evitar sobrecargar la web del BOE
-                semaphore = asyncio.Semaphore(10)
+                semaphore = asyncio.Semaphore(4)
 
                 async def fetch_one_auction(aid):
                     async with semaphore:
-                        try:
-                            r1 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=1")
-                            r3 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=3")
-                            return aid, r1.text, r3.text
-                        except Exception as err:
-                            logger.error(f"Error fetching subasta {aid}: {err}")
-                            return aid, None, None
+                        for attempt in range(2):
+                            try:
+                                r1 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=1", timeout=15.0)
+                                await asyncio.sleep(0.05)
+                                r3 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=3", timeout=15.0)
+                                return aid, r1.text, r3.text
+                            except Exception as err:
+                                if attempt == 1:
+                                    logger.error(f"Error fetching subasta {aid} after retry: {err}")
+                                    return aid, None, None
+                                await asyncio.sleep(0.3)
+                        return aid, None, None
 
                 tasks = [fetch_one_auction(aid) for aid in target_ids]
                 fetched_data = await asyncio.gather(*tasks)

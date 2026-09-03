@@ -494,8 +494,9 @@ def get_sources_status(current_user: dict = Depends(get_current_user)):
         "sources": sources
     }
 
-async def _run_background_pipeline():
-    """Ejecuta la captura de subastas e ingesta de PGOU en segundo plano."""
+async def _run_background_pipeline() -> Dict[str, Any]:
+    """Ejecuta la captura de subastas e ingesta de PGOU garantizando persistencia en base de datos."""
+    t_start = time.time()
     try:
         from app.db.session import SessionLocal
         db = SessionLocal()
@@ -522,17 +523,32 @@ async def _run_background_pipeline():
 
         db.commit()
         db.close()
-        print(f"Pipeline en segundo plano completado: {len(raw_auctions)} subastas procesadas, {len(opportunities)} oportunidades calificadas, {len(pgou_items)} sectores PGOU actualizados.")
+        elapsed = round(time.time() - t_start, 2)
+        summary = {
+            "status": "success",
+            "raw_auctions_processed": len(raw_auctions),
+            "opportunities_scored": len(opportunities),
+            "pgou_sectors_total": len(pgou_items),
+            "alerts_sent": alerts_sent,
+            "duration_seconds": elapsed
+        }
+        print(f"Pipeline completado con éxito: {summary}")
+        return summary
     except Exception as e:
-        print(f"Error ejecutando pipeline en segundo plano: {e}")
+        print(f"Error ejecutando pipeline: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "duration_seconds": round(time.time() - t_start, 2)
+        }
 
 @app.api_route("/api/v1/pipeline/run", methods=["GET", "POST"])
 async def trigger_ingestion_pipeline(
     background_tasks: BackgroundTasks,
-    request: Request
+    request: Request,
+    sync: bool = Query(False, description="Forzar ejecución síncrona completa")
 ):
-    """Ejecuta la captura de subastas reales y planeamientos PGOU en segundo plano de forma silenciosa."""
-    # Permitir cron de Vercel o llamada autenticada
+    """Ejecuta la captura de subastas reales y planeamientos PGOU."""
     cron_header = request.headers.get("x-vercel-cron", "")
     auth_header = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
     
@@ -550,6 +566,16 @@ async def trigger_ingestion_pipeline(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token de autenticación no válido."
             )
+
+    # Si la petición procede de Vercel Cron (x-vercel-cron) o se solicita síncrona (?sync=true),
+    # se ejecuta de forma síncrona dentro del límite de 300s de Vercel Pro para asegurar que no se corta.
+    if cron_header or sync:
+        result = await _run_background_pipeline()
+        return {
+            "status": "completed",
+            "source": "cron" if cron_header else "sync_trigger",
+            "result": result
+        }
 
     background_tasks.add_task(_run_background_pipeline)
     return {
