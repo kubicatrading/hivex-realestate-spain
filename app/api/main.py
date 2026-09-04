@@ -975,11 +975,12 @@ def get_opportunities(
             effective_surf = e_item.get("effective_surface_m2") or surf
             census_data = e_item.get("census_tract_data", {})
             area_m2_price = census_data.get("area_m2_price", 3500.0)
-
-            est_val = e_item.get("estimated_reference_value")
-            if not est_val:
-                est_val = round(effective_surf * area_m2_price, 2)
+            # Dynamic Estimated Market Value strictly consistent with surface and area m2 price:
+            # - For 100% ownership: effective_surf == surf, so est_val = surf * area_m2_price
+            # - For proindiviso (e.g. 50% or 33%): est_val = effective_surf * area_m2_price (value of the auctioned share)
+            est_val = round(effective_surf * area_m2_price, 2)
             e_item["estimated_reference_value"] = est_val
+            e_item["full_property_market_value"] = round(surf * area_m2_price, 2)
 
             if est_val > 0 and listing_p > 0:
                 e_item["discount_percentage"] = round(((est_val - listing_p) / est_val) * 100, 1)

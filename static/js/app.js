@@ -611,8 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const mainImg = imgInfo.url;
             const imgCount = opp.images ? opp.images.length : 0;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
-            // Metrics according to User Rules & Source Type
-            const refVal = opp.source_type === 'pgou'
+            const refVal = (opp.source_type === 'pgou' || opp.source_type === 'edictos')
                 ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
                 : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
             const totalSurface = (opp.surface_m2 && opp.surface_m2 > 0) ? opp.surface_m2 : null;
@@ -1172,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
-        const refValModal = opp.source_type === 'pgou'
+        const refValModal = (opp.source_type === 'pgou' || opp.source_type === 'edictos')
             ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
             : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
         const estimatedMktValModal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refValModal);
