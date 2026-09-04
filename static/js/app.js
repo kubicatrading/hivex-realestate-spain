@@ -607,6 +607,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const stratLabel = isFlipping ? 'House Flipping' : 'Suelo / Desarrollo';
             const stratClass = isFlipping ? 'strat-flipping' : 'strat-land';
             
+            let subastaTypeBadge = isFlipping ? '🏠 VIVIENDA' : '📐 SOLAR';
+            if (opp.property_type) {
+                const pt = opp.property_type.toLowerCase();
+                if (pt.includes('vivienda') || pt.includes('piso') || pt.includes('chalet') || pt.includes('casa') || pt.includes('residencial')) {
+                    subastaTypeBadge = '🏠 VIVIENDA';
+                } else if (pt.includes('solar') || pt.includes('suelo') || pt.includes('terreno') || pt.includes('parcela')) {
+                    subastaTypeBadge = '📐 SOLAR';
+                } else if (pt.includes('local') || pt.includes('comercial')) {
+                    subastaTypeBadge = '🏬 LOCAL';
+                } else if (pt.includes('nave') || pt.includes('industrial')) {
+                    subastaTypeBadge = '🏭 NAVE';
+                } else if (pt.includes('garaje') || pt.includes('parking')) {
+                    subastaTypeBadge = '🚗 GARAJE';
+                } else {
+                    subastaTypeBadge = `🏠 ${opp.property_type.toUpperCase()}`;
+                }
+            }
+            const subastaBadgeBg = isFlipping ? '#e11d48' : '#d97706';
+            
             const imgInfo = getOpportunityMainImage(opp);
             const mainImg = imgInfo.url;
             const imgCount = opp.images ? opp.images.length : 0;
@@ -761,11 +780,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
                             ${opp.source_type === 'pgou' ? '' : (opp.source_type === 'edictos' ? `
-                                <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff;">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
-                                <span class="badge-discount" style="background: #10b981; color: #fff;">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
+                                <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
                             ` : `
-                                <span class="badge-strategy ${stratClass}">${stratLabel}</span>
-                                <span class="badge-discount">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
+                                <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
                             `)}
                         </div>
                     </div>

@@ -752,26 +752,29 @@ body {
 }
 
 .strat-flipping {
-    background: rgba(239, 68, 68, 0.2);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.4);
+    background: #e11d48;
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .strat-land {
-    background: rgba(245, 158, 11, 0.2);
-    color: #fbbf24;
-    border: 1px solid rgba(245, 158, 11, 0.4);
+    background: #d97706;
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .badge-discount {
     padding: 3px 8px;
-    background: rgba(16, 185, 129, 0.25);
-    color: var(--accent-green);
-    border: 1px solid rgba(16, 185, 129, 0.5);
+    background: #10b981;
+    color: #ffffff;
+    border: none;
     border-radius: 20px;
     font-family: var(--font-heading);
     font-size: 0.78rem;
     font-weight: 800;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .card-title {
