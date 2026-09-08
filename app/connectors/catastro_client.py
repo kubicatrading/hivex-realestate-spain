@@ -15,7 +15,7 @@ class CatastroClient:
     INSPIRE_WFS_URL = "http://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
     OVC_REST_URL = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCConsultaRC.asmx/Consulta_DNPRC"
 
-    def __init__(self, timeout: float = 10.0):
+    def __init__(self, timeout: float = 4.0):
         try:
             ca_bundle = certifi.where() if os.path.exists(certifi.where()) else True
             self.client = httpx.Client(timeout=timeout, verify=ca_bundle)
@@ -53,7 +53,7 @@ class CatastroClient:
     def get_parcel_details(self, refcat: str) -> Dict[str, Any]:
         """
         Consulta los datos alfanuméricos y oficiales de la Sede Electrónica del Catastro (SEC) por Referencia Catastral.
-        Retorna la superficie oficial y la clasificación de suelo (URBANO/RÚSTICO) directamente del Catastro.
+        Prioriza el servicio WFS INSPIRE oficial (14 caracteres) para obtener la superficie catastral y clasificación exacta.
         """
         details = {
             "refcat": refcat,
@@ -66,7 +66,7 @@ class CatastroClient:
             "polygon_geojson": None
         }
 
-        if not refcat:
+        if not refcat or not self.client:
             return details
 
         raw_refcat = refcat.strip().upper().replace(" ", "").replace("-", "")
@@ -79,20 +79,7 @@ class CatastroClient:
             candidate_refs.append(raw_refcat)
 
         for target_ref in candidate_refs:
-            # 1. Consulta oficial SEC REST por Referencia Catastral (20 caracteres)
-            try:
-                params = {"Provincia": "", "Municipio": "", "RC": target_ref}
-                resp = self.client.get(self.OVC_REST_URL, params=params)
-                if resp.status_code == 200:
-                    details["land_type"] = self.detect_land_type_from_catastro(target_ref, resp.text)
-                    surface = self._extract_surface_from_sec_xml(resp.text)
-                    if surface and surface > 0:
-                        details["surface_m2"] = surface
-                        return details
-            except Exception as e:
-                logger.warning(f"Error consultando Catastro SEC REST para {target_ref}: {e}")
-
-            # 2. Consulta WFS INSPIRE por parcela catastral (14 caracteres)
+            # 1. Consulta prioritaria WFS INSPIRE por parcela catastral (14 caracteres)
             try:
                 parcel_ref = target_ref[:14] if len(target_ref) >= 14 else target_ref
                 params = {
@@ -104,13 +91,27 @@ class CatastroClient:
                     "srsName": "EPSG:4326"
                 }
                 resp = self.client.get(self.INSPIRE_WFS_URL, params=params)
-                if resp.status_code == 200 and "<cp:areaValue" in resp.text:
+                if resp.status_code == 200 and ("<cp:areaValue" in resp.text or "<gml:surface" in resp.text):
                     details["land_type"] = self.detect_land_type_from_catastro(target_ref, resp.text)
                     surface = self._extract_area_from_gml(resp.text)
                     if surface and surface > 0:
                         details["surface_m2"] = surface
+                        return details
             except Exception as e:
-                logger.warning(f"Error consultando Catastro WFS para {target_ref}: {e}")
+                logger.debug(f"Error consultando Catastro WFS para {target_ref}: {e}")
+
+            # 2. Consulta fallback SEC REST por Referencia Catastral (20 caracteres)
+            try:
+                params = {"Provincia": "", "Municipio": "", "RC": target_ref}
+                resp = self.client.get(self.OVC_REST_URL, params=params)
+                if resp.status_code == 200:
+                    details["land_type"] = self.detect_land_type_from_catastro(target_ref, resp.text)
+                    surface = self._extract_surface_from_sec_xml(resp.text)
+                    if surface and surface > 0:
+                        details["surface_m2"] = surface
+                        return details
+            except Exception as e:
+                logger.debug(f"Error consultando Catastro SEC REST para {target_ref}: {e}")
 
         return details
 

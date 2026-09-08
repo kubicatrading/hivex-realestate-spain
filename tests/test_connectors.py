@@ -121,4 +121,26 @@ def test_edictos_scraper():
     assert first_item["ownership_percentage"] > 0
 
 
+def test_idufir_cru_extraction():
+    scraper = BOESubastasScraper()
+    assert scraper.extract_idufir_cru("CRU: 03011000209451") == "03011000209451"
+    assert scraper.extract_idufir_cru("IDUFIR: 04014000840326") == "04014000840326"
+    assert scraper.extract_idufir_cru("código registral único 45016000674083") == "45016000674083"
+    assert scraper.extract_idufir_cru("C.R.U.: 43018000123549") == "43018000123549"
+    # Normalization of 13-digit IDUFIR to 14 digits with leading 0
+    assert scraper.extract_idufir_cru("- IDUFIR: 3036000504276") == "03036000504276"
 
+
+def test_advanced_surface_extractions():
+    scraper = BOESubastasScraper()
+    # Carreño decimal measurement
+    t_carreno = "que ocupa una superficie útil de VENTIUN METROS SETENTA Y NUEVE CENTIMETROS CUADRADOS."
+    assert scraper.extract_surface_m2(t_carreno) == 21.79
+
+    # Eivissa colon syntax
+    t_eivissa = "SUPERFICIE TERRENO: OCHOCIENTOS CINCUENTA Y DOS METROS CUADRADOS."
+    assert scraper.extract_surface_m2(t_eivissa) == 852.0
+
+    # Alicante agrarian units in words
+    t_alicante = "término de Alicante, de caber cincuenta áreas."
+    assert scraper.extract_surface_m2(t_alicante) == 5000.0

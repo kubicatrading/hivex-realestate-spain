@@ -57,7 +57,7 @@ class KPICalculator:
             return 0.0
 
         discount = (estimated_market_value - listing_price) / estimated_market_value
-        return round(discount, 4)
+        return max(0.0, round(discount, 4))
 
     @staticmethod
     def calculate_detailed_scores(

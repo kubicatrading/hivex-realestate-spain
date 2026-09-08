@@ -13,32 +13,38 @@ SPANISH_NUMBER_WORDS = {
     'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10, 'once': 11, 'doce': 12,
     'trece': 13, 'catorce': 14, 'quince': 15, 'dieciséis': 16, 'dieciseis': 16,
     'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19, 'veinte': 20, 'veintiuno': 21,
+    'veintiun': 21, 'veintiún': 21, 'ventiun': 21, 'veintun': 21,
     'veintidós': 22, 'veintidos': 22, 'veintitrés': 23, 'veintitres': 23,
     'veinticuatro': 24, 'veinticinco': 25, 'veintiséis': 26, 'veintisiete': 27,
     'veintiocho': 28, 'veintinueve': 29, 'treinta': 30, 'cuarenta': 40,
     'cincuenta': 50, 'sesenta': 60, 'setenta': 70, 'ochenta': 80, 'noventa': 90,
     'cien': 100, 'ciento': 100, 'doscientos': 200, 'trescientos': 300,
     'cuatrocientos': 400, 'quinientos': 500, 'seiscientos': 600,
-    'setecientos': 700, 'ochocientos': 800, 'novecientos': 900, 'mil': 1000
+    'setecientos': 700, 'ochocientos': 800, 'novecientos': 900, 'mil': 1000,
+    'medio': 0.5, 'media': 0.5, 'mitad': 0.5
 }
 
 def parse_spanish_written_number(words_str: str) -> Optional[float]:
     if not words_str:
         return None
     s = words_str.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+    # Remover 'un/una' únicamente cuando funciona como artículo indeterminado antes de sustantivo ('una superficie de...', 'una cabida de...')
+    s = re.sub(r'\b(?:un|una)\s+(?:superficie|cabida|extension|parcela|finca|trozo|porcion)\b', ' ', s)
+    # Limpiar palabras no numéricas habituales en frases de cabida registral
+    s = re.sub(r'^(?:que|ocupa|ocupando|de|con|en|del|la|el|superficie|cabida|finca|parcela|\s)+', '', s).strip()
     s = re.sub(r'[^a-z0-9\s]', ' ', s)
     tokens = s.replace(' y ', ' ').split()
-    total = 0
-    current = 0
+    total = 0.0
+    current = 0.0
     for t in tokens:
         if t in SPANISH_NUMBER_WORDS:
-            val = SPANISH_NUMBER_WORDS[t]
-            if val == 1000:
-                if current == 0:
-                    current = 1
-                total += current * 1000
-                current = 0
-            elif val in (100, 200, 300, 400, 500, 600, 700, 800, 900) and current > 0 and current < 10:
+            val = float(SPANISH_NUMBER_WORDS[t])
+            if val == 1000.0:
+                if current == 0.0:
+                    current = 1.0
+                total += current * 1000.0
+                current = 0.0
+            elif val in (100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0) and 0 < current < 10:
                 current *= val
             else:
                 current += val
@@ -46,6 +52,24 @@ def parse_spanish_written_number(words_str: str) -> Optional[float]:
             current += float(t)
     res = float(total + current)
     return res if res > 0 else None
+
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """Extrae texto íntegro de un documento PDF oficial del BOE (edicto, auto o certificación) usando pypdf."""
+    if not pdf_bytes:
+        return ""
+    try:
+        import io
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        pages_text = []
+        for p in reader.pages:
+            pt = p.extract_text()
+            if pt:
+                pages_text.append(pt)
+        return "\n".join(pages_text)
+    except Exception as e:
+        logger.debug(f"Error procesando PDF del edicto: {e}")
+        return ""
 
 import os
 import certifi
@@ -89,17 +113,21 @@ class BOESubastasScraper:
     def extract_idufir_cru(self, text: str) -> Optional[str]:
         """
         Extrae el IDUFIR / CRU (Código Registro Único de 14 dígitos) del texto de la subasta o certificado registral.
+        Soporta 13 o 14 dígitos normalizando con cero a la izquierda si fuera necesario.
         """
         if not text:
             return None
         patterns = [
-            r'(?:idufir|cru|código\s+registral|codigo\s+registral|c\.r\.u\.)\s*:?\s*(\d{14})',
+            r'(?:idufir|cru|c[oó]digo\s+registral(?:\s+[uú]nico)?|identificador\s+[uú]nico|c\.r\.u\.)\s*:?\s*(\d{13,14})',
             r'\b(\d{14})\b'
         ]
         for pat in patterns:
             m = re.search(pat, text.lower())
             if m:
-                return m.group(1)
+                val = m.group(1)
+                if len(val) == 13:
+                    val = "0" + val
+                return val
         return None
 
     @staticmethod
@@ -146,26 +174,49 @@ class BOESubastasScraper:
 
     def extract_ownership_percentage(self, text: str) -> float:
         """
-        Extrae el porcentaje de pleno dominio o participacion subastada sin redondear (precisión matemática exacta).
-        Ej: '16,66667% del pleno dominio' -> 16.66667, '100% del pleno dominio' -> 100.0
-        Ignora cuotas de participación en elementos comunes o gastos de portal (Propiedad Horizontal).
+        Extrae el porcentaje de pleno dominio o participación subastada sin redondear.
+        Distingue estrictamente entre cuotas de comunidad/propiedad horizontal y titularidad subastada.
         """
         if not text:
             return 100.0
         text_lower = text.lower()
         
-        # Eliminar menciones de cuota de participación en elementos comunes/gastos de comunidad del bloque/portal (Propiedad Horizontal)
+        # Eliminar menciones de cuota de participación en elementos comunes/gastos de portal/bloque (Propiedad Horizontal)
         cleaned_text = re.sub(
-            r'cuotas?\s+(?:de\s+participaci[oó]n|en\s+el\s+valor|en\s+los\s+elementos|en\s+los\s+gastos)[^%\n]*%\s*-?',
+            r'cuotas?\s+(?:de\s+participaci[oó]n|en\s+el\s+valor|en\s+los\s+elementos|en\s+los\s+gastos|en\s+el\s+bloque)[^%\n]*(?:%|por\s+ciento)\s*-?',
             '',
             text_lower
         )
-        
+        cleaned_text = re.sub(r'(?:cero\s+enteros|cero\s+coma|\b0,\d+)\s*(?:%|por\s+ciento)', '', cleaned_text)
+
+        # Expresiones textuales explícitas de titularidad completa
+        if any(w in cleaned_text for w in [
+            "totalidad del pleno dominio", "cien por cien del pleno dominio", "100% del pleno dominio",
+            "100% pleno dominio", "pleno dominio de la finca", "la totalidad de la finca",
+            "cien por ciento del pleno dominio", "pleno dominio al 100%"
+        ]):
+            return 100.0
+
+        # Fracciones escritas en texto
+        if any(w in cleaned_text for w in ["mitad indivisa", "una mitad", "un medio", "cincuenta por ciento"]):
+            return 50.0
+        if any(w in cleaned_text for w in ["una tercera parte", "tercera parte indivisa", "un tercio"]):
+            return round(100.0 / 3.0, 5)
+        if any(w in cleaned_text for w in ["dos terceras partes", "dos tercios"]):
+            return round(200.0 / 3.0, 5)
+        if any(w in cleaned_text for w in ["una cuarta parte", "cuarta parte indivisa", "un cuarto"]):
+            return 25.0
+        if any(w in cleaned_text for w in ["tres cuartas partes", "tres cuartos"]):
+            return 75.0
+
+        # Porcentaje numérico explícito
         m_pct = re.search(r'(\d+(?:[\.,]\d+)?)\s*%\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso|titularidad|participaci[oó]n)?', cleaned_text)
         if m_pct:
             val = self.parse_spanish_number(m_pct.group(1))
             if val and 0.000001 <= val <= 100.0:
                 return float(val)
+
+        # Fracción numérica (ej. 1/2, 1/3, 1/6)
         m_frac = re.search(r'\b(\d+/\d+)\b\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso)?', cleaned_text)
         if m_frac:
             try:
@@ -174,6 +225,7 @@ class BOESubastasScraper:
                 return float(val)
             except Exception:
                 pass
+
         return 100.0
 
     def extract_liens_info(self, text: str, id_subasta: str = "") -> Dict[str, Any]:
@@ -286,37 +338,75 @@ class BOESubastasScraper:
         
         text_lower = text.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
 
-        # 0. Búsqueda de Hectáreas, Áreas y Centiáreas escritas en texto
-        written_ha_match = re.search(r'([a-z\s]+?)\s+hectareas?(?:,\s*([a-z\s]+?)\s+areas?)?(?:(?:\s*y|\s*,)\s*([a-z\s]+?)\s+centiareas?)?', text_lower)
+        # 0. Búsqueda de Áreas, Centiáreas y Decímetros (con o sin hectáreas)
+        # Ej: 'una hectárea, once áreas y veintinueve centiáreas' -> 11129 m2
+        # Ej: 'trece áreas cincuenta y seis centiáreas y cincuenta decímetros cuadrados' -> 1356.5 m2
+        # Ej: 'caber cincuenta áreas' -> 5000 m2
+        agrarian_p = r'(?:([a-z\s]+?)\s+hectareas?)?[,\s]*(?:([a-z\s]+?)\s+areas)(?:[,\s]*(?:y\s+)?([a-z\s]+?)\s+centiareas?)?(?:[,\s]*(?:y\s+)?([a-z\s]+?)\s+decimetros)?'
+        m_agr = re.search(agrarian_p, text_lower)
+        if m_agr and (m_agr.group(1) or m_agr.group(2) or m_agr.group(3)):
+            val_h = (parse_spanish_written_number(m_agr.group(1)) or 0.0) if m_agr.group(1) else 0.0
+            val_a = (parse_spanish_written_number(m_agr.group(2)) or 0.0) if m_agr.group(2) else 0.0
+            val_ca = (parse_spanish_written_number(m_agr.group(3)) or 0.0) if m_agr.group(3) else 0.0
+            val_dm = (parse_spanish_written_number(m_agr.group(4)) or 0.0) if m_agr.group(4) else 0.0
+            if (val_h and val_h > 0) or (val_a and val_a > 0) or (val_ca and val_ca > 0):
+                tot_m2 = (val_h * 10000.0) + (val_a * 100.0) + val_ca + (val_dm / 100.0)
+                if tot_m2 >= 10.0:
+                    return round(tot_m2, 2)
+
+        # 0.2 Búsqueda de Hectáreas solas escritas en texto (ej. 'una hectárea y veintidós centiáreas')
+        written_ha_match = re.search(r'([a-z\s]+?)\s+hectareas?(?:[,\s]+([a-z\s]+?)\s+centiareas?)?', text_lower)
         if written_ha_match:
             h_str = written_ha_match.group(1).strip()
-            a_str = written_ha_match.group(2).strip() if written_ha_match.group(2) else ''
-            ca_str = written_ha_match.group(3).strip() if written_ha_match.group(3) else ''
+            ca_str = written_ha_match.group(2).strip() if written_ha_match.group(2) else ''
             val_h = parse_spanish_written_number(h_str) or 0.0
-            val_a = parse_spanish_written_number(a_str) or 0.0
             val_ca = parse_spanish_written_number(ca_str) or 0.0
-            tot_m2 = (val_h * 10000.0) + (val_a * 100.0) + val_ca
-            if tot_m2 >= 10.0:
-                return round(tot_m2, 2)
+            if val_h > 0:
+                tot_m2 = (val_h * 10000.0) + val_ca
+                if tot_m2 >= 10.0:
+                    return round(tot_m2, 2)
 
-        # 1. Búsqueda específica de superficie con números escritos en texto (Ej: 'sesenta y cinco metros cuadrados', 'mide dos mil seiscienosis diez metros')
-        written_m_match = re.search(r'(?:mide|superficie|extension|cabida|de|unos)\s+(?:superficial\s+de\s+)?([a-z\s]+?)\s+metros(?:\s+cuadrados)?', text_lower)
+        # 0.3 Tahúllas (medida tradicional de superficie agraria en Levante / Murcia / Alicante: 1 tahúlla ≈ 1.118 m²)
+        tahulla_match = re.search(r'([a-z\s]+?|\d+(?:[\.,]\d+)?)\s+tah[uú]llas?\b', text_lower)
+        if tahulla_match:
+            t_val_str = tahulla_match.group(1).strip()
+            num_t = parse_spanish_written_number(t_val_str) or self.parse_spanish_number(t_val_str)
+            if num_t and num_t > 0:
+                tot_m2 = round(num_t * 1118.0, 2)
+                if tot_m2 >= 10.0:
+                    return tot_m2
+
+        # 0.5. Unidades agrarias en texto suelto (Ej: 'caber cincuenta areas', 'cabida de tres hectareas')
+        agrarian_word_match = re.search(r'(?:caber|cabida(?:\s+de)?|superficie(?:\s+de)?)\s+([a-z\s]+?)\s+(areas|hectareas)\b', text_lower)
+        if agrarian_word_match:
+            w_num = parse_spanish_written_number(agrarian_word_match.group(1).strip())
+            unit = agrarian_word_match.group(2)
+            if w_num and w_num > 0:
+                mult = 10000.0 if "hectarea" in unit else 100.0
+                tot_m2 = round(w_num * mult, 2)
+                if 10.0 <= tot_m2 <= 50000000.0:
+                    return tot_m2
+
+        # 1. Búsqueda específica de superficie con números escritos en texto (incluyendo decímetros/centímetros decimales)
+        # Ej: 'superficie util de ventiun metros setenta y nueve centimetros cuadrados'
+        written_pat = r'superficie\s+(?:construida|util|registral|total|terreno)?\s*:?\s*(?:de\s*)?([a-z\s]+?)\s*metros?(?:\s+(?:con\s+|y\s+)?([a-z\s]+?)\s*(?:decimetros|centimetros)(?:\s+cuadrados)?)?'
+        m_written = re.search(written_pat, text_lower)
+        if m_written:
+            w_m = m_written.group(1).strip() if m_written.group(1) else ''
+            w_d = m_written.group(2).strip() if m_written.group(2) else ''
+            val_m = parse_spanish_written_number(w_m)
+            if val_m and 10.0 <= val_m <= 500000.0:
+                val_d = parse_spanish_written_number(w_d) if w_d else 0.0
+                return round(val_m + (val_d / 100.0 if val_d else 0.0), 2)
+
+        # 1.2 Búsqueda de expresiones como 'superficie terreno: ochocientos cincuenta y dos metros cuadrados'
+        written_m_match = re.search(r'(?:mide|superficie(?:\s+[a-z]+)?|extension|cabida|de|unos)\s*:?\s*(?:superficial\s+de\s+|de\s+)?([a-z\s]+?)\s+metros(?:\s+cuadrados)?', text_lower)
         if written_m_match:
             words = written_m_match.group(1).strip()
             words = re.sub(r'^(de|unos|una|unas|con|que|en|del|la)\s+', '', words).strip()
             val_m = parse_spanish_written_number(words)
             if val_m and 10.0 <= val_m <= 500000.0:
                 return round(val_m, 2)
-
-        written_pat = r'superficie\s+(?:construida|útil|registral|total)?\s*(?:de\s*)?([a-z\s]+?)\s*metros?(?:\s+([a-z\s]+?)\s*decímetros?)?'
-        m_written = re.search(written_pat, text_lower)
-        if m_written:
-            w_m = m_written.group(1).strip() if m_written.group(1) else ''
-            w_d = m_written.group(2).strip() if m_written.group(2) else ''
-            val_m = parse_spanish_written_number(w_m)
-            if val_m and 10.0 <= val_m <= 50000.0:
-                val_d = parse_spanish_written_number(w_d) if w_d else 0.0
-                return round(val_m + (val_d / 100.0 if val_d else 0.0), 2)
 
         # 1.5. Búsqueda de unidades agrarias/rústicas: Hectáreas (HA), Áreas y Centiáreas
         ha_patterns = [
@@ -507,6 +597,47 @@ class BOESubastasScraper:
 
         return False
 
+    def extract_lotes_info(self, text_or_html: str, title: str = "") -> Dict[str, Any]:
+        """
+        Detecta si la subasta se articula por lotes independientes ('Separada para cada lote / Adjudicación independiente')
+        y extrae el número de lote, totales y badges.
+        """
+        combined = f"{title} {text_or_html}".lower()
+        
+        is_lotes = bool(
+            re.search(r'\blote\s*\d+\b', combined) or
+            "subasta por lotes" in combined or
+            "separada para cada lote" in combined or
+            "adjudicación independiente" in combined or
+            "adjudicacion independiente" in combined or
+            "datos relacionados con la subasta del lote" in combined
+        )
+        
+        lot_number = 1
+        m_lot = re.search(r'\blote\s*(?:n[ºoú\.]*\s*)?(\d+)', combined)
+        if m_lot:
+            lot_number = int(m_lot.group(1))
+            is_lotes = True
+            
+        total_lots = 1
+        m_tot = re.search(r'(?:de|total\s*(?:de)?)\s*(\d+)\s*lotes', combined)
+        if m_tot:
+            total_lots = max(int(m_tot.group(1)), lot_number)
+            
+        lote_badge = None
+        if is_lotes:
+            if total_lots > 1:
+                lote_badge = f"📦 LOTE {lot_number} DE {total_lots} (PUJA INDEPENDIENTE)"
+            else:
+                lote_badge = f"📦 LOTE {lot_number} (ADJUDICACIÓN INDEPENDIENTE)"
+                
+        return {
+            "is_lotes": is_lotes,
+            "lot_number": lot_number if is_lotes else None,
+            "total_lots": total_lots if is_lotes else None,
+            "lote_badge": lote_badge
+        }
+
     async def async_scrape_live_auctions(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Scrapea en tiempo real las subastas públicas activas directamente desde la sede electrónica del BOE en paralelo.
@@ -540,25 +671,25 @@ class BOESubastasScraper:
 
                 target_ids = auction_ids[:limit] if (limit and limit > 0) else auction_ids
 
-                # Semáforo para controlar la velocidad de peticiones y evitar sobrecargar la web del BOE
-                semaphore = asyncio.Semaphore(4)
+                # Semáforo de concurrencia a 5 conexiones simultáneas para no saturar la Sede Electrónica del BOE
+                semaphore = asyncio.Semaphore(5)
 
-                async def fetch_one_auction(aid):
+                async def fetch_auction_detail_pages(aid: str):
                     async with semaphore:
-                        for attempt in range(2):
-                            try:
-                                r1 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=1", timeout=15.0)
-                                await asyncio.sleep(0.05)
-                                r3 = await client.get(f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=3", timeout=15.0)
-                                return aid, r1.text, r3.text
-                            except Exception as err:
-                                if attempt == 1:
-                                    logger.error(f"Error fetching subasta {aid} after retry: {err}")
-                                    return aid, None, None
-                                await asyncio.sleep(0.3)
-                        return aid, None, None
+                        try:
+                            # ver=1 contiene datos generales y financieros
+                            url1 = f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=1"
+                            # ver=3 contiene descripción detallada del bien y referencia catastral
+                            url3 = f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}&ver=3"
 
-                tasks = [fetch_one_auction(aid) for aid in target_ids]
+                            r1 = await client.get(url1, timeout=8.0)
+                            r3 = await client.get(url3, timeout=8.0)
+                            return aid, r1.text if r1.status_code == 200 else "", r3.text if r3.status_code == 200 else ""
+                        except Exception as e_req:
+                            logger.warning(f"Error descargando subasta {aid}: {e_req}")
+                            return aid, "", ""
+
+                tasks = [fetch_auction_detail_pages(aid) for aid in target_ids]
                 fetched_data = await asyncio.gather(*tasks)
 
                 real_auctions = []
@@ -570,6 +701,7 @@ class BOESubastasScraper:
                     # 1. Datos del bien inmueble/solar (ver=3)
                     s3 = BeautifulSoup(html_ver3, "html.parser")
                     desc, address, locality, province, refcat = "", "", "", "", ""
+                    lote_starting_bid, lote_appraisal, lote_deposit, lote_cp = 0.0, 0.0, 0.0, ""
                     for tr in s3.find_all("tr"):
                         tds = tr.find_all(["th", "td"])
                         if len(tds) >= 2:
@@ -578,7 +710,11 @@ class BOESubastasScraper:
                             elif "dirección" in k: address = v
                             elif "localidad" in k: locality = v
                             elif "provincia" in k: province = v
+                            elif "código postal" in k or "codigo postal" in k: lote_cp = v
                             elif "referencia catastral" in k or "catastral" in k or "ref. catastral" in k: refcat = v
+                            elif "valor subasta" in k or "valor de la subasta" in k: lote_starting_bid = self._parse_amount(v)
+                            elif "tasación" in k or "valor de tasación" in k: lote_appraisal = self._parse_amount(v)
+                            elif "depósito" in k or "deposito" in k: lote_deposit = self._parse_amount(v)
 
                     if not refcat:
                         refcat = self.extract_cadastral_reference(html_ver3)
@@ -602,11 +738,20 @@ class BOESubastasScraper:
                             elif "puja mínima" in k or "puja minima" in k:
                                 min_bid = self._parse_amount(v)
 
+                    # Si la subasta es por lotes, los valores financieros se rescatan de ver=3
+                    if starting_bid == 0.0 and lote_starting_bid > 0.0:
+                        starting_bid = lote_starting_bid
+                    if appraisal == 0.0 and lote_appraisal > 0.0:
+                        appraisal = lote_appraisal
+
                     # Si valor subasta no vino explícito, usar tasación
                     if starting_bid == 0.0 and appraisal > 0.0:
                         starting_bid = appraisal
                     if appraisal == 0.0 and starting_bid > 0.0:
                         appraisal = starting_bid
+
+                    # Detección de estructura por lotes
+                    lotes_info = self.extract_lotes_info(html_ver1 + " " + html_ver3, desc)
 
                     # Geolocalización y ortofoto
                     lat, lon = self.geocode_address(address, locality, province)
@@ -636,6 +781,10 @@ class BOESubastasScraper:
                         "lat": lat,
                         "lon": lon,
                         "images": images,
+                        "is_lotes": lotes_info["is_lotes"],
+                        "lot_number": lotes_info["lot_number"],
+                        "total_lots": lotes_info["total_lots"],
+                        "lote_badge": lotes_info["lote_badge"],
                         "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}"
                     }
                     real_auctions.append(item)

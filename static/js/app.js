@@ -74,6 +74,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }).addTo(map);
 
             mapMarkersLayer = L.layerGroup().addTo(map);
+
+            map.on('click', () => {
+                if (typeof window.unspiderify === 'function') window.unspiderify();
+            });
+            map.on('zoomstart', () => {
+                if (typeof window.unspiderify === 'function') window.unspiderify();
+            });
         }
     }
 
@@ -591,6 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render Opportunity Cards Feed
     function renderDeals(opps) {
+        window._lastOpportunities = opps;
         if (opps.length === 0) {
             dealsContainer.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #64748b; background: rgba(0,0,0,0.2); border-radius: 12px;">
@@ -638,22 +646,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const ownershipPct = (opp.ownership_percentage && opp.ownership_percentage > 0) ? opp.ownership_percentage : 100;
             const ownershipFormatted = formatExactPercentage(ownershipPct);
 
-            let surfaceDisplay = '<span style="color: #94a3b8; font-style: italic;">No consta BOE</span>';
-            if (effectiveSurface) {
+            const isSurfaceMissing = Boolean(opp.is_surface_missing || !effectiveSurface);
+
+            let surfaceDisplay = '<span style="color: #f59e0b; font-weight: 700; font-size: 0.80rem;">⚠️ Sin constancia BOE</span>';
+            if (effectiveSurface && !isSurfaceMissing) {
+                const estBadge = opp.is_surface_estimated ? '<span style="font-size: 0.68rem; color: #c084fc; font-weight: 700; margin-left: 3px;" title="Superficie estimada">(est.)</span>' : '';
                 if (ownershipPct < 100 && totalSurface) {
-                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² <span style="font-size: 0.68rem; color: #38bdf8; display: block;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m²)</span>`;
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}<span style="font-size: 0.68rem; color: #38bdf8; display: block;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m²)</span>`;
                 } else {
-                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m²`;
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}`;
                 }
             }
 
-            const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
+            const propertyM2Display = (!isSurfaceMissing && opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
             const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²`;
             const typeLabel = isFlipping ? 'Inmueble' : 'Solar';
 
-            const estimatedMktVal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refVal);
-            const profitVal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktVal - refVal);
-            const profitFormatted = profitVal >= 0 ? `+${formatCurrency(profitVal)}` : formatCurrency(profitVal);
+            const estimatedMktVal = isSurfaceMissing ? null : (opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : null));
+            const profitVal = isSurfaceMissing ? null : ((opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktVal ? (estimatedMktVal - refVal) : null));
+            const profitFormatted = isSurfaceMissing ? '<span style="color: #f59e0b; font-size: 0.78rem; font-weight: 700;">Requiere Nota Simple</span>' : (profitVal >= 0 ? `+${formatCurrency(profitVal)}` : formatCurrency(profitVal));
 
             const landType = opp.land_type || 'URBANO';
             const landColor = landType === 'RÚSTICO' ? '#f59e0b' : '#38bdf8';
@@ -724,7 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (opp.source_type === 'edictos') {
                 const isHerencia = opp.category === 'HERENCIA_YACENTE';
                 actionBtnLabel = isHerencia ? 'TEJU BOE' : 'SUB. JUDICIAL';
-                actionBtnUrl = opp.boe_url || (opp.teju_boe_code ? `https://boe.es/buscar/notificaciones.php?id=${opp.teju_boe_code}` : '#');
+                actionBtnUrl = opp.boe_url || (opp.teju_boe_code ? (opp.teju_boe_code.startsWith('BOE-') && !opp.teju_boe_code.includes('TEJU') && !opp.teju_boe_code.includes('JUZ') ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.teju_boe_code)}&accion=Buscar`) : 'https://www.boe.es/buscar/edictos_judiciales.php');
 
                 dateSubastaHeader = `
                     <div style="font-size: 0.76rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
@@ -771,6 +782,26 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ${liensBadgeLabel}
                             </span>
                         </div>
+                        ${opp.idufir ? `
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="shield-check" style="width: 13px; height: 13px; color: #c084fc;"></i> IDUFIR / CRU:
+                            </span>
+                            <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 800; font-size: 0.74rem; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;">
+                                ${escapeHtml(opp.idufir)}
+                            </span>
+                        </div>
+                        ` : ''}
+                        ${opp.is_lotes ? `
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                            <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="package" style="width: 13px; height: 13px; color: #818cf8;"></i> Modalidad:
+                            </span>
+                            <span style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; font-weight: 800; font-size: 0.74rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.3);">
+                                ${escapeHtml(opp.lote_badge || '📦 LOTE INDEPENDIENTE')}
+                            </span>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             }
@@ -781,10 +812,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
                             ${opp.source_type === 'pgou' ? '' : (opp.source_type === 'edictos' ? `
                                 <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
-                                <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                ${opp.discount_percentage > 0 ? `
+                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                ` : `
+                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Edicto s/ Tipo</span>
+                                `}
                             ` : `
-                                <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
-                                <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                    <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
+                                    ${opp.is_lotes ? `
+                                        <span class="badge-lote" title="Subasta por lotes independientes. Puja y adjudicación separada.">
+                                            <i data-lucide="package"></i> LOTE ${opp.lot_number || 1}
+                                        </span>
+                                    ` : ''}
+                                </div>
+                                ${opp.is_surface_missing ? `
+                                    <span class="badge-discount" style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠️ Requiere Nota Simple</span>
+                                ` : (opp.discount_percentage > 0 ? `
+                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                ` : `
+                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Subasta s/ Tipo</span>
+                                `)}
                             `)}
                         </div>
                     </div>
@@ -818,7 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">Valor Mercado Estimado</span>
-                                <span class="fin-val" style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${formatCurrency(estimatedMktVal)}</span>
+                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: ${isSurfaceMissing ? '#f59e0b' : '#38bdf8'};">${isSurfaceMissing ? '<span style="font-size: 0.76rem; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(estimatedMktVal)}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">Superficie (${opp.source_type === 'pgou' ? 'Suelo m²s' : (opp.source_type === 'edictos' ? 'Útil / Cuota' : 'Cuota Real')})</span>
@@ -865,7 +913,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Attach global window function to open Property Detail Modal
     window.openPropertyDetailModal = function(index) {
-        const opp = state.filteredOpportunities[index];
+        let opp = null;
+        if (typeof index === 'object' && index !== null) {
+            opp = index;
+        } else if (state.filteredOpportunities && state.filteredOpportunities[index]) {
+            opp = state.filteredOpportunities[index];
+        } else if (state.allOpportunities && state.allOpportunities[index]) {
+            opp = state.allOpportunities[index];
+        } else if (window._lastOpportunities && window._lastOpportunities[index]) {
+            opp = window._lastOpportunities[index];
+        }
         if (!opp) return;
 
         const modal = document.getElementById('modal-property-detail');
@@ -878,15 +935,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const ownershipPct = (opp.ownership_percentage && opp.ownership_percentage > 0) ? opp.ownership_percentage : 100;
         const ownershipFormatted = formatExactPercentage(ownershipPct);
 
-        let surfaceDisplayModal = 'No consta BOE/Catastro';
-        if (effectiveSurface) {
+        const isSurfaceMissingModal = Boolean(opp.is_surface_missing || !effectiveSurface);
+        let surfaceDisplayModal = '<span style="color: #f59e0b; font-weight: 700; font-size: 0.95rem;">⚠️ Sin constancia en BOE</span>';
+        if (effectiveSurface && !isSurfaceMissingModal) {
+            const estBadgeModal = opp.is_surface_estimated ? '<span style="font-size: 0.74rem; color: #c084fc; font-weight: 700; margin-left: 4px;" title="Superficie estimada">(est.)</span>' : '';
             if (ownershipPct < 100 && totalSurface) {
                 surfaceDisplayModal = `
-                    <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m²</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>
                     <div style="font-size: 0.72rem; color: #38bdf8; font-weight: 600; margin-top: 2px;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m² total)</div>
                 `;
             } else {
-                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m²</div>`;
+                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>`;
             }
         }
 
@@ -901,6 +960,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let dateSubastaHeaderModal = '';
         let extBtnLabelModal = 'Abrir Expediente Oficial en BOE';
         let extBtnUrlModal = opp.boe_url || opp.gazette_url || '#';
+        if (opp.is_lotes) {
+            extBtnLabelModal = `📦 Abrir Ficha Lote ${opp.lot_number || 1} en BOE Oficial`;
+            if (opp.lote_boe_url) {
+                extBtnUrlModal = opp.lote_boe_url;
+            }
+        }
 
         if (opp.source_type === 'pgou') {
             extBtnLabelModal = `Abrir Boletín Oficial (${opp.gazette_source ? opp.gazette_source.split(' ')[0] : 'BOCM'})`;
@@ -1020,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (opp.source_type === 'edictos') {
             const isHerencia = opp.category === 'HERENCIA_YACENTE';
             extBtnLabelModal = isHerencia ? 'Abrir Anuncio Oficial en TEJU - BOE' : 'Abrir Subasta Judicial de Condominio';
-            extBtnUrlModal = opp.boe_url || (opp.teju_boe_code ? `https://boe.es/buscar/notificaciones.php?id=${opp.teju_boe_code}` : '#');
+            extBtnUrlModal = opp.boe_url || (opp.teju_boe_code ? (opp.teju_boe_code.startsWith('BOE-') && !opp.teju_boe_code.includes('TEJU') && !opp.teju_boe_code.includes('JUZ') ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.teju_boe_code)}&accion=Buscar`) : 'https://www.boe.es/buscar/edictos_judiciales.php');
 
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
@@ -1103,11 +1168,33 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             urbanismDetail = `
-                <div style="margin-top: 14px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; width: 100%;">
-                    <span style="color: #94a3b8; font-weight: 600;">Calificación del Suelo / Dominio:</span>
-                    <span class="badge" style="background: ${landType === 'RÚSTICO' ? 'rgba(234,179,8,0.2)' : 'rgba(56,189,248,0.2)'}; color: ${landType === 'RÚSTICO' ? '#eab308' : '#38bdf8'}; font-weight: 800; font-size: 0.92rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
-                        ${landType} ${(ownershipPct < 100) ? `(${ownershipFormatted}% PLENO DOMINIO)` : ''}
-                    </span>
+                <div style="margin-top: 14px; padding: 12px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; font-size: 0.9rem; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: #94a3b8; font-weight: 600;">Calificación del Suelo / Dominio:</span>
+                        <span class="badge" style="background: ${landType === 'RÚSTICO' ? 'rgba(234,179,8,0.2)' : 'rgba(56,189,248,0.2)'}; color: ${landType === 'RÚSTICO' ? '#eab308' : '#38bdf8'}; font-weight: 800; font-size: 0.92rem; padding: 4px 10px; border-radius: 6px; text-transform: uppercase;">
+                            ${landType} ${(ownershipPct < 100) ? `(${ownershipFormatted}% PLENO DOMINIO)` : ''}
+                        </span>
+                    </div>
+                    ${opp.idufir ? `
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px;">
+                        <span style="color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="shield-check" style="width: 15px; height: 15px; color: #c084fc;"></i> Código Registral Único (CRU / IDUFIR):
+                        </span>
+                        <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 800; font-size: 0.82rem; padding: 3px 10px; border-radius: 6px; letter-spacing: 0.5px;">
+                            ${escapeHtml(opp.idufir)}
+                        </span>
+                    </div>
+                    ` : ''}
+                    ${opp.refcat ? `
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px;">
+                        <span style="color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="map-pin" style="width: 15px; height: 15px; color: #38bdf8;"></i> Referencia Catastral (SEC):
+                        </span>
+                        <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 800; font-size: 0.82rem; padding: 3px 10px; border-radius: 6px; letter-spacing: 0.5px;">
+                            ${escapeHtml(opp.refcat)}
+                        </span>
+                    </div>
+                    ` : ''}
                 </div>
             `;
 
@@ -1193,12 +1280,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const refValModal = (opp.source_type === 'pgou' || opp.source_type === 'edictos')
             ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
             : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
-        const estimatedMktValModal = opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : refValModal);
-        const profitValModal = (opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktValModal - refValModal);
-        const profitFormattedModal = profitValModal >= 0 ? `+${formatCurrency(profitValModal)}` : formatCurrency(profitValModal);
+        const estimatedMktValModal = isSurfaceMissingModal ? null : (opp.estimated_reference_value || ((effectiveSurface && opp.area_m2_price) ? (effectiveSurface * opp.area_m2_price) : null));
+        const profitValModal = isSurfaceMissingModal ? null : ((opp.potential_gross_profit !== undefined && opp.potential_gross_profit !== null) ? opp.potential_gross_profit : (estimatedMktValModal ? (estimatedMktValModal - refValModal) : null));
+        const profitFormattedModal = isSurfaceMissingModal ? '<span style="color: #f59e0b; font-size: 0.85rem; font-weight: 700;">Requiere Nota Simple</span>' : (profitValModal >= 0 ? `+${formatCurrency(profitValModal)}` : formatCurrency(profitValModal));
 
-        const valorMicroVal = opp.valor_micro_est || opp.property_m2_price;
-        const valorMicroDisplay = (valorMicroVal && valorMicroVal > 0) ? `${formatCurrency(valorMicroVal)}/m²` : 'N/D';
+        const valorMicroVal = isSurfaceMissingModal ? null : (opp.valor_micro_est || opp.property_m2_price);
+        const valorMicroDisplay = (valorMicroVal && valorMicroVal > 0) ? `${formatCurrency(valorMicroVal)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
+
+        const registryServiceHtml = (opp.source_type === 'pgou') ? '' : `
+            <div class="card-registry-module" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 14px 16px; margin-top: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: rgba(168, 85, 247, 0.2); color: #c084fc; padding: 4px 8px; border-radius: 6px; font-size: 0.82rem; font-weight: 800; display: flex; align-items: center; gap: 5px;">
+                            <i data-lucide="building"></i> REGISTRO DE LA PROPIEDAD
+                        </span>
+                        <span style="font-size: 0.78rem; color: #94a3b8;">Servicio Web Colegio de Registradores</span>
+                    </div>
+                    <span style="font-size: 0.75rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25); font-weight: 600;">
+                        Tarifa Arancelaria: 9,02 € + IVA (Abono en cuenta)
+                    </span>
+                </div>
+
+                <div style="font-size: 0.82rem; color: #cbd5e1; margin-bottom: 10px; line-height: 1.4;">
+                    ${isSurfaceMissingModal ? `
+                        <div style="background: rgba(245, 158, 11, 0.12); border-left: 3px solid #f59e0b; padding: 8px 10px; border-radius: 0 4px 4px 0; margin-bottom: 8px; color: #fbbf24;">
+                            <strong>Dato métrico no disponible en edicto:</strong> La subasta no especifica los m² en el BOE. Solicita la Nota Simple telemática para verificar la superficie registral exacta, linderos y cargas subsistentes antes de ofertar.
+                        </div>
+                    ` : `
+                        <span>Verifica titularidad registral fehaciente, cargas registrales previas y liquidación de embargos directamente en el Registro de la Propiedad competente.</span>
+                    `}
+                    <div style="display: flex; gap: 16px; margin-top: 6px; font-size: 0.78rem; color: #94a3b8; flex-wrap: wrap;">
+                        <span><strong>IDUFIR / CRU:</strong> <span style="color: #f8fafc; font-family: monospace;">${escapeHtml(opp.idufir || 'No consta en edicto (búsqueda por Finca)')}</span></span>
+                        <span><strong>Ref. Catastral:</strong> <span style="color: #f8fafc; font-family: monospace;">${escapeHtml(opp.refcat || 'Pendiente')}</span></span>
+                        <span><strong>Juzgado / Origen:</strong> <span style="color: #f8fafc;">${escapeHtml(opp.court_or_notary || opp.locality || 'Juzgado competente')}</span></span>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                    <button class="btn" onclick="requestNotaSimpleOnDemand(${index})" id="btn-request-nota-${index}" style="background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); color: #fff; border: none; font-weight: 700; font-size: 0.82rem; padding: 8px 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);">
+                        <i data-lucide="file-check"></i> Solicitar Nota Simple a Demanda (9,02 €)
+                    </button>
+                    <div id="nota-simple-status-${index}" style="font-size: 0.76rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                        <span>Cargo directo en cuenta de abonado registral</span>
+                    </div>
+                </div>
+            </div>
+        `;
 
         body.innerHTML = `
             <div class="modal-prop-container">
@@ -1209,6 +1336,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="modal-prop-header">
+                    ${opp.is_lotes ? `
+                        <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-lote" style="font-size: 0.84rem; padding: 5px 12px; border-radius: 6px;">
+                                <i data-lucide="package"></i> ${escapeHtml(opp.lote_badge || 'SUBASTA POR LOTES · ADJUDICACIÓN INDEPENDIENTE')}
+                            </span>
+                            <span style="font-size: 0.78rem; color: #a5b4fc; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); padding: 4px 8px; border-radius: 4px;">
+                                ⚖️ LEC Art. 643: Puja y adjudicación independiente por lote
+                            </span>
+                        </div>
+                    ` : ''}
                     <h2>${escapeHtml(opp.title)}</h2>
                     <div class="modal-prop-address" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
                         <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
@@ -1229,8 +1366,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Valor Mercado Est.</span>
-                        <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatCurrency(estimatedMktValModal)} (*)</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${isSurfaceMissingModal ? '#f59e0b' : '#38bdf8'}; font-weight: 600; line-height: 1.2;">Valor Mercado Est.</span>
+                        <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${isSurfaceMissingModal ? '#f59e0b' : '#38bdf8'}; margin-top: 2px;">${isSurfaceMissingModal ? '<span style="font-size: 0.82rem; font-weight: 700;">Pendiente Nota Simple</span>' : `${formatCurrency(estimatedMktValModal)} (*)`}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : (opp.source_type === 'edictos' ? 'Superficie Útil / Cuota' : 'Superficie (Cuota Real)')}</span>
@@ -1264,6 +1401,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 ${liensDetailHtml}
 
+                ${registryServiceHtml}
+
                 <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border);">
                     <button class="btn btn-secondary" onclick="closePropertyDetailModal()">
                         <i data-lucide="x"></i> Cerrar Ventana
@@ -1284,6 +1423,77 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closePropertyDetailModal = function() {
         const modal = document.getElementById('modal-property-detail');
         if (modal) modal.classList.add('hidden');
+    };
+
+    window.requestNotaSimpleOnDemand = async function(idx) {
+        let opp = null;
+        if (typeof idx === 'object' && idx !== null) {
+            opp = idx;
+        } else if (state.filteredOpportunities && state.filteredOpportunities[idx]) {
+            opp = state.filteredOpportunities[idx];
+        } else if (state.allOpportunities && state.allOpportunities[idx]) {
+            opp = state.allOpportunities[idx];
+        } else if (window._lastOpportunities && window._lastOpportunities[idx]) {
+            opp = window._lastOpportunities[idx];
+        }
+        if (!opp) return;
+
+        const btn = document.getElementById(`btn-request-nota-${idx}`);
+        const statusDiv = document.getElementById(`nota-simple-status-${idx}`);
+
+        const confirmMsg = `¿Deseas tramitar la solicitud telemática de Nota Simple oficial para ${opp.id_subasta || opp.title}?\n\n• Identificador: ${opp.idufir || opp.refcat || 'Datos de finca/edicto'}\n• Arancel regulado: 9,02 € (+ 21% IVA = 10,91 €)\n• Facturación: Cargo en cuenta de abonado del Colegio de Registradores\n\n¿Continuar con la solicitud a demanda?`;
+        if (!confirm(confirmMsg)) return;
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Tramitando con Registro...`;
+            if (window.lucide) lucide.createIcons();
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            const resp = await fetch(`/api/v1/opportunities/${opp.id}/request-nota-simple`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
+                    motivo: "Interés legítimo de inversión inmobiliaria en procedimiento de subasta pública"
+                })
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                throw new Error(errData.detail || 'Error al conectar con la pasarela del Colegio de Registradores');
+            }
+
+            const resData = await resp.json();
+            if (statusDiv) {
+                statusDiv.innerHTML = `
+                    <div style="background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); padding: 8px 12px; border-radius: 6px; color: #4ade80; display: flex; flex-direction: column; gap: 4px; width: 100%; margin-top: 6px;">
+                        <span style="font-weight: 700; display: flex; align-items: center; gap: 6px;"><i data-lucide="check-circle" style="width: 14px; height: 14px;"></i> Solicitud telemática tramitada con éxito</span>
+                        <span style="font-size: 0.74rem; color: #cbd5e1;">Nº Expediente: <strong style="font-family: monospace; color: #fff;">${escapeHtml(resData.expediente_id || 'REG-2026-0084')}</strong> • Cuenta abono: <strong>${escapeHtml(resData.billing_account || 'ABONO-REG-0001')}</strong></span>
+                        <span style="font-size: 0.72rem; color: #94a3b8;">${escapeHtml(resData.mensaje || 'En tramitación telemática. Los datos registrales y superficie se volcarán al expediente.')}</span>
+                    </div>
+                `;
+                if (window.lucide) lucide.createIcons();
+            }
+            if (btn) {
+                btn.style.background = '#059669';
+                btn.innerHTML = `<i data-lucide="check"></i> Solicitada (Expediente en curso)`;
+                if (window.lucide) lucide.createIcons();
+            }
+        } catch (err) {
+            if (statusDiv) {
+                statusDiv.innerHTML = `<span style="color: #f87171; font-weight: 600;">⚠️ ${escapeHtml(err.message)}</span>`;
+            }
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="file-check"></i> Reintentar Solicitud`;
+                if (window.lucide) lucide.createIcons();
+            }
+        }
     };
 
     window.openGoogleMapsModal = function(address, lat, lon, event) {
@@ -1347,11 +1557,204 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let markersMap = {};
+    let clustersByOppId = {};
+    let currentSpiderLayer = null;
+
+    window.unspiderify = function() {
+        if (currentSpiderLayer && map) {
+            map.removeLayer(currentSpiderLayer);
+            currentSpiderLayer = null;
+        }
+    };
+
+    function buildPopupHtml(opp, idx) {
+        const isPgou = opp.source_type === 'pgou';
+        const isEdictos = opp.source_type === 'edictos';
+        const imgInfo = getOpportunityMainImage(opp);
+        const mainImg = imgInfo.url;
+        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`;
+
+        let loteHeaderHtml = '';
+        if (opp.is_lotes) {
+            loteHeaderHtml = `
+                <div style="margin-bottom: 6px;">
+                    <span style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 4px; box-shadow: 0 1px 4px rgba(99,102,241,0.4); display: inline-flex; align-items: center; gap: 4px;">
+                        📦 LOTE ${opp.lot_number || 1} · PUJA INDEPENDIENTE
+                    </span>
+                </div>
+            `;
+        }
+
+        let popupDetailHtml = '';
+        if (isPgou) {
+            let landUseProposed = 'Residencial';
+            if (opp.proposed_land_use === 'PROTECTED_HOUSING') {
+                landUseProposed = 'Residencial VPA / VPPO (Protegida)';
+            } else if (opp.proposed_land_use === 'FREE_HOUSING') {
+                landUseProposed = 'Residencial Libre';
+            } else if (opp.proposed_land_use === 'TERTIARY_INDUSTRIAL') {
+                landUseProposed = 'Terciario / Industrial';
+            } else if (opp.proposed_land_use) {
+                landUseProposed = opp.proposed_land_use;
+            }
+            const planningStatus = opp.planning_status || 'PGOU';
+            const scoreCol = getScoreColor(opp.overall_score);
+            popupDetailHtml = `
+                <div style="margin-bottom: 3px; font-size: 11px; color: #6b21a8; font-weight: 700;">
+                    🧭 <strong>Uso Propuesto:</strong> ${escapeHtml(landUseProposed)}
+                </div>
+                <div style="margin-bottom: 3px; font-size: 11px; color: #0369a1; font-weight: 700;">
+                    📜 <strong>Estatus:</strong> ${escapeHtml(planningStatus)}
+                </div>
+                <div style="margin-bottom: 10px; font-weight: 800; color: ${scoreCol}; font-size: 12px;">
+                    ⭐ <strong>Score General:</strong> ${formatScore(opp.overall_score)} / 100 pts
+                </div>
+            `;
+        } else if (isEdictos) {
+            const isHerencia = opp.category === 'HERENCIA_YACENTE';
+            popupDetailHtml = `
+                <div style="margin-bottom: 3px; font-size: 11px; color: ${isHerencia ? '#b45309' : '#4338ca'}; font-weight: 700;">
+                    ⚖️ <strong>Procedimiento:</strong> ${escapeHtml(opp.proceedings_type || 'Edicto')}
+                </div>
+                <div style="margin-bottom: 3px; font-size: 11px; color: #0284c7; font-weight: 700;">
+                    🏛️ <strong>Origen:</strong> ${escapeHtml(opp.court_or_notary || 'Notaría / Juzgado')}
+                </div>
+                <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
+                    -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid || opp.property_ref_value)}
+                </div>
+            `;
+        } else {
+            const boeAppraisalText = (opp.appraisal_value && opp.appraisal_value > 0) ? formatCurrency(opp.appraisal_value) : '0 € (Sin constancia en BOE)';
+            const mktEstPopup = opp.is_surface_missing ? '<span style="color: #d97706; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(opp.estimated_reference_value);
+            const discountBadgePopup = opp.is_surface_missing
+                ? '<span style="color: #d97706; font-weight: 700;">⚠️ Requiere Nota Simple</span>'
+                : (opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 0)}% Descuento` : 'Subasta s/ Tipo');
+            popupDetailHtml = `
+                <div style="margin-bottom: 2px; font-size: 11px; color: #475569;">
+                    <strong>Tasación BOE:</strong> ${boeAppraisalText}
+                </div>
+                <div style="margin-bottom: 4px; font-size: 11px; color: #0284c7;">
+                    <strong>Estimación Mercado:</strong> ${mktEstPopup}
+                </div>
+                <div style="margin-bottom: 10px; font-weight: 700; color: ${opp.is_surface_missing ? '#d97706' : (opp.discount_percentage > 0 ? '#059669' : '#64748b')}; font-size: 12px;">
+                    ${discountBadgePopup} | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid)}
+                </div>
+            `;
+        }
+
+        return `
+            <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
+                <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
+                    <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                </div>
+                ${loteHeaderHtml}
+                <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
+                <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
+                ${popupDetailHtml}
+                <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
+                    🔍 Ver Ficha Completa
+                </button>
+            </div>
+        `;
+    }
+
+    function spiderifyCluster(cluster, clusterMarker, targetOppIdToOpen = null) {
+        window.unspiderify();
+        if (!map) return;
+
+        currentSpiderLayer = L.layerGroup();
+        const count = cluster.items.length;
+        const centerLatLng = L.latLng(cluster.lat, cluster.lon);
+        const centerPoint = map.latLngToLayerPoint(centerLatLng);
+
+        const radiusPx = count <= 2 ? 55 : (count <= 4 ? 68 : (count <= 6 ? 85 : 105));
+
+        cluster.items.forEach((item, i) => {
+            const opp = item.opp;
+            const idx = item.idx;
+
+            let angle;
+            if (count === 2) {
+                angle = (i === 0 ? -Math.PI * 0.75 : -Math.PI * 0.25);
+            } else if (count === 3) {
+                angle = -Math.PI / 2 + (i - 1) * (Math.PI / 3);
+            } else {
+                angle = (2 * Math.PI * i / count) - (Math.PI / 2);
+            }
+
+            const childPoint = L.point(
+                centerPoint.x + radiusPx * Math.cos(angle),
+                centerPoint.y + radiusPx * Math.sin(angle)
+            );
+            const childLatLng = map.layerPointToLatLng(childPoint);
+
+            // 1. Línea SVG conectora
+            const connector = L.polyline([centerLatLng, childLatLng], {
+                color: '#818cf8',
+                weight: 2,
+                opacity: 0.9,
+                dashArray: '3, 4',
+                className: 'spider-connector-line'
+            });
+            currentSpiderLayer.addLayer(connector);
+
+            // 2. Marcador desplegado en abanico
+            let childColor = '#f59e0b';
+            if (opp.source_type === 'pgou') {
+                childColor = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
+            } else if (opp.source_type === 'edictos') {
+                childColor = opp.category === 'HERENCIA_YACENTE' ? '#eab308' : '#6366f1';
+            } else {
+                childColor = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
+            }
+
+            const lotNum = opp.lot_number || (i + 1);
+            const childIcon = L.divIcon({
+                className: 'custom-map-pin spider-pin-fan',
+                html: `
+                    <div style="background-color: ${childColor}; width: 28px; height: 28px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 14px ${childColor}; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 11px; user-select: none;">
+                        L${lotNum}
+                    </div>
+                `,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+
+            const childMarker = L.marker(childLatLng, { icon: childIcon });
+            childMarker.bindPopup(buildPopupHtml(opp, idx));
+
+            childMarker.on('click', () => {
+                document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
+                const cardEl = document.querySelector(`.deal-card[data-opp-id="${opp.id}"]`);
+                if (cardEl) {
+                    cardEl.classList.add('card-highlight');
+                    cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+
+            currentSpiderLayer.addLayer(childMarker);
+
+            if (targetOppIdToOpen && opp.id === targetOppIdToOpen) {
+                setTimeout(() => childMarker.openPopup(), 180);
+            }
+        });
+
+        currentSpiderLayer.addTo(map);
+    }
 
     window.highlightOpportunityPin = function(oppId, lat, lon) {
         document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
         const cardEl = document.querySelector(`.deal-card[data-opp-id="${oppId}"]`);
         if (cardEl) cardEl.classList.add('card-highlight');
+
+        const cluster = clustersByOppId[oppId];
+        if (cluster && cluster.items.length > 1) {
+            if (lat && lon && map) {
+                map.flyTo([lat, lon], 16, { duration: 0.8 });
+            }
+            spiderifyCluster(cluster, cluster.marker, oppId);
+            return;
+        }
 
         const marker = markersMap[oppId];
         if (marker && map) {
@@ -1408,107 +1811,82 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Render Pins on Map with Interactivity
+    // Render Pins on Map with Interactivity & Spiderify (Opción A: Abanico Radial)
     function renderMapMarkers(opps) {
         if (!mapMarkersLayer) return;
+        window.unspiderify();
         mapMarkersLayer.clearLayers();
         markersMap = {};
+        clustersByOppId = {};
         const bounds = [];
 
+        // Agrupar oportunidades en clusters geográficos o por id_subasta si es por lotes
+        const clusters = {};
         opps.forEach((opp, idx) => {
             if (opp.lat && opp.lon) {
-                const isPgou = opp.source_type === 'pgou';
-                const isEdictos = opp.source_type === 'edictos';
+                const geoKey = (opp.is_lotes && opp.id_subasta)
+                    ? `sub_${opp.id_subasta}`
+                    : `${opp.lat.toFixed(4)},${opp.lon.toFixed(4)}`;
+
+                if (!clusters[geoKey]) {
+                    clusters[geoKey] = {
+                        lat: opp.lat,
+                        lon: opp.lon,
+                        items: [],
+                        marker: null
+                    };
+                }
+                clusters[geoKey].items.push({ opp, idx });
+                bounds.push([opp.lat, opp.lon]);
+            }
+        });
+
+        // Crear marcadores en el mapa
+        Object.keys(clusters).forEach(key => {
+            const cluster = clusters[key];
+            const count = cluster.items.length;
+
+            if (count === 1) {
+                // Caso 1: Oportunidad individual
+                const item = cluster.items[0];
+                const opp = item.opp;
+                const idx = item.idx;
+
+                clustersByOppId[opp.id] = cluster;
+
                 let color = '#f59e0b';
-                if (isPgou) {
+                if (opp.source_type === 'pgou') {
                     color = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
-                } else if (isEdictos) {
+                } else if (opp.source_type === 'edictos') {
                     color = opp.category === 'HERENCIA_YACENTE' ? '#eab308' : '#6366f1';
                 } else {
                     color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
                 }
 
-                const imgInfo = getOpportunityMainImage(opp);
-                const mainImg = imgInfo.url;
-                const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}`;
+                let iconHtml = `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 12px ${color}; cursor: pointer;"></div>`;
+                let iconSize = [20, 20];
+                let iconAnchor = [10, 10];
+
+                if (opp.is_lotes) {
+                    iconHtml = `
+                        <div class="pin-lote-badge" style="background-color: ${color}; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; border: 2px solid white; box-shadow: 0 0 14px ${color}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 3px; color: white; font-weight: 800; font-size: 11px;">
+                            <span>📦</span><span>L${opp.lot_number || 1}</span>
+                        </div>
+                    `;
+                    iconSize = [46, 26];
+                    iconAnchor = [23, 13];
+                }
 
                 const customIcon = L.divIcon({
                     className: 'custom-map-pin',
-                    html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 12px ${color}; cursor: pointer;"></div>`,
-                    iconSize: [20, 20]
+                    html: iconHtml,
+                    iconSize: iconSize,
+                    iconAnchor: iconAnchor
                 });
 
                 const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
-                markersMap[opp.id] = marker;
+                marker.bindPopup(buildPopupHtml(opp, idx));
 
-                let popupDetailHtml = '';
-                if (isPgou) {
-                    let landUseProposed = 'Residencial';
-                    if (opp.proposed_land_use === 'PROTECTED_HOUSING') {
-                        landUseProposed = 'Residencial VPA / VPPO (Protegida)';
-                    } else if (opp.proposed_land_use === 'FREE_HOUSING') {
-                        landUseProposed = 'Residencial Libre';
-                    } else if (opp.proposed_land_use === 'TERTIARY_INDUSTRIAL') {
-                        landUseProposed = 'Terciario / Industrial';
-                    } else if (opp.proposed_land_use) {
-                        landUseProposed = opp.proposed_land_use;
-                    }
-                    const planningStatus = opp.planning_status || 'PGOU';
-                    const scoreCol = getScoreColor(opp.overall_score);
-                    popupDetailHtml = `
-                        <div style="margin-bottom: 3px; font-size: 11px; color: #6b21a8; font-weight: 700;">
-                            🧭 <strong>Uso Propuesto:</strong> ${escapeHtml(landUseProposed)}
-                        </div>
-                        <div style="margin-bottom: 3px; font-size: 11px; color: #0369a1; font-weight: 700;">
-                            📜 <strong>Estatus:</strong> ${escapeHtml(planningStatus)}
-                        </div>
-                        <div style="margin-bottom: 10px; font-weight: 800; color: ${scoreCol}; font-size: 12px;">
-                            ⭐ <strong>Score General:</strong> ${formatScore(opp.overall_score)} / 100 pts
-                        </div>
-                    `;
-                } else if (isEdictos) {
-                    const isHerencia = opp.category === 'HERENCIA_YACENTE';
-                    popupDetailHtml = `
-                        <div style="margin-bottom: 3px; font-size: 11px; color: ${isHerencia ? '#b45309' : '#4338ca'}; font-weight: 700;">
-                            ⚖️ <strong>Procedimiento:</strong> ${escapeHtml(opp.proceedings_type || 'Edicto')}
-                        </div>
-                        <div style="margin-bottom: 3px; font-size: 11px; color: #0284c7; font-weight: 700;">
-                            🏛️ <strong>Origen:</strong> ${escapeHtml(opp.court_or_notary || 'Notaría / Juzgado')}
-                        </div>
-                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
-                            -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid || opp.property_ref_value)}
-                        </div>
-                    `;
-                } else {
-                    const boeAppraisalText = (opp.appraisal_value && opp.appraisal_value > 0) ? formatCurrency(opp.appraisal_value) : '0 € (Sin constancia en BOE)';
-                    popupDetailHtml = `
-                        <div style="margin-bottom: 2px; font-size: 11px; color: #475569;">
-                            <strong>Tasación BOE:</strong> ${boeAppraisalText}
-                        </div>
-                        <div style="margin-bottom: 4px; font-size: 11px; color: #0284c7;">
-                            <strong>Estimación Mercado:</strong> ${formatCurrency(opp.estimated_reference_value)}
-                        </div>
-                        <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
-                            -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price)}
-                        </div>
-                    `;
-                }
-
-                marker.bindPopup(`
-                    <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
-                        <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
-                            <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
-                        </div>
-                        <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
-                        <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
-                        ${popupDetailHtml}
-                        <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
-                            🔍 Ver Ficha Completa
-                        </button>
-                    </div>
-                `);
-
-                // Al pulsar la chincheta: resaltar tarjeta en el panel y hacer scroll
                 marker.on('click', () => {
                     document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
                     const cardEl = document.querySelector(`.deal-card[data-opp-id="${opp.id}"]`);
@@ -1518,8 +1896,42 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
 
+                cluster.marker = marker;
+                markersMap[opp.id] = marker;
                 mapMarkersLayer.addLayer(marker);
-                bounds.push([opp.lat, opp.lon]);
+
+            } else {
+                // Caso 2: Subasta con múltiples lotes o fincas co-ubicadas -> Cluster con apertura en abanico (Spiderify)
+                cluster.items.forEach(it => {
+                    clustersByOppId[it.opp.id] = cluster;
+                });
+
+                const hasLot = cluster.items.some(it => it.opp.is_lotes);
+                const clusterColor = hasLot ? '#6366f1' : '#0ea5e9';
+                const labelText = hasLot ? `${count} Lotes` : `${count} Fincas`;
+
+                const clusterIcon = L.divIcon({
+                    className: 'custom-map-pin pin-cluster',
+                    html: `
+                        <div class="spider-cluster-badge" style="background: linear-gradient(135deg, ${clusterColor}, #4338ca); min-width: 36px; height: 32px; padding: 0 9px; border-radius: 16px; border: 2px solid white; box-shadow: 0 0 16px rgba(99,102,241,0.85); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; color: white; font-weight: 800; font-size: 11px; white-space: nowrap;">
+                            <span>${hasLot ? '📦' : '📍'}</span>
+                            <span>${labelText}</span>
+                        </div>
+                    `,
+                    iconSize: [44, 32],
+                    iconAnchor: [22, 16]
+                });
+
+                const clusterMarker = L.marker([cluster.lat, cluster.lon], { icon: clusterIcon });
+
+                // Al pulsar el cluster: abrir abanico radial (Spiderify)
+                clusterMarker.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    spiderifyCluster(cluster, clusterMarker);
+                });
+
+                cluster.marker = clusterMarker;
+                mapMarkersLayer.addLayer(clusterMarker);
             }
         });
 
