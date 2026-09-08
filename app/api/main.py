@@ -623,19 +623,12 @@ def get_opportunities(
 
         opportunities = query.all()
 
-        # Si la base de datos no tiene oportunidades, ejecutar el raspador BOE en tiempo real (100% datos reales)
-        if not opportunities:
+        # Si la base de datos no tiene oportunidades y no se pide solo edictos/pgou, programar escaneo en segundo plano
+        if not opportunities and source_type not in ["edictos", "pgou"]:
             try:
-                from app.engine.scoring_engine import OpportunityScoringEngine
-                scraper_init = BOESubastasScraper()
-                raw_auctions = scraper_init.scrape_live_auctions(limit=50)
-                if raw_auctions:
-                    scoring_engine = OpportunityScoringEngine(db)
-                    scoring_engine.process_and_score_auctions(raw_auctions)
-                    db.commit()
-                    opportunities = query.all()
-            except Exception as e_seed:
-                print(f"Error poblando subastas BOE en tiempo real: {e_seed}")
+                background_tasks.add_task(_run_background_pipeline)
+            except Exception as e_bg:
+                print(f"Error programando escaneo en segundo plano: {e_bg}")
 
         scraper = BOESubastasScraper()
         ine_client = INEClient()
