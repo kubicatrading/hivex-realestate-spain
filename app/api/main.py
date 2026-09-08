@@ -1126,54 +1126,54 @@ def get_opportunities(
             edictos_scraper = EdictosScraper()
             edictos_items = edictos_scraper.fetch_edictos_opportunities(province=province)
 
-        for e_item in edictos_items:
-            listing_p = e_item.get("listing_price", 0.0)
-            surf = e_item.get("surface_m2", 1.0)
-            effective_surf = e_item.get("effective_surface_m2") or surf
-            census_data = e_item.get("census_tract_data", {})
-            area_m2_price = census_data.get("area_m2_price", 3500.0)
-            # Dynamic Estimated Market Value strictly consistent with surface and area m2 price:
-            # - For 100% ownership: effective_surf == surf, so est_val = surf * area_m2_price
-            # - For proindiviso (e.g. 50% or 33%): est_val = effective_surf * area_m2_price (value of the auctioned share)
-            est_val = round(effective_surf * area_m2_price, 2)
-            e_item["estimated_reference_value"] = est_val
-            e_item["full_property_market_value"] = round(surf * area_m2_price, 2)
+            for e_item in edictos_items:
+                listing_p = e_item.get("listing_price", 0.0)
+                surf = e_item.get("surface_m2", 1.0)
+                effective_surf = e_item.get("effective_surface_m2") or surf
+                census_data = e_item.get("census_tract_data", {})
+                area_m2_price = census_data.get("area_m2_price", 3500.0)
+                # Dynamic Estimated Market Value strictly consistent with surface and area m2 price:
+                # - For 100% ownership: effective_surf == surf, so est_val = surf * area_m2_price
+                # - For proindiviso (e.g. 50% or 33%): est_val = effective_surf * area_m2_price (value of the auctioned share)
+                est_val = round(effective_surf * area_m2_price, 2)
+                e_item["estimated_reference_value"] = est_val
+                e_item["full_property_market_value"] = round(surf * area_m2_price, 2)
 
-            if est_val > 0 and listing_p > 0:
-                e_item["discount_percentage"] = max(0.0, round(((est_val - listing_p) / est_val) * 100, 1))
+                if est_val > 0 and listing_p > 0:
+                    e_item["discount_percentage"] = max(0.0, round(((est_val - listing_p) / est_val) * 100, 1))
 
-            e_item["potential_gross_profit"] = max(0.0, round(est_val - listing_p, 2))
-            e_item["property_m2_price"] = round(listing_p / effective_surf, 2) if effective_surf > 0 else 0.0
-            e_item["area_m2_price"] = area_m2_price
-            e_item["area_m2_price_source"] = "INE_CATASTRO"
-            e_item["area_m2_price_label"] = f"Ref. Mercado ({e_item.get('locality', '')})"
-            e_item["price_ref_level"] = "MESO"
-            e_item["price_ref_level_label"] = e_item.get("proceedings_type", "Edicto Judicial / Notarial")
+                e_item["potential_gross_profit"] = max(0.0, round(est_val - listing_p, 2))
+                e_item["property_m2_price"] = round(listing_p / effective_surf, 2) if effective_surf > 0 else 0.0
+                e_item["area_m2_price"] = area_m2_price
+                e_item["area_m2_price_source"] = "INE_CATASTRO"
+                e_item["area_m2_price_label"] = f"Ref. Mercado ({e_item.get('locality', '')})"
+                e_item["price_ref_level"] = "MESO"
+                e_item["price_ref_level_label"] = e_item.get("proceedings_type", "Edicto Judicial / Notarial")
 
-            scores_comp = e_item.get("score_components", {})
-            e_item["income_score"] = scores_comp.get("income_score", 90.0)
-            e_item["poi_score"] = scores_comp.get("poi_score", 90.0)
-            e_item["demographic_score"] = scores_comp.get("demographic_score", 88.0)
-            e_item["discount_score"] = scores_comp.get("discount_score", 95.0)
+                scores_comp = e_item.get("score_components", {})
+                e_item["income_score"] = scores_comp.get("income_score", 90.0)
+                e_item["poi_score"] = scores_comp.get("poi_score", 90.0)
+                e_item["demographic_score"] = scores_comp.get("demographic_score", 88.0)
+                e_item["discount_score"] = scores_comp.get("discount_score", 95.0)
 
-            e_item["avg_household_income"] = census_data.get("avg_household_income", 38000)
-            e_item["avg_person_income"] = census_data.get("avg_person_income", 17500)
-            e_item["population_growth_rate"] = census_data.get("population_growth_rate", 1.5)
+                e_item["avg_household_income"] = census_data.get("avg_household_income", 38000)
+                e_item["avg_person_income"] = census_data.get("avg_person_income", 17500)
+                e_item["population_growth_rate"] = census_data.get("population_growth_rate", 1.5)
 
-            # Enlace oficial al BOE (TEJU / Diario BOE)
-            if not e_item.get("boe_url"):
-                teju_code = (e_item.get("teju_boe_code") or "").strip()
-                if teju_code and re.match(r"^BOE-[A-Z]-\d{4}-\d+$", teju_code, re.IGNORECASE):
-                    e_item["boe_url"] = f"https://www.boe.es/diario_boe/txt.php?id={teju_code}"
-                elif e_item.get("expediente_num"):
-                    exp_clean = e_item.get("expediente_num")
-                    e_item["boe_url"] = f"https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D={quote_plus(exp_clean)}&accion=Buscar"
-                else:
-                    e_item["boe_url"] = "https://www.boe.es/buscar/edictos_judiciales.php"
+                # Enlace oficial al BOE (TEJU / Diario BOE)
+                if not e_item.get("boe_url"):
+                    teju_code = (e_item.get("teju_boe_code") or "").strip()
+                    if teju_code and re.match(r"^BOE-[A-Z]-\d{4}-\d+$", teju_code, re.IGNORECASE):
+                        e_item["boe_url"] = f"https://www.boe.es/diario_boe/txt.php?id={teju_code}"
+                    elif e_item.get("expediente_num"):
+                        exp_clean = e_item.get("expediente_num")
+                        e_item["boe_url"] = f"https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D={quote_plus(exp_clean)}&accion=Buscar"
+                    else:
+                        e_item["boe_url"] = "https://www.boe.es/buscar/edictos_judiciales.php"
 
-            results.append(e_item)
-    except Exception as e_edictos:
-        print(f"Error cargando oportunidades de Edictos: {e_edictos}")
+                results.append(e_item)
+        except Exception as e_edictos:
+            print(f"Error cargando oportunidades de Edictos: {e_edictos}")
 
     # Apply strategy filter if specified
     if strategy:
