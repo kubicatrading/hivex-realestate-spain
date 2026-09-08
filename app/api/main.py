@@ -1163,15 +1163,15 @@ def get_opportunities(
             e_item["population_growth_rate"] = census_data.get("population_growth_rate", 1.5)
 
             # Enlace oficial al BOE (TEJU / Diario BOE)
-            teju_code = (e_item.get("teju_boe_code") or "").strip()
-            if teju_code:
-                if re.match(r"^BOE-[A-Z]-\d{4}-\d+$", teju_code, re.IGNORECASE):
+            if not e_item.get("boe_url"):
+                teju_code = (e_item.get("teju_boe_code") or "").strip()
+                if teju_code and re.match(r"^BOE-[A-Z]-\d{4}-\d+$", teju_code, re.IGNORECASE):
                     e_item["boe_url"] = f"https://www.boe.es/diario_boe/txt.php?id={teju_code}"
+                elif e_item.get("expediente_num"):
+                    exp_clean = e_item.get("expediente_num")
+                    e_item["boe_url"] = f"https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D={quote_plus(exp_clean)}&accion=Buscar"
                 else:
-                    e_item["boe_url"] = f"https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D={quote_plus(teju_code)}&accion=Buscar"
-            elif not e_item.get("boe_url"):
-                exp_num = e_item.get("expediente_num") or "herencia yacente"
-                e_item["boe_url"] = f"https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D={quote_plus(exp_num)}&accion=Buscar"
+                    e_item["boe_url"] = "https://www.boe.es/buscar/edictos_judiciales.php"
 
             results.append(e_item)
     except Exception as e_edictos:

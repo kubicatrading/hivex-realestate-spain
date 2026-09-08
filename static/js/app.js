@@ -735,7 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (opp.source_type === 'edictos') {
                 const isHerencia = opp.category === 'HERENCIA_YACENTE';
                 actionBtnLabel = isHerencia ? 'TEJU BOE' : 'SUB. JUDICIAL';
-                actionBtnUrl = opp.boe_url || (opp.teju_boe_code ? (opp.teju_boe_code.startsWith('BOE-') && !opp.teju_boe_code.includes('TEJU') && !opp.teju_boe_code.includes('JUZ') ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.teju_boe_code)}&accion=Buscar`) : 'https://www.boe.es/buscar/edictos_judiciales.php');
+                actionBtnUrl = opp.boe_url || (opp.teju_boe_code && /^BOE-[A-Z]-\d{4}-\d+$/i.test(opp.teju_boe_code) ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : (opp.expediente_num ? `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.expediente_num)}&accion=Buscar` : 'https://www.boe.es/buscar/edictos_judiciales.php'));
 
                 dateSubastaHeader = `
                     <div style="font-size: 0.76rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
@@ -1085,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (opp.source_type === 'edictos') {
             const isHerencia = opp.category === 'HERENCIA_YACENTE';
             extBtnLabelModal = isHerencia ? 'Abrir Anuncio Oficial en TEJU - BOE' : 'Abrir Subasta Judicial de Condominio';
-            extBtnUrlModal = opp.boe_url || (opp.teju_boe_code ? (opp.teju_boe_code.startsWith('BOE-') && !opp.teju_boe_code.includes('TEJU') && !opp.teju_boe_code.includes('JUZ') ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.teju_boe_code)}&accion=Buscar`) : 'https://www.boe.es/buscar/edictos_judiciales.php');
+            extBtnUrlModal = opp.boe_url || (opp.teju_boe_code && /^BOE-[A-Z]-\d{4}-\d+$/i.test(opp.teju_boe_code) ? `https://www.boe.es/diario_boe/txt.php?id=${opp.teju_boe_code}` : (opp.expediente_num ? `https://www.boe.es/buscar/edictos_judiciales.php?campo%5B0%5D=DOC&dato%5B0%5D=${encodeURIComponent(opp.expediente_num)}&accion=Buscar` : 'https://www.boe.es/buscar/edictos_judiciales.php'));
 
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: ${isHerencia ? '#fbbf24' : '#818cf8'}; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
