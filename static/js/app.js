@@ -1559,12 +1559,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let markersMap = {};
     let clustersByOppId = {};
     let currentSpiderLayer = null;
+    let currentSpiderClusterKey = null;
 
     window.unspiderify = function() {
         if (currentSpiderLayer && map) {
             map.removeLayer(currentSpiderLayer);
             currentSpiderLayer = null;
         }
+        currentSpiderClusterKey = null;
     };
 
     function buildPopupHtml(opp, idx) {
@@ -1658,16 +1660,38 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    function openClusterWithZoom(cluster, targetOppIdToOpen = null) {
+        if (!map) return;
+        if (currentSpiderClusterKey === cluster.key && !targetOppIdToOpen) {
+            window.unspiderify();
+            return;
+        }
+
+        const currentZoom = map.getZoom();
+        const targetZoom = Math.max(currentZoom, 16);
+
+        if (currentZoom < 15) {
+            map.flyTo([cluster.lat, cluster.lon], targetZoom, { duration: 0.6 });
+            map.once('moveend', () => {
+                spiderifyCluster(cluster, cluster.marker, targetOppIdToOpen);
+            });
+        } else {
+            map.panTo([cluster.lat, cluster.lon], { duration: 0.25 });
+            spiderifyCluster(cluster, cluster.marker, targetOppIdToOpen);
+        }
+    }
+
     function spiderifyCluster(cluster, clusterMarker, targetOppIdToOpen = null) {
         window.unspiderify();
         if (!map) return;
 
+        currentSpiderClusterKey = cluster.key;
         currentSpiderLayer = L.layerGroup();
         const count = cluster.items.length;
         const centerLatLng = L.latLng(cluster.lat, cluster.lon);
         const centerPoint = map.latLngToLayerPoint(centerLatLng);
 
-        const radiusPx = count <= 2 ? 55 : (count <= 4 ? 68 : (count <= 6 ? 85 : 105));
+        const radiusPx = count <= 2 ? 45 : (count <= 4 ? 56 : (count <= 6 ? 68 : 82));
 
         cluster.items.forEach((item, i) => {
             const opp = item.opp;
@@ -1710,9 +1734,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const lotNum = opp.lot_number || (i + 1);
             const childIcon = L.divIcon({
-                className: 'custom-map-pin spider-pin-fan',
+                className: 'custom-map-pin spider-pin-wrapper',
                 html: `
-                    <div style="background-color: ${childColor}; width: 28px; height: 28px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 14px ${childColor}; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 11px; user-select: none;">
+                    <div class="spider-pin-circle" style="background-color: ${childColor}; box-shadow: 0 0 14px ${childColor};">
                         L${lotNum}
                     </div>
                 `,
@@ -1749,10 +1773,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const cluster = clustersByOppId[oppId];
         if (cluster && cluster.items.length > 1) {
-            if (lat && lon && map) {
-                map.flyTo([lat, lon], 16, { duration: 0.8 });
-            }
-            spiderifyCluster(cluster, cluster.marker, oppId);
+            openClusterWithZoom(cluster, oppId);
             return;
         }
 
@@ -1830,6 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!clusters[geoKey]) {
                     clusters[geoKey] = {
+                        key: geoKey,
                         lat: opp.lat,
                         lon: opp.lon,
                         items: [],
@@ -1924,10 +1946,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const clusterMarker = L.marker([cluster.lat, cluster.lon], { icon: clusterIcon });
 
-                // Al pulsar el cluster: abrir abanico radial (Spiderify)
+                // Al pulsar el cluster: abrir abanico radial (Spiderify con zoom inteligente)
                 clusterMarker.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);
-                    spiderifyCluster(cluster, clusterMarker);
+                    openClusterWithZoom(cluster);
                 });
 
                 cluster.marker = clusterMarker;
