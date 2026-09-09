@@ -181,48 +181,54 @@ class BOESubastasScraper:
             return 100.0
         text_lower = text.lower()
         
-        # Eliminar menciones de cuota de participación en elementos comunes/gastos de portal/bloque (Propiedad Horizontal)
+        # Eliminar menciones de cuota de participación en elementos comunes/gastos de portal/bloque/división horizontal
         cleaned_text = re.sub(
-            r'cuotas?\s+(?:de\s+participaci[oó]n|en\s+el\s+valor|en\s+los\s+elementos|en\s+los\s+gastos|en\s+el\s+bloque)[^%\n]*(?:%|por\s+ciento)\s*-?',
+            r'cuotas?\s*(?:[:\s]|de\s+participaci[oó]n|en\s+relaci[oó]n|en\s+el|en\s+los|en\s+su\s+conjunto)[^%\n]{0,80}?\d+(?:[\.,]\d+)?\s*%',
             '',
             text_lower
         )
+        cleaned_text = re.sub(r'cuotas?\s*[:\s]?\s*\d+(?:[\.,]\d+)?\s*%', '', cleaned_text)
+        cleaned_text = re.sub(r'finca(?:\s+registral)?\s*[:\s]?\s*\d+/\d+', '', cleaned_text)
+        cleaned_text = re.sub(r'autos?\s*[:\s]?\s*\d+/\d+', '', cleaned_text)
+        cleaned_text = re.sub(r'procedimiento\s*[:\s]?\s*\d+/\d+', '', cleaned_text)
+        cleaned_text = re.sub(r'ejecuci[oó]n\s*[:\s]?\s*\d+/\d+', '', cleaned_text)
+        cleaned_text = re.sub(r'expediente\s*[:\s]?\s*\d+/\d+', '', cleaned_text)
         cleaned_text = re.sub(r'(?:cero\s+enteros|cero\s+coma|\b0,\d+)\s*(?:%|por\s+ciento)', '', cleaned_text)
 
-        # Expresiones textuales explícitas de titularidad completa
+        # 1. Porcentaje numérico explícito (ej. 16,67% del pleno dominio, 50% indiviso)
+        m_pct = re.search(r'(\d+(?:[\.,]\d+)?)\s*%\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso|titularidad|participaci[oó]n)?', cleaned_text)
+        if m_pct:
+            val = self.parse_spanish_number(m_pct.group(1))
+            if val and 0.01 <= val <= 100.0:
+                return float(val)
+
+        # 2. Expresiones textuales explícitas de titularidad completa (100%)
         if any(w in cleaned_text for w in [
             "totalidad del pleno dominio", "cien por cien del pleno dominio", "100% del pleno dominio",
-            "100% pleno dominio", "pleno dominio de la finca", "la totalidad de la finca",
+            "100% pleno dominio", "la totalidad de la finca",
             "cien por ciento del pleno dominio", "pleno dominio al 100%"
         ]):
             return 100.0
 
-        # Fracciones escritas en texto
-        if any(w in cleaned_text for w in ["mitad indivisa", "una mitad", "un medio", "cincuenta por ciento"]):
+        # 3. Fracciones escritas en texto
+        if any(w in cleaned_text for w in ["mitad indivisa", "una mitad", "un medio", "cincuenta por ciento", "50% indiviso"]):
             return 50.0
-        if any(w in cleaned_text for w in ["una tercera parte", "tercera parte indivisa", "un tercio"]):
+        if any(w in cleaned_text for w in ["una tercera parte", "tercera parte indivisa", "un tercio", "33,33%"]):
             return round(100.0 / 3.0, 5)
-        if any(w in cleaned_text for w in ["dos terceras partes", "dos tercios"]):
+        if any(w in cleaned_text for w in ["dos terceras partes", "dos tercios", "66,66%"]):
             return round(200.0 / 3.0, 5)
-        if any(w in cleaned_text for w in ["una cuarta parte", "cuarta parte indivisa", "un cuarto"]):
+        if any(w in cleaned_text for w in ["una cuarta parte", "cuarta parte indivisa", "un cuarto", "25% indiviso"]):
             return 25.0
-        if any(w in cleaned_text for w in ["tres cuartas partes", "tres cuartos"]):
+        if any(w in cleaned_text for w in ["tres cuartas partes", "tres cuartos", "75% indiviso"]):
             return 75.0
 
-        # Porcentaje numérico explícito
-        m_pct = re.search(r'(\d+(?:[\.,]\d+)?)\s*%\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso|titularidad|participaci[oó]n)?', cleaned_text)
-        if m_pct:
-            val = self.parse_spanish_number(m_pct.group(1))
-            if val and 0.000001 <= val <= 100.0:
-                return float(val)
-
-        # Fracción numérica (ej. 1/2, 1/3, 1/6)
-        m_frac = re.search(r'\b(\d+/\d+)\b\s*(?:del\s*)?(?:pleno\s*dominio|nuda\s*propiedad|propiedad|indiviso)?', cleaned_text)
+        # 4. Fracción numérica con contexto de cuota o participación (ej. 1/2, 1/3, 1/6)
+        m_frac = re.search(r'(?:participaci[oó]n|cuota\s+indivisa|proindiviso|titularidad)\s+(?:del?\s+)?\b([1-9]\d?/[1-9]\d?)\b', cleaned_text)
         if m_frac:
             try:
                 num, denom = m_frac.group(1).split('/')
-                val = (float(num) / float(denom)) * 100.0
-                return float(val)
+                if float(denom) > 0 and float(num) <= float(denom):
+                    return float(num) / float(denom) * 100.0
             except Exception:
                 pass
 
