@@ -90,7 +90,8 @@ LATEST_SYNC_STATE: Dict[str, Any] = {
     "last_sync_timestamp": None,
     "new_auction_ids": set(),
     "new_pgou_ids": set(),
-    "new_edicto_ids": set()
+    "new_edicto_ids": set(),
+    "new_market_ids": set()
 }
 
 # Coordinates fallback map for Spanish provinces/cities
@@ -530,11 +531,18 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         edictos_scraper = EdictosScraper()
         edictos_items = edictos_scraper.fetch_edictos_opportunities()
 
+        # 4. Ingesta y monitorización de Oportunidades de Mercado (Idealista, Fotocasa, Habitaclia, etc.)
+        from app.connectors.market_scraper import MarketScraper
+        market_scraper = MarketScraper()
+        market_items = market_scraper.fetch_market_opportunities()
+        MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
+
         new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])
 
-        # Consultar sincronizaciones previas para conocer los IDs históricos de PGOU y Edictos
+        # Consultar sincronizaciones previas para conocer los IDs históricos de PGOU, Edictos y Market
         all_known_pgou_ids = set()
         all_known_edicto_ids = set()
+        all_known_market_ids = set()
         prev_syncs = []
         try:
             prev_syncs = db.query(PipelineSyncState).all()
@@ -544,6 +552,7 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
                         sdata = json.loads(ps.summary_json)
                         all_known_pgou_ids.update(sdata.get("all_pgou_ids", []))
                         all_known_edicto_ids.update(sdata.get("all_edicto_ids", []))
+                        all_known_market_ids.update(sdata.get("all_market_ids", []))
                     except Exception:
                         pass
                 if ps.new_pgou_ids_json:
@@ -556,26 +565,36 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
                         all_known_edicto_ids.update(json.loads(ps.new_edicto_ids_json))
                     except Exception:
                         pass
+                if getattr(ps, "new_market_ids_json", None):
+                    try:
+                        all_known_market_ids.update(json.loads(ps.new_market_ids_json))
+                    except Exception:
+                        pass
         except Exception as e_prev:
             print(f"Error consultando sincronizaciones previas: {e_prev}")
 
         current_pgou_ids = [p["id"] for p in pgou_items if p.get("id")]
         current_edicto_ids = [e["id"] for e in edictos_items if e.get("id")]
+        current_market_ids = [m["id"] for m in market_items if m.get("id")]
 
         # Rigor absoluto: solo son "New!" si ya existía un catálogo base previo y aparecen
         # identificadores nunca antes registrados en el sistema
         new_pgou_ids = []
         new_edicto_ids = []
+        new_market_ids = []
         if prev_syncs and all_known_pgou_ids:
             new_pgou_ids = [pid for pid in current_pgou_ids if pid not in all_known_pgou_ids]
         if prev_syncs and all_known_edicto_ids:
             new_edicto_ids = [eid for eid in current_edicto_ids if eid not in all_known_edicto_ids]
+        if prev_syncs and all_known_market_ids:
+            new_market_ids = [mid for mid in current_market_ids if mid not in all_known_market_ids]
 
         # Actualizar estado de sincronización en memoria de manera exacta y sin simulación
         LATEST_SYNC_STATE["last_sync_timestamp"] = datetime.utcnow().isoformat()
         LATEST_SYNC_STATE["new_auction_ids"] = set(new_opp_ids)
         LATEST_SYNC_STATE["new_pgou_ids"] = set(new_pgou_ids)
         LATEST_SYNC_STATE["new_edicto_ids"] = set(new_edicto_ids)
+        LATEST_SYNC_STATE["new_market_ids"] = set(new_market_ids)
 
         notifier = TelegramNotifier()
         alerts_sent = 0
@@ -592,11 +611,14 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
             "opportunities_scored": len(opportunities),
             "new_auctions_detected": len(new_opp_ids),
             "new_pgou_detected": len(new_pgou_ids),
-            "new_edictos_detected": len(new_edicto_ids),
+            "new_edicto_detected": len(new_edicto_ids),
+            "new_market_detected": len(new_market_ids),
             "pgou_sectors_total": len(pgou_items),
-            "edictos_total": len(edictos_items),
+            "edicto_total": len(edictos_items),
+            "market_total": len(market_items),
             "all_pgou_ids": current_pgou_ids,
             "all_edicto_ids": current_edicto_ids,
+            "all_market_ids": current_market_ids,
             "alerts_sent": alerts_sent,
             "duration_seconds": elapsed
         }
@@ -608,6 +630,7 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
                 new_auction_ids_json=json.dumps(new_opp_ids),
                 new_pgou_ids_json=json.dumps(new_pgou_ids),
                 new_edicto_ids_json=json.dumps(new_edicto_ids),
+                new_market_ids_json=json.dumps(new_market_ids),
                 summary_json=json.dumps(summary)
             )
             db.add(sync_rec)
@@ -673,7 +696,8 @@ def get_opportunities(
     strategy: Optional[StrategyType] = None,
     min_discount: Optional[float] = Query(None, ge=0.0, le=100.0),
     province: Optional[str] = None,
-    source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas', 'pgou' o 'edictos'"),
+    source_type: Optional[str] = Query(None, description="Filtrar por origen: 'subastas', 'pgou', 'edictos' o 'market'"),
+    only_synergy_pgou: Optional[bool] = Query(False, description="Filtrar solo oportunidades con sinergia de planeamiento PGOU"),
     bbox: Optional[str] = Query(None, description="Cuadrante visible BBOX: min_lat,min_lon,max_lat,max_lon"),
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Límite de resultados por página"),
     page: int = Query(1, ge=1, description="Número de página para paginación"),
@@ -684,8 +708,8 @@ def get_opportunities(
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     results = []
     try:
-        # Si la petición es solo de PGOU o solo de Edictos, omitimos el procesamiento de subastas
-        if source_type in ["edictos", "pgou"]:
+        # Si la petición es solo de PGOU, Edictos o Market, omitimos el procesamiento de subastas
+        if source_type in ["edictos", "pgou", "market"]:
             opportunities = []
         else:
             from sqlalchemy.orm import joinedload
@@ -703,8 +727,8 @@ def get_opportunities(
 
             opportunities = query.all()
 
-        # Si la base de datos no tiene oportunidades y no se pide solo edictos/pgou, programar escaneo en segundo plano
-        if not opportunities and source_type not in ["edictos", "pgou"]:
+        # Si la base de datos no tiene oportunidades y no se pide solo fuentes externas, programar escaneo en segundo plano
+        if not opportunities and source_type not in ["edictos", "pgou", "market"]:
             try:
                 background_tasks.add_task(_run_background_pipeline)
             except Exception as e_bg:
@@ -720,9 +744,10 @@ def get_opportunities(
         active_new_auction_ids = set(LATEST_SYNC_STATE.get("new_auction_ids") or [])
         active_new_pgou_ids = set(LATEST_SYNC_STATE.get("new_pgou_ids") or [])
         active_new_edicto_ids = set(LATEST_SYNC_STATE.get("new_edicto_ids") or [])
+        active_new_market_ids = set(LATEST_SYNC_STATE.get("new_market_ids") or [])
 
         # Si no hay estado en memoria (por ejemplo, reinicio del servicio), recuperar el último registro de sincronización
-        if not active_new_auction_ids and not active_new_pgou_ids and not active_new_edicto_ids:
+        if not active_new_auction_ids and not active_new_pgou_ids and not active_new_edicto_ids and not active_new_market_ids:
             try:
                 last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
                 if last_sync and last_sync.sync_time:
@@ -740,6 +765,9 @@ def get_opportunities(
                         if last_sync.new_edicto_ids_json:
                             active_new_edicto_ids = set(json.loads(last_sync.new_edicto_ids_json))
                             LATEST_SYNC_STATE["new_edicto_ids"] = active_new_edicto_ids
+                        if getattr(last_sync, "new_market_ids_json", None):
+                            active_new_market_ids = set(json.loads(last_sync.new_market_ids_json))
+                            LATEST_SYNC_STATE["new_market_ids"] = active_new_market_ids
             except Exception as e_ls:
                 pass
 
@@ -1229,7 +1257,7 @@ def get_opportunities(
             print(f"Error cargando oportunidades PGOU: {e_pgou}")
 
     # 3. Merging Edictos y Registros (Herencias Yacentes & División de Cosa Común)
-    if source_type not in ["subastas", "pgou"]:
+    if source_type not in ["subastas", "pgou", "market"]:
         try:
             from app.connectors.edictos_scraper import EdictosScraper
             edictos_scraper = EdictosScraper()
@@ -1287,6 +1315,26 @@ def get_opportunities(
         except Exception as e_edictos:
             print(f"Error cargando oportunidades de Edictos: {e_edictos}")
 
+    # 4. Merging Oportunidades de Mercado (Idealista, Fotocasa, Habitaclia, YaEncontré, Pisos.com)
+    if source_type not in ["subastas", "edictos"]:
+        try:
+            from app.connectors.market_scraper import MarketScraper
+            market_scraper = MarketScraper()
+            current_pgou = pgou_items if ("pgou_items" in locals() and pgou_items) else None
+            market_items = market_scraper.fetch_market_opportunities(
+                province=province,
+                pgou_items=current_pgou,
+                only_synergy_pgou=bool(only_synergy_pgou)
+            )
+
+            for m_item in market_items:
+                is_market_new = bool(m_item.get("id") in active_new_market_ids)
+                m_item["is_new"] = is_market_new
+                m_item["badge_new"] = "New!" if is_market_new else None
+                results.append(m_item)
+        except Exception as e_market:
+            print(f"Error cargando oportunidades de Mercado: {e_market}")
+
     # Apply strategy filter if specified
     if strategy:
         strategy_val = strategy.value if hasattr(strategy, "value") else str(strategy)
@@ -1303,6 +1351,12 @@ def get_opportunities(
         results = [item for item in results if item.get("source_type") == "pgou"]
     elif source_type in ("edictos", "edictos_reg"):
         results = [item for item in results if item.get("source_type") == "edictos"]
+    elif source_type == "market":
+        results = [item for item in results if item.get("source_type") == "market"]
+
+    # Apply only_synergy_pgou filter if requested
+    if only_synergy_pgou:
+        results = [item for item in results if item.get("has_pgou_synergy")]
 
     # Apply Bounding Box (BBOX) filter if specified for visible map area
     if bbox:

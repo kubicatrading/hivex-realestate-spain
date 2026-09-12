@@ -186,6 +186,21 @@
                                 <span>Edictos/Reg.</span>
                                 <span id="badge-edictos-count" class="tab-badge">0</span>
                             </button>
+                            <button id="tab-market" class="source-tab" onclick="switchOpportunitySource('market')" role="tab" aria-selected="false" title="Ver ofertas y oportunidades en portales inmobiliarios (Idealista, Fotocasa, Habitaclia...)">
+                                <i data-lucide="store"></i>
+                                <span>Market</span>
+                                <span id="badge-market-count" class="tab-badge">0</span>
+                            </button>
+                        </div>
+                        <div id="market-filter-bar" class="sub-tab-filter-bar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; padding: 6px 12px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.80rem; color: #cbd5e1;">
+                                <i data-lucide="store" style="width: 14px; height: 14px; color: #34d399;"></i>
+                                <span>Portales: <strong>Idealista · Fotocasa · Habitaclia · YaEncontré · Pisos.com</strong></span>
+                            </div>
+                            <button id="btn-toggle-synergy" class="btn-synergy-pill" onclick="toggleSynergyFilter()" title="Filtrar solo oportunidades que concurren en Market y Planeamiento Urbanístico (PGOU)">
+                                <i data-lucide="crosshair" style="width: 13px; height: 13px;"></i>
+                                <span>⚡ Solo con Sinergia PGOU</span>
+                            </button>
                         </div>
                     </div>
                     <div id="deals-container" class="deals-grid">

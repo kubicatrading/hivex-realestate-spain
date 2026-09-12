@@ -139,6 +139,7 @@ class PipelineSyncState(Base):
     new_auction_ids_json = Column(Text, default="[]")
     new_pgou_ids_json = Column(Text, default="[]")
     new_edicto_ids_json = Column(Text, default="[]")
+    new_market_ids_json = Column(Text, default="[]")
     summary_json = Column(Text, default="{}")
 
 class User(Base):

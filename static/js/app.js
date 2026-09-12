@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         minDiscount: 0.0,
         searchQuery: '',
         activeSource: 'subastas',
+        onlySynergyPGOU: false,
         isLoading: false
     };
 
@@ -443,17 +444,64 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return true;
         }).length;
+
+        const marketCount = state.allOpportunities.filter(o => {
+            const isMkt = o.source_type === 'market';
+            if (!isMkt) return false;
+            if (state.onlySynergyPGOU && !o.has_pgou_synergy) return false;
+            if (state.currentStrategy !== 'ALL' && o.strategy !== state.currentStrategy) return false;
+            if (state.minDiscount > 0.0 && ((o.discount_percentage || 0) / 100) < state.minDiscount) return false;
+            if (q !== '') {
+                const title = (o.title || '').toLowerCase();
+                const prov = (o.province || '').toLowerCase();
+                const loc = (o.locality || '').toLowerCase();
+                if (!title.includes(q) && !prov.includes(q) && !loc.includes(q)) return false;
+            }
+            return true;
+        }).length;
         
         const badgeSub = document.getElementById('badge-subastas-count');
         const badgePgou = document.getElementById('badge-pgou-count');
         const badgeEdictos = document.getElementById('badge-edictos-count');
+        const badgeMarket = document.getElementById('badge-market-count');
         
         if (badgeSub) badgeSub.textContent = subastasCount;
         if (badgePgou) badgePgou.textContent = pgouCount;
         if (badgeEdictos) badgeEdictos.textContent = edictosCount;
+        if (badgeMarket) badgeMarket.textContent = marketCount;
     }
 
-    // Opportunity Source Tab Switcher (Subastas BOE vs Visor PGOU vs Edictos/Reg.)
+    // Toggle PGOU Synergy Filter for Market Tab
+    window.toggleSynergyFilter = function() {
+        state.onlySynergyPGOU = !state.onlySynergyPGOU;
+        const btn = document.getElementById('btn-toggle-synergy');
+        if (btn) {
+            if (state.onlySynergyPGOU) {
+                btn.classList.add('active');
+                btn.innerHTML = `<i data-lucide="check" style="width: 13px; height: 13px;"></i> <span>🎯 Sinergia PGOU (Activo)</span>`;
+                showToast('🎯 Mostrando exclusivamente inmuebles de Market con Sinergia en PGOU', 'info');
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = `<i data-lucide="crosshair" style="width: 13px; height: 13px;"></i> <span>⚡ Solo con Sinergia PGOU</span>`;
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+        applyFilters();
+    };
+
+    // Jump from Market synergy card to PGOU sector viewer
+    window.jumpToPgouSector = function(pgouId) {
+        closePropertyDetailModal();
+        switchOpportunitySource('pgou');
+        setTimeout(() => {
+            const target = state.allOpportunities.find(o => o.id === pgouId || (o.source_type === 'pgou' && (o.title || '').includes(pgouId)));
+            if (target) {
+                highlightOpportunityPin(target.id, target.lat, target.lon);
+            }
+        }, 350);
+    };
+
+    // Opportunity Source Tab Switcher (Subastas BOE vs Visor PGOU vs Edictos/Reg. vs Market)
     window.switchOpportunitySource = function(sourceType) {
         state.activeSource = sourceType;
 
@@ -466,6 +514,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeBtn) {
             activeBtn.classList.add('active');
             activeBtn.setAttribute('aria-selected', 'true');
+        }
+
+        // Show/hide Market sub-filter bar
+        const marketFilterBar = document.getElementById('market-filter-bar');
+        if (marketFilterBar) {
+            marketFilterBar.style.display = sourceType === 'market' ? 'flex' : 'none';
         }
 
         // Update map legend dynamically according to active tab
@@ -486,6 +540,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="dot" style="background:#eab308; box-shadow: 0 0 8px #eab308;"></span> Herencia Yacente (TEJU)
                     <span class="dot" style="background:#6366f1; box-shadow: 0 0 8px #6366f1;"></span> División Cosa Común (Proindiviso)
                 `;
+            } else if (sourceType === 'market') {
+                legendEl.innerHTML = `
+                    <span class="dot" style="background:#10b981; box-shadow: 0 0 8px #10b981;"></span> Inmueble en Venta (Market)
+                    <span class="dot" style="background:#a855f7; box-shadow: 0 0 8px #a855f7;"></span> 🎯 Con Sinergia PGOU
+                `;
             }
         }
 
@@ -498,24 +557,30 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`📐 Visor PGOU: Mostrando ${currentCount} desarrollos urbanísticos detectados en boletines oficiales (BOCM, DOGC, BOJA)`, 'success');
         } else if (sourceType === 'edictos') {
             showToast(`⚖️ Edictos y Registros: Mostrando ${currentCount} herencias y procedimientos de proindiviso`, 'info');
+        } else if (sourceType === 'market') {
+            showToast(`🏪 Market: Mostrando ${currentCount} oportunidades en portales inmobiliarios (menor precio garantizado y cruce PGOU)`, 'success');
         }
     };
 
     // Apply Filter Logic
     function applyFilters() {
         state.filteredOpportunities = state.allOpportunities.filter(opp => {
-            // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg.)
+            // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg. vs Market)
             const oppSource = opp.source_type || 'subastas';
             if (oppSource !== state.activeSource) {
+                return false;
+            }
+            // Sinergia PGOU Filter (for Market)
+            if (state.activeSource === 'market' && state.onlySynergyPGOU && !opp.has_pgou_synergy) {
                 return false;
             }
             // Strategy Filter
             if (state.currentStrategy !== 'ALL' && opp.strategy !== state.currentStrategy) {
                 return false;
             }
-            // Discount Filter (Subastas and Edictos; PGOU ignores auction discount filter)
-            if ((oppSource === 'subastas' || oppSource === 'edictos') && state.minDiscount > 0.0) {
-                const discDecimal = opp.discount_percentage / 100;
+            // Discount Filter (Subastas, Edictos, and Market; PGOU ignores auction discount filter)
+            if ((oppSource === 'subastas' || oppSource === 'edictos' || oppSource === 'market') && state.minDiscount > 0.0) {
+                const discDecimal = (opp.discount_percentage || 0) / 100;
                 if (discDecimal < state.minDiscount) {
                     return false;
                 }
@@ -763,6 +828,55 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                 `;
+            } else if (opp.source_type === 'market') {
+                actionBtnLabel = escapeHtml(opp.primary_portal || 'PORTAL');
+                actionBtnUrl = opp.portal_url || opp.boe_url || '#';
+
+                dateSubastaHeader = `
+                    <div style="font-size: 0.76rem; color: #34d399; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                        <i data-lucide="store" style="width: 12px; height: 12px; display: inline;"></i> Portal: <strong>${escapeHtml(opp.primary_portal || 'Idealista')}</strong> • Publicado: ${escapeHtml(opp.created_at || 'Reciente')}
+                    </div>
+                `;
+
+                if (opp.has_pgou_synergy) {
+                    urbanismHtml = `
+                        <div class="card-urbanism-compact" style="background: rgba(168, 85, 247, 0.12); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(168, 85, 247, 0.4); display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 0.76rem; color: #c084fc; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                                    <i data-lucide="crosshair" style="width: 13px; height: 13px; color: #c084fc;"></i> 🎯 Sinergia PGOU:
+                                </span>
+                                <span style="background: rgba(168, 85, 247, 0.25); color: #f3e8ff; font-weight: 800; font-size: 0.74rem; padding: 2px 8px; border-radius: 4px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(opp.pgou_title || '')}">
+                                    ${escapeHtml(opp.pgou_title || 'Sector')}
+                                </span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
+                                <span style="font-size: 0.74rem; color: #94a3b8;">Revalorización prevista:</span>
+                                <span style="color: #34d399; font-weight: 800; font-size: 0.76rem;">${escapeHtml(opp.pgou_uplift || 'Plusvalía Urbanística')}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    urbanismHtml = `
+                        <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                    <i data-lucide="store" style="width: 13px; height: 13px; color: #34d399;"></i> Mercado Residencial:
+                                </span>
+                                <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 800; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px;">
+                                    VENTA DIRECTA
+                                </span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                                <span style="font-size: 0.76rem; color: #94a3b8; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                    <i data-lucide="layers" style="width: 13px; height: 13px; color: #38bdf8;"></i> Precios Distintos:
+                                </span>
+                                <span style="color: #38bdf8; font-weight: 800; font-size: 0.76rem;">
+                                    ${escapeHtml(opp.x_publicacion || 'x1')} (${opp.distinct_prices_count || 1} precios)
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                }
             } else {
                 urbanismHtml = `
                     <div class="card-urbanism-compact" style="background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 6px; margin: 8px 0; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px;">
@@ -826,13 +940,25 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ` : `
                                     <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Edicto s/ Tipo</span>
                                 `}
+                            ` : (opp.source_type === 'market' ? `
+                                <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                    <span class="badge-strategy" style="background: #059669; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
+                                    ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
+                                    <span class="badge-xpublicacion" title="Contabiliza publicaciones con precios distintos"><i data-lucide="layers" style="width: 12px; height: 12px;"></i> xPublicación: ${escapeHtml(opp.x_publicacion || 'x1')}</span>
+                                    ${opp.has_pgou_synergy ? `<span class="badge-synergy" title="Inmueble con Sinergia Urbanística PGOU"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> 🎯 SINERGIA PGOU</span>` : ''}
+                                </div>
+                                ${opp.discount_percentage > 0 ? `
+                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 1)}% dto.</span>
+                                ` : `
+                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Precio Inicial</span>
+                                `}
                             ` : `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
                                     ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
                                     ${opp.is_lotes ? `
                                         <span class="badge-lote" title="Subasta por lotes independientes. Puja y adjudicación separada.">
-                                            <i data-lucide="package"></i> LOTE ${opp.lot_number || 1}
+                                             <i data-lucide="package"></i> LOTE ${opp.lot_number || 1}
                                         </span>
                                     ` : ''}
                                 </div>
@@ -843,7 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ` : `
                                     <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Subasta s/ Tipo</span>
                                 `)}
-                            `)}
+                            `))}
                         </div>
                     </div>
 
@@ -871,19 +997,21 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">${areaM2Display} (*)</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">${opp.source_type === 'pgou' ? 'Precio Adquisición' : (opp.source_type === 'edictos' ? 'Salida / Tipo' : 'Valor Subasta')}</span>
-                                <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700;">${formatCurrency(refVal)}</span>
+                                <span class="fin-lbl">${opp.source_type === 'market' ? 'Precio de Venta' : (opp.source_type === 'pgou' ? 'Precio Adquisición' : (opp.source_type === 'edictos' ? 'Salida / Tipo' : 'Valor Subasta'))}</span>
+                                <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700; color: ${opp.source_type === 'market' ? '#38bdf8' : '#f8fafc'};">${formatCurrency(opp.source_type === 'market' ? opp.listing_price : refVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Valor Mercado Estimado</span>
-                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: ${isSurfaceMissing ? '#f59e0b' : '#38bdf8'};">${isSurfaceMissing ? '<span style="font-size: 0.76rem; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(estimatedMktVal)}</span>
+                                <span class="fin-lbl">${opp.source_type === 'market' ? '% dto.' : 'Valor Mercado Estimado'}</span>
+                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? '#4ade80' : '#cbd5e1') : (isSurfaceMissing ? '#f59e0b' : '#38bdf8')};">
+                                    ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% (${formatCurrency(opp.price_drop_amount)})` : '0% (Precio Inicial)') : (isSurfaceMissing ? '<span style="font-size: 0.76rem; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(estimatedMktVal))}
+                                </span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">Superficie (${opp.source_type === 'pgou' ? 'Suelo m²s' : (opp.source_type === 'edictos' ? 'Útil / Cuota' : 'Cuota Real')})</span>
+                                <span class="fin-lbl">Superficie (${opp.source_type === 'market' ? 'Construida' : (opp.source_type === 'pgou' ? 'Suelo m²s' : (opp.source_type === 'edictos' ? 'Útil / Cuota' : 'Cuota Real'))})</span>
                                 <span class="fin-val" style="font-size: 0.88rem; color: #f8fafc; font-weight: 600;">${surfaceDisplay}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : 'Beneficio / Margen Est.')}</span>
+                                <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
                                     ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : profitFormatted}
                                 </span>
@@ -1169,6 +1297,135 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
             `;
+        } else if (opp.source_type === 'market') {
+            extBtnLabelModal = `Ver Inmueble en ${escapeHtml(opp.primary_portal || 'Portal Inmobiliario')}`;
+            extBtnUrlModal = opp.portal_url || opp.boe_url || '#';
+
+            dateSubastaHeaderModal = `
+                <div style="font-size: 0.88rem; color: #34d399; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
+                    <i data-lucide="store" style="width: 15px; height: 15px;"></i>
+                    <span>Portal Principal: <strong>${escapeHtml(opp.primary_portal || 'Idealista')}</strong> • Modalidad: <strong>Venta Directa de Mercado</strong></span>
+                </div>
+            `;
+
+            // Publications multichannel table (Matiz 2)
+            const pubs = opp.publications || [];
+            let pubsRowsHtml = '';
+            if (pubs.length > 0) {
+                pubsRowsHtml = pubs.map(p => {
+                    const isMin = p.is_minimum || p.price === opp.listing_price;
+                    const diffPrice = p.price - opp.listing_price;
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                            <td style="padding: 8px 10px; font-weight: 700; color: #f8fafc;">
+                                ${escapeHtml(p.portal || 'Portal')}
+                            </td>
+                            <td style="padding: 8px 10px; font-weight: 800; color: ${isMin ? '#34d399' : '#cbd5e1'};">
+                                ${formatCurrency(p.price)}
+                            </td>
+                            <td style="padding: 8px 10px;">
+                                ${isMin 
+                                    ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 0.72rem; border: 1px solid rgba(16, 185, 129, 0.3);">🏆 MENOR PRECIO</span>' 
+                                    : `<span style="color: #f87171; font-size: 0.76rem; font-weight: 600;">+${formatCurrency(diffPrice)}</span>`}
+                            </td>
+                            <td style="padding: 8px 10px; color: #94a3b8; font-size: 0.78rem;">
+                                ${escapeHtml(p.agency || 'Agencia')}
+                            </td>
+                            <td style="padding: 8px 10px; text-align: right;">
+                                <a href="${p.url || '#'}" target="_blank" rel="noopener" class="btn-boe-xs" style="padding: 3px 8px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
+                                    Ver <i data-lucide="external-link" style="width: 10px; height: 10px;"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                pubsRowsHtml = `
+                    <tr>
+                        <td colspan="5" style="padding: 10px; text-align: center; color: #94a3b8; font-size: 0.8rem;">
+                            Publicación única detectada en ${escapeHtml(opp.primary_portal || 'Portal')} por ${formatCurrency(opp.listing_price)}
+                        </td>
+                    </tr>
+                `;
+            }
+
+            // Sinergia PGOU Banner & Section (Matiz 3)
+            let synergySectionHtml = '';
+            if (opp.has_pgou_synergy) {
+                synergySectionHtml = `
+                    <div style="margin-top: 14px; padding: 14px 16px; background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 10px; width: 100%;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid rgba(168, 85, 247, 0.25); padding-bottom: 8px;">
+                            <span style="font-size: 0.95rem; font-weight: 800; color: #f3e8ff; display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="crosshair" style="width: 18px; height: 18px; color: #c084fc;"></i> 🎯 SINERGIA URBANÍSTICA DETECTADA: ${escapeHtml(opp.pgou_title || 'Sector PGOU')}
+                            </span>
+                            <span style="background: rgba(168, 85, 247, 0.25); color: #c084fc; font-weight: 800; font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.4);">
+                                ${escapeHtml(opp.pgou_status || 'En Desarrollo')}
+                            </span>
+                        </div>
+                        <div style="font-size: 0.85rem; color: #e2e8f0; line-height: 1.45; margin-bottom: 10px;">
+                            ${escapeHtml(opp.synergy_reason || 'Inmueble situado en el ámbito directo de planeamiento urbanístico.')}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; background: rgba(0, 0, 0, 0.2); padding: 8px 12px; border-radius: 6px;">
+                            <div>
+                                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">Revalorización prevista por transformación urbanística:</span>
+                                <strong style="color: #34d399; font-size: 0.95rem;">${escapeHtml(opp.pgou_uplift || '+25-40% Plusvalía')}</strong>
+                            </div>
+                            <button class="btn" onclick="jumpToPgouSector('${opp.pgou_id || ''}')" style="background: linear-gradient(135deg, #9333ea 0%, #6366f1 100%); color: #fff; border: none; font-weight: 700; font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);">
+                                <i data-lucide="map" style="width: 14px; height: 14px;"></i> Abrir Ficha en Visor PGOU
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            urbanismDetail = `
+                ${synergySectionHtml}
+                <div style="margin-top: 14px; padding: 14px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="layers" style="width: 16px; height: 16px; color: #38bdf8;"></i> Análisis Multicanal de Publicaciones (${escapeHtml(opp.x_publicacion || 'x1')})
+                        </span>
+                        <span class="badge-xpublicacion" style="font-size: 0.76rem;">
+                            ${opp.distinct_prices_count || 1} precios distintos detectados
+                        </span>
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color: #94a3b8; font-size: 0.74rem;">
+                                    <th style="padding: 6px 10px;">Portal</th>
+                                    <th style="padding: 6px 10px;">Precio Anunciado</th>
+                                    <th style="padding: 6px 10px;">Estado</th>
+                                    <th style="padding: 6px 10px;">Comercializadora</th>
+                                    <th style="padding: 6px 10px; text-align: right;">Enlace</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pubsRowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 8px; line-height: 1.4; font-style: italic;">
+                        ℹ️ <strong>Regla de Conteo xPublicación</strong>: Si el inmueble se anuncia en diferentes portales al mismo precio, no incrementa el contador. Solo computan importes numéricamente diferentes. HIVEX muestra siempre el precio mínimo garantizado.
+                    </div>
+                </div>
+            `;
+
+            liensDetailHtml = `
+                <div style="margin-top: 14px; padding: 12px 14px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.88rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                            <i data-lucide="badge-check" style="width: 16px; height: 16px; color: #34d399;"></i> Modalidad de Adquisición
+                        </span>
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-weight: 800; font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">
+                            VENTA DIRECTA LIBRE
+                        </span>
+                    </div>
+                    <p style="font-size: 0.82rem; color: #cbd5e1; margin: 6px 0 0 0;">
+                        Inmueble comercializado en portales inmobiliarios sin cargas procesales de subasta judicial activa. Verificación catastral y de linderos disponible.
+                    </p>
+                </div>
+            `;
         } else {
             dateSubastaHeaderModal = `
                 <div style="font-size: 0.88rem; color: #f59e0b; display: flex; align-items: center; gap: 6px; padding-left: 2px;">
@@ -1246,10 +1503,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span style="color: #fbbf24; display: block; font-size: 0.75rem; font-weight: 600;">Estrategia Legal & Descuento</span>
                         <strong style="color: #4ade80; font-size: 0.95rem;">-${formatNumber(opp.discount_percentage, 0)}% vs Mercado</strong>
                    </div>`
-                : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
-                        <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
-                   </div>`);
+                : (opp.source_type === 'market'
+                    ? `<div style="background: rgba(16, 185, 129, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25);">
+                            <span style="color: #34d399; display: block; font-size: 0.75rem; font-weight: 600;">% dto. / Rebaja Acumulada</span>
+                            <strong style="color: #34d399; font-size: 0.95rem;">${opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}%` : '0%'}</strong>
+                       </div>`
+                    : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
+                            <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
+                       </div>`));
 
         const detailedScoresHtml = `
             <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
@@ -1297,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const valorMicroVal = isSurfaceMissingModal ? null : (opp.valor_micro_est || opp.property_m2_price);
         const valorMicroDisplay = (valorMicroVal && valorMicroVal > 0) ? `${formatCurrency(valorMicroVal)}/m²` : '<span style="color: #94a3b8; font-style: italic;">-</span>';
 
-        const registryServiceHtml = (opp.source_type === 'pgou') ? '' : `
+        const registryServiceHtml = (opp.source_type === 'pgou' || opp.source_type === 'market') ? '' : `
             <div class="card-registry-module" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 14px 16px; margin-top: 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -1352,6 +1614,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <i data-lucide="sparkles"></i> New! Incorporada recientemente
                             </span>
                         ` : ''}
+                        ${opp.source_type === 'market' ? `
+                            <span class="badge-xpublicacion" style="font-size: 0.82rem; padding: 5px 12px; border-radius: 6px;">
+                                <i data-lucide="layers"></i> xPublicación: ${escapeHtml(opp.x_publicacion || 'x1')}
+                            </span>
+                            ${opp.has_pgou_synergy ? `
+                                <span class="badge-synergy" style="font-size: 0.82rem; padding: 5px 12px; border-radius: 6px;">
+                                    <i data-lucide="crosshair"></i> 🎯 SINERGIA PGOU
+                                </span>
+                            ` : ''}
+                        ` : ''}
                         ${opp.is_lotes ? `
                             <span class="badge-lote" style="font-size: 0.84rem; padding: 5px 12px; border-radius: 6px;">
                                 <i data-lucide="package"></i> ${escapeHtml(opp.lote_badge || 'SUBASTA POR LOTES · ADJUDICACIÓN INDEPENDIENTE')}
@@ -1373,19 +1645,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Valor Tasación Ref.' : 'Valor Tasación BOE'}</span>
-                        <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €'}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? '% dto.' : (opp.source_type === 'pgou' ? 'Valor Tasación Ref.' : 'Valor Tasación BOE')}</span>
+                        <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px; color: ${opp.source_type === 'market' ? '#4ade80' : 'inherit'};">
+                            ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% dto.` : '0% (Precio Inicial)') : (opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €')}
+                        </span>
+                        ${opp.source_type === 'market' && opp.price_drop_amount > 0 ? `<span style="font-size: 0.72rem; color: #34d399;">Bajada: -${formatCurrency(opp.price_drop_amount)}</span>` : ''}
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : (opp.source_type === 'edictos' ? 'Salida / Tipo Estimado' : 'Valor de Subasta')}</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px;">${formatCurrency(refValModal)}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? 'Precio de Venta' : (opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : (opp.source_type === 'edictos' ? 'Salida / Tipo Estimado' : 'Valor de Subasta'))}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px; color: ${opp.source_type === 'market' ? '#38bdf8' : 'inherit'};">${formatCurrency(opp.source_type === 'market' ? opp.listing_price : refValModal)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${isSurfaceMissingModal ? '#f59e0b' : '#38bdf8'}; font-weight: 600; line-height: 1.2;">Valor Mercado Est.</span>
                         <span class="fin-val" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${isSurfaceMissingModal ? '#f59e0b' : '#38bdf8'}; margin-top: 2px;">${isSurfaceMissingModal ? '<span style="font-size: 0.82rem; font-weight: 700;">Pendiente Nota Simple</span>' : `${formatCurrency(estimatedMktValModal)} (*)`}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : (opp.source_type === 'edictos' ? 'Superficie Útil / Cuota' : 'Superficie (Cuota Real)')}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? 'Superficie Construida' : (opp.source_type === 'pgou' ? 'Superficie Suelo (m²s)' : (opp.source_type === 'edictos' ? 'Superficie Útil / Cuota' : 'Superficie (Cuota Real)'))}</span>
                         <div class="fin-val" style="display: block; font-size: 1.05rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${surfaceDisplayModal}</div>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
@@ -1399,7 +1674,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div></div>
                     <div></div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : 'Beneficio / Margen Est.')}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
                     </div>
                 </div>
@@ -1587,17 +1862,28 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildPopupHtml(opp, idx) {
         const isPgou = opp.source_type === 'pgou';
         const isEdictos = opp.source_type === 'edictos';
+        const isMarket = opp.source_type === 'market';
         const imgInfo = getOpportunityMainImage(opp);
         const mainImg = imgInfo.url;
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`;
 
         let loteHeaderHtml = '';
-        if (opp.is_lotes || opp.is_new) {
+        if (opp.is_lotes || opp.is_new || (isMarket && (opp.x_publicacion || opp.has_pgou_synergy))) {
             loteHeaderHtml = `
                 <div style="margin-bottom: 6px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                     ${opp.is_new ? `
                         <span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 12px; box-shadow: 0 1px 4px rgba(16,185,129,0.4); display: inline-flex; align-items: center; gap: 3px;">
                             ✨ New!
+                        </span>
+                    ` : ''}
+                    ${isMarket && opp.x_publicacion ? `
+                        <span style="background: rgba(14, 165, 233, 0.15); color: #0284c7; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(14, 165, 233, 0.3);">
+                            xPublicación: ${escapeHtml(opp.x_publicacion)}
+                        </span>
+                    ` : ''}
+                    ${isMarket && opp.has_pgou_synergy ? `
+                        <span style="background: rgba(168, 85, 247, 0.15); color: #7e22ce; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.3);">
+                            🎯 PGOU
                         </span>
                     ` : ''}
                     ${opp.is_lotes ? `
@@ -1645,6 +1931,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
                     -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid || opp.property_ref_value)}
+                </div>
+            `;
+        } else if (isMarket) {
+            popupDetailHtml = `
+                <div style="margin-bottom: 3px; font-size: 11px; color: #059669; font-weight: 700;">
+                    🛒 <strong>Portal:</strong> ${escapeHtml(opp.primary_portal || 'Portal Inmobiliario')}
+                </div>
+                ${opp.has_pgou_synergy ? `
+                    <div style="margin-bottom: 3px; font-size: 11px; color: #7e22ce; font-weight: 700;">
+                        🎯 <strong>Sinergia PGOU:</strong> ${escapeHtml(opp.pgou_title || 'Sector Urb.')} (${escapeHtml(opp.pgou_uplift || '+Plusvalía')})
+                    </div>
+                ` : ''}
+                <div style="margin-bottom: 3px; font-size: 11px; color: #0284c7;">
+                    <strong>% dto. bajada:</strong> ${opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% dto.` : '0% (Precio Inicial)'}
+                </div>
+                <div style="margin-bottom: 10px; font-weight: 800; color: #0284c7; font-size: 12px;">
+                    Precio Venta: ${formatCurrency(opp.listing_price)}
                 </div>
             `;
         } else {
@@ -1750,6 +2053,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 childColor = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
             } else if (opp.source_type === 'edictos') {
                 childColor = opp.category === 'HERENCIA_YACENTE' ? '#eab308' : '#6366f1';
+            } else if (opp.source_type === 'market') {
+                childColor = opp.has_pgou_synergy ? '#a855f7' : '#10b981';
             } else {
                 childColor = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
             }
@@ -1903,6 +2208,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     color = opp.planning_status && opp.planning_status.includes('Definitiva') ? '#a855f7' : '#10b981';
                 } else if (opp.source_type === 'edictos') {
                     color = opp.category === 'HERENCIA_YACENTE' ? '#eab308' : '#6366f1';
+                } else if (opp.source_type === 'market') {
+                    color = opp.has_pgou_synergy ? '#a855f7' : '#10b981';
                 } else {
                     color = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
                 }

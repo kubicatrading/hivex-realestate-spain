@@ -635,9 +635,91 @@ body {
 }
 
 #tab-pgou.active .tab-badge {
-    background: #9333ea;
+#tab-edictos.active {
+    background: linear-gradient(135deg, rgba(234, 179, 8, 0.2) 0%, rgba(99, 102, 241, 0.25) 100%);
+    border: 1px solid rgba(251, 191, 36, 0.45);
+}
+
+#tab-edictos.active i {
+    color: #fbbf24;
+}
+
+#tab-edictos.active .tab-badge {
+    background: #d97706;
     color: #ffffff;
-    box-shadow: 0 0 8px rgba(147, 51, 234, 0.6);
+    box-shadow: 0 0 8px rgba(217, 119, 6, 0.6);
+}
+
+#tab-market.active {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(14, 165, 233, 0.22) 100%);
+    border: 1px solid rgba(52, 211, 153, 0.45);
+}
+
+#tab-market.active i {
+    color: #34d399;
+}
+
+#tab-market.active .tab-badge {
+    background: #059669;
+    color: #ffffff;
+    box-shadow: 0 0 8px rgba(5, 150, 105, 0.6);
+}
+
+.btn-synergy-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: rgba(168, 85, 247, 0.15);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    border-radius: 20px;
+    color: #c084fc;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-synergy-pill:hover {
+    background: rgba(168, 85, 247, 0.25);
+    border-color: rgba(168, 85, 247, 0.6);
+    color: #f3e8ff;
+    transform: translateY(-1px);
+}
+
+.btn-synergy-pill.active {
+    background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+    border-color: #c084fc;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
+}
+
+.badge-xpublicacion {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(14, 165, 233, 0.2);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #38bdf8;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.76rem;
+    letter-spacing: 0.3px;
+}
+
+.badge-synergy {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(16, 185, 129, 0.25) 100%);
+    border: 1px solid rgba(192, 132, 252, 0.5);
+    color: #f3e8ff;
+    padding: 2px 9px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.76rem;
+    box-shadow: 0 2px 6px rgba(168, 85, 247, 0.25);
 }
 
 .map-legend {
