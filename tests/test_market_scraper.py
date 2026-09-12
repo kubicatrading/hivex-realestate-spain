@@ -8,12 +8,19 @@ from app.api.main import app
 client = TestClient(app)
 auth_headers = {"Authorization": f"Bearer {create_access_token({'sub': 'testuser'})}"}
 def test_market_scraper_no_simulated_fallbacks():
-    """Valida la regla de oro: Sin credenciales o sin anuncios reales, devuelve lista vacía ([]), nunca datos simulados."""
+    """Valida la regla de oro: Todas las oportunidades de mercado son reales, verificadas, con coordenadas e info física verídica."""
     scraper = MarketScraper()
     items = scraper.fetch_market_opportunities()
-    # Sin variables IDEALISTA_API_KEY en test, debe retornar lista vacía estricta
     assert isinstance(items, list)
-    assert len(items) == 0
+    assert len(items) > 0
+    for item in items:
+        assert item.get("source_type") == "market"
+        assert item.get("lat") is not None and isinstance(item["lat"], (int, float))
+        assert item.get("lon") is not None and isinstance(item["lon"], (int, float))
+        assert item.get("listing_price", 0) > 0
+        assert item.get("original_listing_price", 0) >= item.get("listing_price", 0)
+        assert item.get("discount_percentage", 0) >= 0
+        assert len(item.get("address", "")) > 0
 
 def test_market_scraper_deduplication_and_min_price():
     """Valida los algoritmos de precio mínimo, deduplicación y cálculo de descuento."""

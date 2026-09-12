@@ -66,23 +66,52 @@ document.addEventListener('DOMContentLoaded', () => {
     let mapMarkersLayer = null;
 
     function initMap() {
-        if (!map) {
-            map = L.map('map').setView([40.4168, -3.7038], 6); // Centered on Madrid / Spain
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                subdomains: 'abc',
-                maxZoom: 19
-            }).addTo(map);
-
-            mapMarkersLayer = L.layerGroup().addTo(map);
-
-            map.on('click', () => {
-                if (typeof window.unspiderify === 'function') window.unspiderify();
-            });
-            map.on('zoomstart', () => {
-                if (typeof window.unspiderify === 'function') window.unspiderify();
-            });
+        if (typeof L === 'undefined') {
+            console.warn('Leaflet (L) no disponible todavía.');
+            return null;
         }
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer) return null;
+
+        if (!map) {
+            try {
+                if (mapContainer._leaflet_id) {
+                    mapContainer._leaflet_id = null;
+                }
+                map = L.map('map', {
+                    preferCanvas: true,
+                    zoomControl: true,
+                    attributionControl: true
+                }).setView([40.4168, -3.7038], 6); // Centered on Madrid / Spain
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                    subdomains: 'abc',
+                    maxZoom: 19
+                }).addTo(map);
+
+                mapMarkersLayer = L.layerGroup().addTo(map);
+
+                map.on('click', () => {
+                    if (typeof window.unspiderify === 'function') window.unspiderify();
+                });
+                map.on('zoomstart', () => {
+                    if (typeof window.unspiderify === 'function') window.unspiderify();
+                });
+
+                window.map = map;
+                window.mapMarkersLayer = mapMarkersLayer;
+            } catch (err) {
+                console.error('Error al inicializar Leaflet map:', err);
+            }
+        }
+
+        if (map && typeof map.invalidateSize === 'function') {
+            setTimeout(() => {
+                try { map.invalidateSize(); } catch(e) {}
+            }, 80);
+        }
+        return map;
     }
 
     // Authentication Checks
@@ -186,9 +215,11 @@ document.addEventListener('DOMContentLoaded', () => {
         inputPassword.value = '';
         setTimeout(() => {
             initMap();
-            map.invalidateSize();
+            if (map && typeof map.invalidateSize === 'function') {
+                try { map.invalidateSize(); } catch(e) {}
+            }
             fetchOpportunities();
-        }, 100);
+        }, 80);
     }
 
     // Tab Navigation Switcher
@@ -203,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetTab === 'deals') {
                 viewDeals.classList.remove('hidden');
                 viewSources.classList.add('hidden');
-                setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+                setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 80);
             } else if (targetTab === 'sources') {
                 viewDeals.classList.add('hidden');
                 viewSources.classList.remove('hidden');
@@ -232,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error('Error al conectar con la API');
 
             const data = await response.json();
-            const newOpps = data.opportunities || [];
+            const newOpps = Array.isArray(data) ? data : (data.opportunities || []);
             
             // Reconciliación silenciosa si ya existían datos en pantalla
             if (isSilent && state.allOpportunities.length > 0) {
@@ -2168,8 +2199,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render Pins on Map with Interactivity & Spiderify (Opción A: Abanico Radial)
     function renderMapMarkers(opps) {
+        if (!map || !mapMarkersLayer) {
+            initMap();
+        }
         if (!mapMarkersLayer) return;
-        window.unspiderify();
+
+        if (typeof window.unspiderify === 'function') {
+            window.unspiderify();
+        }
         mapMarkersLayer.clearLayers();
         markersMap = {};
         clustersByOppId = {};
@@ -2177,23 +2214,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Agrupar oportunidades en clusters geográficos o por id_subasta si es por lotes
         const clusters = {};
-        opps.forEach((opp, idx) => {
-            if (opp.lat && opp.lon) {
+        (opps || []).forEach((opp, idx) => {
+            const rawLat = parseFloat(opp.lat);
+            const rawLon = parseFloat(opp.lon);
+            if (!isNaN(rawLat) && !isNaN(rawLon) && rawLat !== 0 && rawLon !== 0) {
+                const lat = rawLat;
+                const lon = rawLon;
                 const geoKey = (opp.is_lotes && opp.id_subasta)
                     ? `sub_${opp.id_subasta}`
-                    : `${opp.lat.toFixed(4)},${opp.lon.toFixed(4)}`;
+                    : `${lat.toFixed(4)},${lon.toFixed(4)}`;
 
                 if (!clusters[geoKey]) {
                     clusters[geoKey] = {
                         key: geoKey,
-                        lat: opp.lat,
-                        lon: opp.lon,
+                        lat: lat,
+                        lon: lon,
                         items: [],
                         marker: null
                     };
                 }
-                clusters[geoKey].items.push({ opp, idx });
-                bounds.push([opp.lat, opp.lon]);
+                clusters[geoKey].items.push({ opp, idx, lat, lon });
+                bounds.push([lat, lon]);
             }
         });
 
@@ -2207,6 +2248,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const item = cluster.items[0];
                 const opp = item.opp;
                 const idx = item.idx;
+                const lat = item.lat;
+                const lon = item.lon;
 
                 clustersByOppId[opp.id] = cluster;
 
@@ -2242,7 +2285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     iconAnchor: iconAnchor
                 });
 
-                const marker = L.marker([opp.lat, opp.lon], { icon: customIcon });
+                const marker = L.marker([lat, lon], { icon: customIcon });
                 marker.bindPopup(buildPopupHtml(opp, idx));
 
                 marker.on('click', () => {
@@ -2293,8 +2336,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        if (bounds.length > 0 && map) {
-            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+        if (map) {
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+            } else {
+                map.setView([40.4168, -3.7038], 6);
+            }
+            setTimeout(() => {
+                try { map.invalidateSize(); } catch(e) {}
+            }, 60);
         }
     }
 
