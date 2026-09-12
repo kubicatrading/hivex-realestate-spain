@@ -31,6 +31,7 @@ class OpportunityScoringEngine:
         las oportunidades que superen el umbral mínimo de descuento (ej. 30%).
         """
         detected_opportunities = []
+        self.newly_created_opp_ids = []
 
         # Batch-fetch all existing auction records in 1 single query
         target_ids = [it["id_subasta"] for it in raw_auctions if "id_subasta" in it]
@@ -152,6 +153,9 @@ class OpportunityScoringEngine:
                         is_alert_sent=False
                     )
                     self.db.add(opportunity)
+                    self.db.flush()
+                    if opportunity.id not in self.newly_created_opp_ids:
+                        self.newly_created_opp_ids.append(opportunity.id)
                 
                 self.db.flush()
                 self.db.commit()

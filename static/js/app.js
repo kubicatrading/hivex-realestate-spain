@@ -807,11 +807,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             return `
-                <div class="deal-card" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
+                <div class="deal-card ${opp.is_new ? 'deal-card-new' : ''}" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
                     <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
                         <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
-                            ${opp.source_type === 'pgou' ? '' : (opp.source_type === 'edictos' ? `
-                                <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
+                            ${opp.source_type === 'pgou' ? `
+                                <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                    <span class="badge-strategy" style="background: #9333ea; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">📐 DESARROLLO SUELO</span>
+                                    ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
+                                </div>
+                                <span class="badge-discount" style="background: rgba(168, 85, 247, 0.25); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-weight: 700;">${escapeHtml(opp.planning_status || 'PGOU')}</span>
+                            ` : (opp.source_type === 'edictos' ? `
+                                <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                    <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
+                                    ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
+                                </div>
                                 ${opp.discount_percentage > 0 ? `
                                     <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
                                 ` : `
@@ -820,6 +829,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             ` : `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
+                                    ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
                                     ${opp.is_lotes ? `
                                         <span class="badge-lote" title="Subasta por lotes independientes. Puja y adjudicación separada.">
                                             <i data-lucide="package"></i> LOTE ${opp.lot_number || 1}
@@ -1336,16 +1346,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="modal-prop-header">
-                    ${opp.is_lotes ? `
-                        <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        ${opp.is_new ? `
+                            <span class="badge-new-pill" style="font-size: 0.78rem; padding: 4px 10px;">
+                                <i data-lucide="sparkles"></i> New! Incorporada recientemente
+                            </span>
+                        ` : ''}
+                        ${opp.is_lotes ? `
                             <span class="badge-lote" style="font-size: 0.84rem; padding: 5px 12px; border-radius: 6px;">
                                 <i data-lucide="package"></i> ${escapeHtml(opp.lote_badge || 'SUBASTA POR LOTES · ADJUDICACIÓN INDEPENDIENTE')}
                             </span>
                             <span style="font-size: 0.78rem; color: #a5b4fc; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); padding: 4px 8px; border-radius: 4px;">
                                 ⚖️ LEC Art. 643: Puja y adjudicación independiente por lote
                             </span>
-                        </div>
-                    ` : ''}
+                        ` : ''}
+                    </div>
                     <h2>${escapeHtml(opp.title)}</h2>
                     <div class="modal-prop-address" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
                         <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
@@ -1577,12 +1592,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`;
 
         let loteHeaderHtml = '';
-        if (opp.is_lotes) {
+        if (opp.is_lotes || opp.is_new) {
             loteHeaderHtml = `
-                <div style="margin-bottom: 6px;">
-                    <span style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 4px; box-shadow: 0 1px 4px rgba(99,102,241,0.4); display: inline-flex; align-items: center; gap: 4px;">
-                        📦 LOTE ${opp.lot_number || 1} · PUJA INDEPENDIENTE
-                    </span>
+                <div style="margin-bottom: 6px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                    ${opp.is_new ? `
+                        <span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 12px; box-shadow: 0 1px 4px rgba(16,185,129,0.4); display: inline-flex; align-items: center; gap: 3px;">
+                            ✨ New!
+                        </span>
+                    ` : ''}
+                    ${opp.is_lotes ? `
+                        <span style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 4px; box-shadow: 0 1px 4px rgba(99,102,241,0.4); display: inline-flex; align-items: center; gap: 4px;">
+                            📦 LOTE ${opp.lot_number || 1} · PUJA INDEPENDIENTE
+                        </span>
+                    ` : ''}
                 </div>
             `;
         }

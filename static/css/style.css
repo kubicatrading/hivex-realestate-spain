@@ -1529,3 +1529,43 @@ body {
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.9) !important;
 }
 
+/* Badge "New!" para Oportunidades Recién Sincronizadas */
+.badge-new-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff;
+    font-family: var(--font-heading, inherit);
+    font-size: 0.70rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 20px;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    animation: badge-pulse-glow 2.5s infinite ease-in-out;
+}
+
+.badge-new-pill i {
+    width: 11px;
+    height: 11px;
+}
+
+@keyframes badge-pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 14px rgba(16, 185, 129, 0.85), 0 2px 6px rgba(0, 0, 0, 0.4);
+        transform: scale(1.03);
+    }
+}
+
+.deal-card.deal-card-new {
+    border-color: rgba(16, 185, 129, 0.45);
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.12), 0 0 0 1px rgba(16, 185, 129, 0.25);
+}
+

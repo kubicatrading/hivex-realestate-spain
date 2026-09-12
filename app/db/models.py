@@ -131,6 +131,16 @@ class Opportunity(Base):
 
     auction = relationship("Auction", back_populates="opportunities")
 
+class PipelineSyncState(Base):
+    __tablename__ = "pipeline_sync_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sync_time = Column(DateTime, default=datetime.utcnow)
+    new_auction_ids_json = Column(Text, default="[]")
+    new_pgou_ids_json = Column(Text, default="[]")
+    new_edicto_ids_json = Column(Text, default="[]")
+    summary_json = Column(Text, default="{}")
+
 class User(Base):
     __tablename__ = "users"
 
@@ -143,4 +153,5 @@ class User(Base):
     is_admin = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 

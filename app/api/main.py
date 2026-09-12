@@ -21,8 +21,11 @@ from sqlalchemy.orm import Session
 from geoalchemy2.shape import to_shape
 from typing import List, Optional, Dict, Tuple, Any, Union
 
+from datetime import datetime
+import json
+
 from app.db.session import get_db, Base, engine
-from app.db.models import Opportunity, Auction, StrategyType
+from app.db.models import Opportunity, Auction, StrategyType, PipelineSyncState
 from app.connectors.boe_scraper import BOESubastasScraper
 from app.connectors.catastro_client import CatastroClient
 from app.connectors.ine_client import INEClient
@@ -81,6 +84,14 @@ async def fix_vercel_rewrites_middleware(request: Request, call_next):
 class LoginRequest(BaseModel):
     login: Optional[str] = ""
     password: Optional[str] = ""
+
+# Estado de sincronización en memoria para destacar oportunidades nuevas (cron y escáner manual)
+LATEST_SYNC_STATE: Dict[str, Any] = {
+    "last_sync_timestamp": None,
+    "new_auction_ids": set(),
+    "new_pgou_ids": set(),
+    "new_edicto_ids": set()
+}
 
 # Coordinates fallback map for Spanish provinces/cities
 PROVINCE_COORDS = {
@@ -519,6 +530,17 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         edictos_scraper = EdictosScraper()
         edictos_items = edictos_scraper.fetch_edictos_opportunities()
 
+        new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])
+        new_pgou_ids = [p["id"] for p in pgou_items if p.get("is_new")]
+        new_edicto_ids = [e["id"] for e in edictos_items if e.get("is_new")]
+
+        # Actualizar estado de sincronización en memoria
+        LATEST_SYNC_STATE["last_sync_timestamp"] = datetime.utcnow().isoformat()
+        if new_opp_ids:
+            LATEST_SYNC_STATE["new_auction_ids"] = set(new_opp_ids)
+        LATEST_SYNC_STATE["new_pgou_ids"] = set(new_pgou_ids)
+        LATEST_SYNC_STATE["new_edicto_ids"] = set(new_edicto_ids)
+
         notifier = TelegramNotifier()
         alerts_sent = 0
         for opp in opportunities:
@@ -527,18 +549,33 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
                     opp.is_alert_sent = True
                     alerts_sent += 1
 
-        db.commit()
-        db.close()
         elapsed = round(time.time() - t_start, 2)
         summary = {
             "status": "success",
             "raw_auctions_processed": len(raw_auctions),
             "opportunities_scored": len(opportunities),
+            "new_auctions_detected": len(new_opp_ids),
             "pgou_sectors_total": len(pgou_items),
             "edictos_total": len(edictos_items),
             "alerts_sent": alerts_sent,
             "duration_seconds": elapsed
         }
+
+        # Persistir registro de sincronización en base de datos
+        try:
+            sync_rec = PipelineSyncState(
+                sync_time=datetime.utcnow(),
+                new_auction_ids_json=json.dumps(new_opp_ids),
+                new_pgou_ids_json=json.dumps(new_pgou_ids),
+                new_edicto_ids_json=json.dumps(new_edicto_ids),
+                summary_json=json.dumps(summary)
+            )
+            db.add(sync_rec)
+        except Exception as e_rec:
+            print(f"Aviso guardando PipelineSyncState: {e_rec}")
+
+        db.commit()
+        db.close()
         print(f"Pipeline completado con éxito: {summary}")
         return summary
     except Exception as e:
@@ -638,6 +675,36 @@ def get_opportunities(
         from app.engine.kpi_calculator import KPICalculator
         from app.core.geo_utils import get_spanish_province_coords, normalize_text
         import json
+
+        # Obtener IDs de nuevas oportunidades del lote de sincronización activo
+        active_new_auction_ids = set(LATEST_SYNC_STATE.get("new_auction_ids") or [])
+        active_new_pgou_ids = set(LATEST_SYNC_STATE.get("new_pgou_ids") or [])
+        active_new_edicto_ids = set(LATEST_SYNC_STATE.get("new_edicto_ids") or [])
+
+        if not active_new_auction_ids:
+            try:
+                last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
+                if last_sync:
+                    if last_sync.new_auction_ids_json:
+                        db_ids = json.loads(last_sync.new_auction_ids_json)
+                        if db_ids:
+                            active_new_auction_ids = set(db_ids)
+                            LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
+                    if last_sync.new_pgou_ids_json:
+                        active_new_pgou_ids = set(json.loads(last_sync.new_pgou_ids_json))
+                        LATEST_SYNC_STATE["new_pgou_ids"] = active_new_pgou_ids
+                    if last_sync.new_edicto_ids_json:
+                        active_new_edicto_ids = set(json.loads(last_sync.new_edicto_ids_json))
+                        LATEST_SYNC_STATE["new_edicto_ids"] = active_new_edicto_ids
+            except Exception as e_ls:
+                pass
+
+        # Arranque en frío (cold start): si aún no ha corrido el cron en esta sesión y no hay registro previo,
+        # marcar las subastas más recientes como lote inicial con distintivo "New!"
+        if not active_new_auction_ids and opportunities:
+            recent_sorted = sorted(opportunities, key=lambda x: (getattr(x, "created_at", None) or datetime.min, x.id), reverse=True)
+            active_new_auction_ids = set(o.id for o in recent_sorted[:12])
+            LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
 
         for opp in opportunities:
             try:
@@ -1039,6 +1106,8 @@ def get_opportunities(
                         "buildability_ratio": (auc.buildability_ratio if (auc and auc.buildability_ratio) else "1.8 m²t/m²s"),
                         "permitted_uses": (auc.permitted_uses if (auc and auc.permitted_uses) else "Residencial / Comercial")
                     },
+                    "is_new": bool(opp.id in active_new_auction_ids or (auc and auc.id in active_new_auction_ids)),
+                    "badge_new": "New!" if (opp.id in active_new_auction_ids or (auc and auc.id in active_new_auction_ids)) else None,
                     "source_type": "subastas",
                     "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else ""
                 })
@@ -1115,6 +1184,9 @@ def get_opportunities(
                 p_item["price_ref_level"] = "MESO"
                 p_item["price_ref_level_label"] = p_item.get("planning_status", "PGOU")
                 p_item["boe_url"] = None
+                is_pgou_new = bool(p_item.get("is_new") or p_item.get("id") in active_new_pgou_ids)
+                p_item["is_new"] = is_pgou_new
+                p_item["badge_new"] = "New!" if is_pgou_new else None
                 results.append(p_item)
         except Exception as e_pgou:
             print(f"Error cargando oportunidades PGOU: {e_pgou}")
@@ -1171,6 +1243,9 @@ def get_opportunities(
                     else:
                         e_item["boe_url"] = "https://www.boe.es/buscar/edictos_judiciales.php"
 
+                is_edicto_new = bool(e_item.get("is_new") or e_item.get("id") in active_new_edicto_ids)
+                e_item["is_new"] = is_edicto_new
+                e_item["badge_new"] = "New!" if is_edicto_new else None
                 results.append(e_item)
         except Exception as e_edictos:
             print(f"Error cargando oportunidades de Edictos: {e_edictos}")
@@ -1206,8 +1281,16 @@ def get_opportunities(
         except Exception as e_bbox:
             print(f"Error procesando BBOX {bbox}: {e_bbox}")
 
-    # Order results by discount percentage and overall score descending (best investment opportunities first)
-    results.sort(key=lambda x: (x.get("discount_percentage") or 0.0, x.get("overall_score") or 0.0), reverse=True)
+    # Order results: newly synchronized opportunities first (is_new=True),
+    # followed by discount percentage and overall score descending (best investment opportunities first)
+    results.sort(
+        key=lambda x: (
+            1 if x.get("is_new") else 0,
+            x.get("discount_percentage") or 0.0,
+            x.get("overall_score") or 0.0
+        ),
+        reverse=True
+    )
 
     total_count = len(results)
 

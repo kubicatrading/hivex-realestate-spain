@@ -59,6 +59,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-MAD-2026-001",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "HERENCIA_YACENTE",
                 "category_label": "⚖️ Herencia Yacente - Herederos Indeterminados",
                 "title": "Herencia Yacente - Finca Urbana en Chamberí (Causante sin Testamento)",
@@ -98,6 +100,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-MAD-2026-002",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "DIVISION_COSA_COMUN",
                 "category_label": "👥 División de Cosa Común - Extinción de Condominio",
                 "title": "Subasta de División de Cosa Común - 50% Proindiviso en Barrio de Salamanca",
@@ -258,6 +262,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-BCN-2026-006",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "DIVISION_COSA_COMUN",
                 "category_label": "👥 División de Cosa Común - Extinción de Condominio",
                 "title": "Subasta Cosa Común - 33.33% Indiviso Piso en Gràcia (Vila de Gràcia)",
@@ -301,6 +307,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-VAL-2026-007",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "HERENCIA_YACENTE",
                 "category_label": "⚖️ Herencia Yacente - Herederos Indeterminados",
                 "title": "Herencia Yacente - Edificio Histórico en Ciutat Vella (El Carmen)",
@@ -383,6 +391,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-MLG-2026-009",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "HERENCIA_YACENTE",
                 "category_label": "⚖️ Herencia Yacente - Herederos Indeterminados",
                 "title": "Herencia Yacente - Villa en Nueva Andalucía (Marbella - Causante Extranjero)",
@@ -465,6 +475,8 @@ class EdictosScraper:
             {
                 "id": "EDICTO-BIO-2026-011",
                 "source_type": "edictos",
+                "is_new": True,
+                "badge_new": "New!",
                 "category": "HERENCIA_YACENTE",
                 "category_label": "⚖️ Herencia Yacente - Herederos Indeterminados",
                 "title": "Herencia Yacente - Finca en Abandoibarra / Ensanche (Derecho Civil Vasco)",
