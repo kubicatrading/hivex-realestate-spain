@@ -133,8 +133,6 @@ class PGOUScraper:
             {
                 "id": "PGOU-MAD-2026-003",
                 "source_type": "pgou",
-                "is_new": True,
-                "badge_new": "New!",
                 "title": "Desarrollo Suelo Sector UZPp 02.06 'Valdecarros'",
                 "address": "Avenida del Mayorazgo / M-50",
                 "locality": "Madrid",
@@ -175,9 +173,7 @@ class PGOUScraper:
             {
                 "id": "PGOU-MAD-2026-004",
                 "source_type": "pgou",
-                "is_new": True,
-                "badge_new": "New!",
-                "title": "Madrid Nuevo Norte - Ámbito Centro de Negocios Chamartín (APE 08.20)",
+                "title": "Madrid Nuevo Norte - Ámbito Centro de Negocios Chamartín (APR 08.03)",
                 "address": "Calle Agustín de Foxá / Estación Chamartín",
                 "locality": "Madrid",
                 "province": "Madrid",
@@ -257,8 +253,6 @@ class PGOUScraper:
             {
                 "id": "PGOU-MAD-2026-005B",
                 "source_type": "pgou",
-                "is_new": True,
-                "badge_new": "New!",
                 "title": "Desarrollo Residencial & Dotacional - Sector 'Las Vegas'",
                 "address": "Avenida de las Vegas / Camino Real",
                 "locality": "Villanueva del Pardillo",
@@ -507,8 +501,6 @@ class PGOUScraper:
             {
                 "id": "PGOU-MLG-2026-011",
                 "source_type": "pgou",
-                "is_new": True,
-                "badge_new": "New!",
                 "title": "Regeneración Industrial - Sector Cortijo Merino / Intelhorce",
                 "address": "Calle Severo Ochoa / Carretera de Cártama",
                 "locality": "Málaga",
@@ -553,8 +545,6 @@ class PGOUScraper:
             {
                 "id": "PGOU-VAL-2026-012",
                 "source_type": "pgou",
-                "is_new": True,
-                "badge_new": "New!",
                 "title": "Desarrollo Urbano Sostenible - Sector NPR-4 'El Grau / Delta del Turia'",
                 "address": "Carrer de les Moreres / Avinguda de França",
                 "locality": "Valencia",

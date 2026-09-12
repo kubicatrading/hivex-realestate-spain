@@ -1,14 +1,19 @@
 import pytest
 from app.core.auth import create_access_token
 from fastapi.testclient import TestClient
-from app.api.main import app
+from app.api.main import app, LATEST_SYNC_STATE
 
 @pytest.fixture
 def auth_headers():
     token = create_access_token(data={"sub": "admin@hivex.es", "is_admin": True})
     return {"Authorization": f"Bearer {token}"}
 
-def test_opportunities_is_new_ordering(auth_headers):
+def test_zero_false_positives_without_active_sync(auth_headers):
+    """Garantizar rigor: si no ha habido sincronización con novedades reales, ningún elemento debe llevar 'New!' ni simulación."""
+    LATEST_SYNC_STATE["new_auction_ids"] = set()
+    LATEST_SYNC_STATE["new_pgou_ids"] = set()
+    LATEST_SYNC_STATE["new_edicto_ids"] = set()
+
     client = TestClient(app)
     response = client.get("/api/v1/opportunities", headers=auth_headers)
     assert response.status_code == 200
@@ -16,29 +21,34 @@ def test_opportunities_is_new_ordering(auth_headers):
     opps = data.get("opportunities", [])
     assert len(opps) > 0
 
-    first_non_new_idx = None
-    for idx, o in enumerate(opps):
-        if not o.get("is_new"):
-            first_non_new_idx = idx
-            break
+    new_opps = [o for o in opps if o.get("is_new")]
+    assert len(new_opps) == 0, f"No debe haber falsos positivos de 'New!'. Encontrados: {len(new_opps)}"
 
-    if first_non_new_idx is not None:
-        for idx in range(first_non_new_idx, len(opps)):
-            assert not opps[idx].get("is_new"), (
-                f"Found is_new=True at index {idx} after first non-new at {first_non_new_idx}"
-            )
+def test_real_sync_novelties_prioritized_at_top(auth_headers):
+    """Verificar que cuando una sincronización real introduce oportunidades nuevas, éstas aparecen exactamente al frente."""
+    # Simular una sincronización que detectó 2 oportunidades concretas
+    LATEST_SYNC_STATE["new_auction_ids"] = {10}
+    LATEST_SYNC_STATE["new_pgou_ids"] = {"PGOU-MAD-2026-003"}
+    LATEST_SYNC_STATE["new_edicto_ids"] = set()
+
+    client = TestClient(app)
+    response = client.get("/api/v1/opportunities", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    opps = data.get("opportunities", [])
 
     new_opps = [o for o in opps if o.get("is_new")]
+    assert len(new_opps) == 2
     for o in new_opps:
         assert o.get("badge_new") == "New!"
 
-def test_opportunities_by_source_type_has_new_at_top(auth_headers):
-    client = TestClient(app)
-    for st in ["subastas", "pgou", "edictos"]:
-        res = client.get(f"/api/v1/opportunities?source_type={st}", headers=auth_headers)
-        assert res.status_code == 200
-        data = res.json().get("opportunities", [])
-        first_non_new = next((i for i, o in enumerate(data) if not o.get("is_new")), None)
-        if first_non_new is not None:
-            for idx in range(first_non_new, len(data)):
-                assert not data[idx].get("is_new"), f"Found new item after non-new in source {st}"
+    # Las 2 novedades deben ser estrictamente los primeros 2 elementos de la lista
+    assert opps[0].get("is_new") is True
+    assert opps[1].get("is_new") is True
+    if len(opps) > 2:
+        assert opps[2].get("is_new") is not True
+
+    # Limpiar estado
+    LATEST_SYNC_STATE["new_auction_ids"] = set()
+    LATEST_SYNC_STATE["new_pgou_ids"] = set()
+    LATEST_SYNC_STATE["new_edicto_ids"] = set()

@@ -531,13 +531,49 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         edictos_items = edictos_scraper.fetch_edictos_opportunities()
 
         new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])
-        new_pgou_ids = [p["id"] for p in pgou_items if p.get("is_new")]
-        new_edicto_ids = [e["id"] for e in edictos_items if e.get("is_new")]
 
-        # Actualizar estado de sincronización en memoria
+        # Consultar sincronizaciones previas para conocer los IDs históricos de PGOU y Edictos
+        all_known_pgou_ids = set()
+        all_known_edicto_ids = set()
+        prev_syncs = []
+        try:
+            prev_syncs = db.query(PipelineSyncState).all()
+            for ps in prev_syncs:
+                if ps.summary_json:
+                    try:
+                        sdata = json.loads(ps.summary_json)
+                        all_known_pgou_ids.update(sdata.get("all_pgou_ids", []))
+                        all_known_edicto_ids.update(sdata.get("all_edicto_ids", []))
+                    except Exception:
+                        pass
+                if ps.new_pgou_ids_json:
+                    try:
+                        all_known_pgou_ids.update(json.loads(ps.new_pgou_ids_json))
+                    except Exception:
+                        pass
+                if ps.new_edicto_ids_json:
+                    try:
+                        all_known_edicto_ids.update(json.loads(ps.new_edicto_ids_json))
+                    except Exception:
+                        pass
+        except Exception as e_prev:
+            print(f"Error consultando sincronizaciones previas: {e_prev}")
+
+        current_pgou_ids = [p["id"] for p in pgou_items if p.get("id")]
+        current_edicto_ids = [e["id"] for e in edictos_items if e.get("id")]
+
+        # Rigor absoluto: solo son "New!" si ya existía un catálogo base previo y aparecen
+        # identificadores nunca antes registrados en el sistema
+        new_pgou_ids = []
+        new_edicto_ids = []
+        if prev_syncs and all_known_pgou_ids:
+            new_pgou_ids = [pid for pid in current_pgou_ids if pid not in all_known_pgou_ids]
+        if prev_syncs and all_known_edicto_ids:
+            new_edicto_ids = [eid for eid in current_edicto_ids if eid not in all_known_edicto_ids]
+
+        # Actualizar estado de sincronización en memoria de manera exacta y sin simulación
         LATEST_SYNC_STATE["last_sync_timestamp"] = datetime.utcnow().isoformat()
-        if new_opp_ids:
-            LATEST_SYNC_STATE["new_auction_ids"] = set(new_opp_ids)
+        LATEST_SYNC_STATE["new_auction_ids"] = set(new_opp_ids)
         LATEST_SYNC_STATE["new_pgou_ids"] = set(new_pgou_ids)
         LATEST_SYNC_STATE["new_edicto_ids"] = set(new_edicto_ids)
 
@@ -555,8 +591,12 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
             "raw_auctions_processed": len(raw_auctions),
             "opportunities_scored": len(opportunities),
             "new_auctions_detected": len(new_opp_ids),
+            "new_pgou_detected": len(new_pgou_ids),
+            "new_edictos_detected": len(new_edicto_ids),
             "pgou_sectors_total": len(pgou_items),
             "edictos_total": len(edictos_items),
+            "all_pgou_ids": current_pgou_ids,
+            "all_edicto_ids": current_edicto_ids,
             "alerts_sent": alerts_sent,
             "duration_seconds": elapsed
         }
@@ -681,30 +721,27 @@ def get_opportunities(
         active_new_pgou_ids = set(LATEST_SYNC_STATE.get("new_pgou_ids") or [])
         active_new_edicto_ids = set(LATEST_SYNC_STATE.get("new_edicto_ids") or [])
 
-        if not active_new_auction_ids:
+        # Si no hay estado en memoria (por ejemplo, reinicio del servicio), recuperar el último registro de sincronización
+        if not active_new_auction_ids and not active_new_pgou_ids and not active_new_edicto_ids:
             try:
                 last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
-                if last_sync:
-                    if last_sync.new_auction_ids_json:
-                        db_ids = json.loads(last_sync.new_auction_ids_json)
-                        if db_ids:
-                            active_new_auction_ids = set(db_ids)
-                            LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
-                    if last_sync.new_pgou_ids_json:
-                        active_new_pgou_ids = set(json.loads(last_sync.new_pgou_ids_json))
-                        LATEST_SYNC_STATE["new_pgou_ids"] = active_new_pgou_ids
-                    if last_sync.new_edicto_ids_json:
-                        active_new_edicto_ids = set(json.loads(last_sync.new_edicto_ids_json))
-                        LATEST_SYNC_STATE["new_edicto_ids"] = active_new_edicto_ids
+                if last_sync and last_sync.sync_time:
+                    # Rigor de datos y fidelidad: las novedades solo se consideran activas si la sincronización ocurrió en las últimas 24 horas
+                    hours_since_sync = (datetime.utcnow() - last_sync.sync_time).total_seconds() / 3600.0
+                    if hours_since_sync <= 24.0:
+                        if last_sync.new_auction_ids_json:
+                            db_ids = json.loads(last_sync.new_auction_ids_json)
+                            if db_ids:
+                                active_new_auction_ids = set(db_ids)
+                                LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
+                        if last_sync.new_pgou_ids_json:
+                            active_new_pgou_ids = set(json.loads(last_sync.new_pgou_ids_json))
+                            LATEST_SYNC_STATE["new_pgou_ids"] = active_new_pgou_ids
+                        if last_sync.new_edicto_ids_json:
+                            active_new_edicto_ids = set(json.loads(last_sync.new_edicto_ids_json))
+                            LATEST_SYNC_STATE["new_edicto_ids"] = active_new_edicto_ids
             except Exception as e_ls:
                 pass
-
-        # Arranque en frío (cold start): si aún no ha corrido el cron en esta sesión y no hay registro previo,
-        # marcar las subastas más recientes como lote inicial con distintivo "New!"
-        if not active_new_auction_ids and opportunities:
-            recent_sorted = sorted(opportunities, key=lambda x: (getattr(x, "created_at", None) or datetime.min, x.id), reverse=True)
-            active_new_auction_ids = set(o.id for o in recent_sorted[:12])
-            LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
 
         for opp in opportunities:
             try:
@@ -1184,7 +1221,7 @@ def get_opportunities(
                 p_item["price_ref_level"] = "MESO"
                 p_item["price_ref_level_label"] = p_item.get("planning_status", "PGOU")
                 p_item["boe_url"] = None
-                is_pgou_new = bool(p_item.get("is_new") or p_item.get("id") in active_new_pgou_ids)
+                is_pgou_new = bool(p_item.get("id") in active_new_pgou_ids)
                 p_item["is_new"] = is_pgou_new
                 p_item["badge_new"] = "New!" if is_pgou_new else None
                 results.append(p_item)
@@ -1243,7 +1280,7 @@ def get_opportunities(
                     else:
                         e_item["boe_url"] = "https://www.boe.es/buscar/edictos_judiciales.php"
 
-                is_edicto_new = bool(e_item.get("is_new") or e_item.get("id") in active_new_edicto_ids)
+                is_edicto_new = bool(e_item.get("id") in active_new_edicto_ids)
                 e_item["is_new"] = is_edicto_new
                 e_item["badge_new"] = "New!" if is_edicto_new else None
                 results.append(e_item)
