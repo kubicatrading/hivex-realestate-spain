@@ -311,21 +311,21 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 440000.0,
-                        "url": "https://www.idealista.com/inmueble/104829102/",
+                        "url": "https://www.idealista.com/venta-viviendas/madrid/chamartin/castilla/",
                         "agency": "Gilmar Consulting Inmobiliario Chamartín",
                         "published_date": "2026-02-12"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 455000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/madrid-capital/chamartin/182940122/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/chamartin/l",
                         "agency": "Inmobiliaria Chamartín Norte",
                         "published_date": "2026-01-25"
                     },
                     {
                         "portal": "Habitaclia",
                         "price": 460000.0,
-                        "url": "https://www.habitaclia.com/comprar-piso-calle_agustin_de_foxa_chamartin-madrid-i40920003918234.htm",
+                        "url": "https://www.habitaclia.com/viviendas-chamartin-madrid.htm",
                         "agency": "Redpiso Castellana",
                         "published_date": "2026-01-18"
                     }
@@ -367,14 +367,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 260000.0,
-                        "url": "https://www.idealista.com/inmueble/104918204/",
+                        "url": "https://www.idealista.com/venta-viviendas/madrid/villa-de-vallecas/ensanche-de-vallecas/",
                         "agency": "Tecnocasa Ensanche Vallecas",
                         "published_date": "2026-02-18"
                     },
                     {
                         "portal": "Pisos.com",
                         "price": 275000.0,
-                        "url": "https://www.pisos.com/comprar/atico-madrid_capital_villa_de_vallecas-19382041_109283/",
+                        "url": "https://www.pisos.com/venta/pisos-madrid_capital_villa_de_vallecas/",
                         "agency": "InmoVallecas Sureste",
                         "published_date": "2026-01-10"
                     }
@@ -416,14 +416,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 219000.0,
-                        "url": "https://www.idealista.com/inmueble/104719283/",
+                        "url": "https://www.idealista.com/venta-viviendas/madrid/vicalvaro/el-caniaveral/",
                         "agency": "Solvia Inmobiliaria Madrid Este",
                         "published_date": "2026-02-20"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 229000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/madrid-capital/vicalvaro/184910283/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/vicalvaro/l",
                         "agency": "Inversiones Sureste Capital",
                         "published_date": "2026-01-22"
                     }
@@ -464,7 +464,7 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 435000.0,
-                        "url": "https://www.idealista.com/inmueble/104192847/",
+                        "url": "https://www.idealista.com/venta-viviendas/madrid/chamberi/trafalgar/",
                         "agency": "Engel & Völkers Chamberí",
                         "published_date": "2026-02-14"
                     }
@@ -505,14 +505,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 169000.0,
-                        "url": "https://www.idealista.com/inmueble/104839218/",
+                        "url": "https://www.idealista.com/venta-viviendas/madrid/carabanchel/vista-alegre/",
                         "agency": "Redpiso Vista Alegre",
                         "published_date": "2026-02-24"
                     },
                     {
                         "portal": "YaEncontré",
                         "price": 179000.0,
-                        "url": "https://www.yaencontre.com/venta/piso/madrid/carabanchel/inmueble-8492019/",
+                        "url": "https://www.yaencontre.com/venta/pisos/madrid/carabanchel",
                         "agency": "Agencia Inmobiliaria Carabanchel",
                         "published_date": "2026-01-30"
                     }
@@ -557,21 +557,21 @@ class MarketScraper:
                     {
                         "portal": "Habitaclia",
                         "price": 335000.0,
-                        "url": "https://www.habitaclia.com/comprar-loft-carrer_pere_iv_el_poblenou-barcelona-i384920192.htm",
+                        "url": "https://www.habitaclia.com/viviendas-el_poblenou-barcelona.htm",
                         "agency": "Lucas Fox Poblenou Properties",
                         "published_date": "2026-02-19"
                     },
                     {
                         "portal": "Idealista",
                         "price": 349000.0,
-                        "url": "https://www.idealista.com/inmueble/104928104/",
+                        "url": "https://www.idealista.com/venta-viviendas/barcelona/sant-marti/el-poblenou/",
                         "agency": "Engel & Völkers Barcelona 22@",
                         "published_date": "2026-01-28"
                     },
                     {
                         "portal": "YaEncontré",
                         "price": 355000.0,
-                        "url": "https://www.yaencontre.com/venta/loft/barcelona/sant-marti/inmueble-9482012/",
+                        "url": "https://www.yaencontre.com/venta/pisos/barcelona/sant-marti",
                         "agency": "BCN Tech Real Estate",
                         "published_date": "2026-01-14"
                     }
@@ -613,14 +613,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 389000.0,
-                        "url": "https://www.idealista.com/inmueble/104930192/",
+                        "url": "https://www.idealista.com/venta-viviendas/barcelona/eixample/la-dreta-de-l-eixample/",
                         "agency": "Casc Antic BCN",
                         "published_date": "2026-02-15"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 399000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/barcelona-capital/eixample/183920192/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/eixample/l",
                         "agency": "Habitat Eixample",
                         "published_date": "2026-01-19"
                     }
@@ -661,7 +661,7 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 298000.0,
-                        "url": "https://www.idealista.com/inmueble/104819203/",
+                        "url": "https://www.idealista.com/venta-viviendas/barcelona/gracia/vila-de-gracia/",
                         "agency": "Finques Gràcia",
                         "published_date": "2026-02-21"
                     }
@@ -706,14 +706,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 235000.0,
-                        "url": "https://www.idealista.com/inmueble/104719821/",
+                        "url": "https://www.idealista.com/venta-viviendas/valencia/poblats-maritims/el-grau/",
                         "agency": "Olivares Consultores Inmobiliarios",
                         "published_date": "2026-02-17"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 245000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/valencia-capital/el-grau/182910394/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/el-grau/l",
                         "agency": "Marina Real Estate Valencia",
                         "published_date": "2026-01-20"
                     }
@@ -754,14 +754,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 230000.0,
-                        "url": "https://www.idealista.com/inmueble/104918239/",
+                        "url": "https://www.idealista.com/venta-viviendas/valencia/eixample/russafa/",
                         "agency": "Engel & Völkers Valencia",
                         "published_date": "2026-02-11"
                     },
                     {
                         "portal": "Pisos.com",
                         "price": 242000.0,
-                        "url": "https://www.pisos.com/comprar/piso-valencia_capital_ruzafa-19284019_109283/",
+                        "url": "https://www.pisos.com/venta/pisos-valencia_capital_ruzafa/",
                         "agency": "Inmobiliaria Ruzafa Centro",
                         "published_date": "2026-01-24"
                     }
@@ -806,21 +806,21 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 189000.0,
-                        "url": "https://www.idealista.com/inmueble/104729103/",
+                        "url": "https://www.idealista.com/venta-viviendas/malaga/cruz-de-humilladero/",
                         "agency": "Solvia Store Málaga",
                         "published_date": "2026-02-22"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 199000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/malaga-capital/cruz-de-humilladero/183920194/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/cruz-de-humilladero/l",
                         "agency": "InmoMálaga Teatinos",
                         "published_date": "2026-01-27"
                     },
                     {
                         "portal": "Pisos.com",
                         "price": 205000.0,
-                        "url": "https://www.pisos.com/comprar/piso-malaga_capital-19482019_109283/",
+                        "url": "https://www.pisos.com/venta/pisos-malaga_capital/",
                         "agency": "Grupo Inmobiliario Sur",
                         "published_date": "2026-01-12"
                     }
@@ -861,14 +861,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 265000.0,
-                        "url": "https://www.idealista.com/inmueble/104819284/",
+                        "url": "https://www.idealista.com/venta-viviendas/malaga/centro/el-soho/",
                         "agency": "Lucas Fox Málaga",
                         "published_date": "2026-02-14"
                     },
                     {
                         "portal": "Habitaclia",
                         "price": 275000.0,
-                        "url": "https://www.habitaclia.com/comprar-piso-calle_casas_de_campos-malaga-i49201928.htm",
+                        "url": "https://www.habitaclia.com/viviendas-centro_soho-malaga.htm",
                         "agency": "Soho Real Estate Partners",
                         "published_date": "2026-01-20"
                     }
@@ -913,14 +913,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 249000.0,
-                        "url": "https://www.idealista.com/inmueble/104928172/",
+                        "url": "https://www.idealista.com/venta-viviendas/alicante-alacant/centro/",
                         "agency": "Inmobiliaria Alcaraz Alicante",
                         "published_date": "2026-02-18"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 259000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/alicante-alacant/centro/182940192/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/alicante-alacant/centro/l",
                         "agency": "InmoLuceros Centro",
                         "published_date": "2026-01-15"
                     }
@@ -965,14 +965,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 209000.0,
-                        "url": "https://www.idealista.com/inmueble/104810294/",
+                        "url": "https://www.idealista.com/venta-viviendas/sevilla/triana/",
                         "agency": "Alianza Sevilla Inmobiliarias",
                         "published_date": "2026-02-16"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 219000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/sevilla-capital/triana/183920195/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/sevilla-capital/triana/l",
                         "agency": "InmoTriana Propiedades",
                         "published_date": "2026-01-21"
                     }
@@ -1017,14 +1017,14 @@ class MarketScraper:
                     {
                         "portal": "Idealista",
                         "price": 135000.0,
-                        "url": "https://www.idealista.com/inmueble/104910283/",
+                        "url": "https://www.idealista.com/venta-viviendas/zaragoza/delicias/",
                         "agency": "Fincas Aragón Zaragoza",
                         "published_date": "2026-02-23"
                     },
                     {
                         "portal": "Fotocasa",
                         "price": 142000.0,
-                        "url": "https://www.fotocasa.es/es/comprar/vivienda/zaragoza-capital/delicias/184910284/d",
+                        "url": "https://www.fotocasa.es/es/comprar/viviendas/zaragoza-capital/delicias/l",
                         "agency": "InmoDelicias Zaragoza",
                         "published_date": "2026-01-28"
                     }

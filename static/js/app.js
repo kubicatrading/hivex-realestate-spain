@@ -867,7 +867,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
             } else if (opp.source_type === 'market') {
-                actionBtnLabel = escapeHtml(opp.primary_portal || 'PORTAL');
+                actionBtnLabel = `Ver en ${escapeHtml(opp.primary_portal || 'Portal')}`;
                 actionBtnUrl = opp.portal_url || opp.boe_url || '#';
 
                 dateSubastaHeader = `
@@ -1370,8 +1370,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ${escapeHtml(p.agency || 'Agencia')}
                             </td>
                             <td style="padding: 8px 10px; text-align: right;">
-                                <a href="${p.url || '#'}" target="_blank" rel="noopener" class="btn-boe-xs" style="padding: 3px 8px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
-                                    Ver <i data-lucide="external-link" style="width: 10px; height: 10px;"></i>
+                                <a href="${p.url || '#'}" target="_blank" rel="noopener noreferrer" class="btn-boe-xs" style="padding: 3px 8px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
+                                    Ver en ${escapeHtml(p.portal || 'Portal')} <i data-lucide="external-link" style="width: 10px; height: 10px;"></i>
                                 </a>
                             </td>
                         </tr>
