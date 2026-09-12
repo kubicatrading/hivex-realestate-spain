@@ -516,10 +516,17 @@ document.addEventListener('DOMContentLoaded', () => {
             activeBtn.setAttribute('aria-selected', 'true');
         }
 
-        // Show/hide Market sub-filter bar
-        const marketFilterBar = document.getElementById('market-filter-bar');
-        if (marketFilterBar) {
-            marketFilterBar.style.display = sourceType === 'market' ? 'flex' : 'none';
+        // Show/hide PGOU synergy filter button in toolbar when relevant
+        const synergyFilterGroup = document.getElementById('filter-group-synergy');
+        if (synergyFilterGroup) {
+            synergyFilterGroup.style.display = (sourceType === 'market' || sourceType === 'subastas') ? 'flex' : 'none';
+        }
+
+        // Ensure Leaflet map recalculates its dimensions and renders tiles crisply
+        if (typeof map !== 'undefined' && map) {
+            setTimeout(() => {
+                try { map.invalidateSize(); } catch(e) {}
+            }, 60);
         }
 
         // Update map legend dynamically according to active tab

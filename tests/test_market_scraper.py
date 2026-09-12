@@ -7,37 +7,46 @@ from app.api.main import app
 
 client = TestClient(app)
 auth_headers = {"Authorization": f"Bearer {create_access_token({'sub': 'testuser'})}"}
-
-def test_market_scraper_deduplication_and_min_price():
+def test_market_scraper_no_simulated_fallbacks():
+    """Valida la regla de oro: Sin credenciales o sin anuncios reales, devuelve lista vacía ([]), nunca datos simulados."""
     scraper = MarketScraper()
     items = scraper.fetch_market_opportunities()
+    # Sin variables IDEALISTA_API_KEY en test, debe retornar lista vacía estricta
+    assert isinstance(items, list)
+    assert len(items) == 0
+
+def test_market_scraper_deduplication_and_min_price():
+    """Valida los algoritmos de precio mínimo, deduplicación y cálculo de descuento."""
+    scraper = MarketScraper()
+    sample_raw = {
+        "id": "MKT-TEST-MAD-001",
+        "title": "Piso exterior en Madrid",
+        "address": "Calle Mayor 10",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "original_listing_price": 300000.0,
+        "surface_m2": 80.0,
+        "publications": [
+            {"portal": "Idealista", "price": 280000.0, "url": "https://idealista.com/1"},
+            {"portal": "Fotocasa", "price": 260000.0, "url": "https://fotocasa.es/1"}, # Precio mínimo
+            {"portal": "Habitaclia", "price": 270000.0, "url": "https://habitaclia.com/1"}
+        ]
+    }
+    processed = scraper._process_market_listing(sample_raw)
     
-    assert len(items) > 0
-    
-    for item in items:
-        assert item["source_type"] == "market"
-        assert item["listing_price"] > 0
-        assert "x_publicacion" in item
-        assert "distinct_prices_count" in item
-        
-        # Verify lowest price rule: listing_price must equal minimum price found in all publications
-        distinct_prices = [p["price"] for p in item.get("publications", []) if p.get("price")]
-        if distinct_prices:
-            assert item["listing_price"] == min(distinct_prices)
-            # Verify strict rule: len(set(distinct_prices)) equals distinct_prices_count
-            assert item["distinct_prices_count"] == len(set(distinct_prices))
-            assert item["x_publicacion"] == f"x{len(set(distinct_prices))}"
-            
-        # Verify discount calculation
-        if item.get("original_listing_price") and item["original_listing_price"] > item["listing_price"]:
-            expected_discount = round(((item["original_listing_price"] - item["listing_price"]) / item["original_listing_price"]) * 100, 1)
-            assert item["discount_percentage"] == expected_discount
+    assert processed["source_type"] == "market"
+    assert processed["listing_price"] == 260000.0
+    assert processed["original_listing_price"] == 300000.0
+    assert processed["price_drop_amount"] == 40000.0
+    assert processed["discount_percentage"] == 13.3
+    assert processed["distinct_prices_count"] == 3
+    assert processed["x_publicacion"] == "x3"
 
 def test_market_scraper_same_price_different_portals_no_increment():
     """Valida la regla estricta: Si se detecta en otra página con el mismo precio, NO debe contar."""
     scraper = MarketScraper()
     sample_raw = {
-        "id": "MKT-TEST-001",
+        "id": "MKT-TEST-002",
         "title": "Piso de prueba",
         "original_listing_price": 200000.0,
         "publications": [
@@ -55,42 +64,37 @@ def test_market_scraper_same_price_different_portals_no_increment():
 def test_market_cross_reference_with_pgou():
     """Valida el cruce de mercado con planeamiento PGOU y detección de sinergias."""
     scraper = MarketScraper()
-    market_items = scraper.fetch_market_opportunities()
+    raw_sample = {
+        "id": "MKT-TEST-VALDECARROS",
+        "title": "Vivienda en Valdecarros",
+        "address": "Avenida del Mayorazgo 42",
+        "locality": "Madrid",
+        "description": "Junto al sector UZPp 02.06 Valdecarros",
+        "original_listing_price": 250000.0,
+        "listing_price": 220000.0,
+        "lat": 40.3540,
+        "lon": -3.6180,
+        "publications": [{"portal": "Idealista", "price": 220000.0}]
+    }
+    processed = scraper._process_market_listing(raw_sample)
+    
     pgou_scraper = PGOUScraper()
     pgou_items = pgou_scraper.fetch_pgou_opportunities()
     
     # Run cross-reference
-    MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
+    MarketScraper.cross_reference_with_pgou([processed], pgou_items)
     
-    synergy_items = [m for m in market_items if m.get("has_pgou_synergy")]
-    assert len(synergy_items) > 0
-    
-    for s_item in synergy_items:
-        assert s_item["has_pgou_synergy"] is True
-        assert s_item.get("pgou_id") is not None
-        assert s_item.get("pgou_title") is not None
-        assert s_item.get("synergy_reason") is not None
+    assert processed["has_pgou_synergy"] is True
+    assert processed.get("pgou_id") is not None
+    assert processed.get("pgou_title") is not None
+    assert processed.get("synergy_reason") is not None
+    assert "Valdecarros" in processed.get("pgou_title")
 
 def test_api_market_opportunities_endpoint():
-    """Verifica que el endpoint /api/v1/opportunities soporte source_type=market."""
+    """Verifica que el endpoint /api/v1/opportunities soporte source_type=market retornando 200."""
     response = client.get("/api/v1/opportunities?source_type=market", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "opportunities" in data
-    opps = data["opportunities"]
-    assert len(opps) > 0
-    for item in opps:
-        assert item["source_type"] == "market"
-        assert "x_publicacion" in item
-        assert "listing_price" in item
-        assert "discount_percentage" in item
+    assert isinstance(data["opportunities"], list)
 
-def test_api_market_opportunities_filter_synergy():
-    """Verifica el filtrado por only_synergy_pgou."""
-    response = client.get("/api/v1/opportunities?source_type=market&only_synergy_pgou=true", headers=auth_headers)
-    assert response.status_code == 200
-    data = response.json()
-    opps = data["opportunities"]
-    assert len(opps) > 0
-    for item in opps:
-        assert item["has_pgou_synergy"] is True
