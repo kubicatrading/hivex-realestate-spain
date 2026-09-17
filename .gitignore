@@ -10,3 +10,4 @@ __pycache__/
 .vercel/
 .vercel
 scratch/
+data/cache_supadata/

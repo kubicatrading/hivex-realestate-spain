@@ -23,6 +23,8 @@ import math
 import re
 from typing import List, Dict, Any, Optional
 import httpx
+from app.connectors.supadata_client import SupadataClient
+from app.connectors.portal_parsers import IdealistaMarkdownParser, HabitacliaMarkdownParser
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class MarketScraper:
         self.idealista_api_key = os.environ.get("IDEALISTA_API_KEY", "").strip()
         self.idealista_api_secret = os.environ.get("IDEALISTA_API_SECRET", "").strip()
         self.timeout = float(os.environ.get("MARKET_SCRAPER_TIMEOUT", "10.0"))
+        self.supadata_client = SupadataClient()
 
     def fetch_market_opportunities(
         self,
@@ -267,11 +270,66 @@ class MarketScraper:
 
     def _fetch_live_portals(self, province: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Intento de extracción en vivo para portales abiertos.
-        Si la conexión falla o el portal responde con bloqueo anti-bot,
-        captura la excepción de forma segura y devuelve [] sin inventar ningún dato.
+        Extracción en vivo de portales inmobiliarios (Idealista, Habitaclia) utilizando
+        la API de Supadata para superar Cloudflare / DataDome.
+        Aplica deduplicación, cálculo de precio mínimo y normalización a oportunidades HIVEX.
         """
-        return []
+        results: List[Dict[str, Any]] = []
+        if not self.supadata_client.api_key:
+            logger.info("SUPADATA_API_KEY no configurada. Omitiendo scraping en vivo de portales.")
+            return results
+
+        # Definir targets según provincia solicitada
+        prov_map = {
+            "madrid": [
+                ("https://www.idealista.com/venta-viviendas/madrid-madrid/", "Madrid", "idealista"),
+                ("https://www.habitaclia.com/viviendas-madrid.htm", "Madrid", "habitaclia"),
+            ],
+            "barcelona": [
+                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/", "Barcelona", "idealista"),
+                ("https://www.habitaclia.com/viviendas-barcelona.htm", "Barcelona", "habitaclia"),
+            ],
+            "valencia": [
+                ("https://www.idealista.com/venta-viviendas/valencia-valencia/", "Valencia", "idealista"),
+            ],
+            "malaga": [
+                ("https://www.idealista.com/venta-viviendas/malaga-malaga/", "Málaga", "idealista"),
+            ],
+        }
+
+        targets = []
+        if province:
+            p_clean = province.strip().lower()
+            for k, v in prov_map.items():
+                if k in p_clean:
+                    targets.extend(v)
+            if not targets:
+                # Target genérico por provincia
+                targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
+        else:
+            # Consulta completa nacional sobre los mercados clave
+            for prov_targets in prov_map.values():
+                targets.extend(prov_targets)
+
+        for url, prov_name, portal_type in targets:
+            try:
+                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata...")
+                scrape_res = self.supadata_client.scrape_url(url)
+                if not scrape_res or not scrape_res.get("content"):
+                    continue
+
+                content = scrape_res.get("content", "")
+                if portal_type == "idealista":
+                    parsed = IdealistaMarkdownParser.parse_listings(content, default_province=prov_name)
+                    results.extend(parsed)
+                elif portal_type == "habitaclia":
+                    parsed = HabitacliaMarkdownParser.parse_listings(content, default_province=prov_name)
+                    results.extend(parsed)
+            except Exception as e_scrape:
+                logger.warning(f"Error extrayendo {url} con Supadata: {e_scrape}")
+
+        logger.info(f"[Market Live Scraper] Total de {len(results)} oportunidades en vivo extraídas.")
+        return results
 
     def _build_verified_market_catalog(self) -> List[Dict[str, Any]]:
         """

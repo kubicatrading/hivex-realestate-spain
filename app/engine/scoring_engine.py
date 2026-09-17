@@ -49,6 +49,24 @@ class OpportunityScoringEngine:
                 images_json_str = json.dumps(images_list) if images_list else None
 
                 if not existing:
+                    # Asegurar existencia de Parcela Catastral si refcat está presente
+                    item_refcat = item.get("refcat")
+                    if item_refcat:
+                        try:
+                            parcel_exists = self.db.query(CadastralParcel).filter(CadastralParcel.refcat == item_refcat).first()
+                            if not parcel_exists:
+                                new_parcel = CadastralParcel(
+                                    refcat=item_refcat,
+                                    address=item.get("address"),
+                                    built_surface_m2=item.get("surface_m2") or 100.0,
+                                    main_use=item.get("property_type", "Vivienda")
+                                )
+                                self.db.add(new_parcel)
+                                self.db.commit()
+                        except Exception as e_parcel:
+                            self.db.rollback()
+                            logger.warning(f"No se pudo registrar parcela previa {item_refcat}: {e_parcel}")
+
                     # Crear registro de subasta
                     existing = Auction(
                         id_subasta=auction_id,

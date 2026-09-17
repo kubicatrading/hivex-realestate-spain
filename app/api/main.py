@@ -1,6 +1,9 @@
 import os
 import re
 import certifi
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Sanitize SSL environment
 if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
