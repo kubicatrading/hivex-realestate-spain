@@ -1059,6 +1059,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="card-bottom-row" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%;">
                             <div class="scores-compact" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
                                 <span class="score-chip" title="Score Global Oportunidad" style="${getScoreBgStyle(opp.overall_score)}">Score: <strong>${formatScore(opp.overall_score)}</strong></span>
+                                ${(opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
+                                <span class="score-chip" title="Rentabilidad de Alquiler Anual Estimada (Yield)" style="background: ${opp.rental_yield >= 7 ? 'rgba(34, 197, 94, 0.22)' : (opp.rental_yield >= 6 ? 'rgba(234, 179, 8, 0.22)' : (opp.rental_yield >= 5 ? 'rgba(249, 115, 22, 0.22)' : 'rgba(239, 68, 68, 0.22)'))}; border: 1px solid ${opp.rental_yield >= 7 ? '#22c55e' : (opp.rental_yield >= 6 ? '#eab308' : (opp.rental_yield >= 5 ? '#f97316' : '#ef4444'))}; color: ${opp.rental_yield >= 7 ? '#4ade80' : (opp.rental_yield >= 6 ? '#fde047' : (opp.rental_yield >= 5 ? '#fb923c' : '#f87171'))};">Yield: <strong>${Number(opp.rental_yield).toFixed(1)}%</strong></span>
+                                ` : ''}
                                 ${opp.source_type === 'pgou' ? '' : `<span class="score-chip" title="Score Descuento vs Mercado" style="${getScoreBgStyle((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}">Desc: <strong>${formatScore((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}</strong></span>`}
                                 <span class="score-chip" title="Score POIs / Entorno (OSM)" style="${getScoreBgStyle(opp.poi_score)}">POI: <strong>${formatScore(opp.poi_score)}</strong></span>
                                 <span class="score-chip" title="Score Renta INE" style="${getScoreBgStyle(opp.income_score)}">Renta: <strong>${formatScore(opp.income_score)}</strong></span>
@@ -1583,6 +1586,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
                     </div>
                     ${discountScoreBoxHtml}
+                    ${(opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Rentabilidad Bruta Alquiler (Yield 40% Score)</span>
+                                <strong style="color: ${opp.rental_yield >= 7 ? '#4ade80' : (opp.rental_yield >= 6 ? '#fde047' : (opp.rental_yield >= 5 ? '#fb923c' : '#f87171'))}; font-size: 1.05rem;">
+                                    ${Number(opp.rental_yield).toFixed(2)}% anual
+                                </strong>
+                                <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 6px;">(${formatScore(opp.yield_score || 0)} pts)</span>
+                            </div>
+                            ${opp.estimated_monthly_rent ? `
+                            <div style="text-align: right;">
+                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Alquiler Est. Mercado</span>
+                                <strong style="color: #38bdf8; font-size: 0.95rem;">${formatCurrency(opp.estimated_monthly_rent)}/mes</strong>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
         `;

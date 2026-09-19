@@ -8,6 +8,9 @@ import re
 import logging
 from typing import List, Dict, Any, Optional
 
+from app.engine.rental_reference import RentalReferenceEngine
+from app.engine.kpi_calculator import KPICalculator
+
 logger = logging.getLogger(__name__)
 
 
@@ -211,11 +214,52 @@ class IdealistaMarkdownParser:
                     "images": images,
                     "description": description
                 }
+
+                # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
+                monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                    surface_m2=surface_m2,
+                    postal_code=opportunity["postal_code"],
+                    province=opportunity["province"],
+                    floor=floor,
+                    has_elevator=has_elevator
+                )
+                rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                    listing_price=listing_price,
+                    monthly_rent=monthly_rent
+                )
+                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+
+                area_m2_price = float(location_data.get("area_m2_price", 3800.0))
+                est_market_val = surface_m2 * area_m2_price
+                discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                overall_score = KPICalculator.calculate_overall_opportunity_score(
+                    discount_percentage=discount_vs_market / 100.0,
+                    poi_score=85.0,
+                    income_amount=location_data.get("avg_household_income", 42000),
+                    population_growth=location_data.get("population_growth_rate", 2.0),
+                    rental_yield=rental_yield
+                )
+
+                opportunity["estimated_monthly_rent"] = monthly_rent
+                opportunity["rental_yield"] = rental_yield
+                opportunity["yield_score"] = yield_score
+                opportunity["yield_color"] = yield_color
+                opportunity["discount_vs_market"] = discount_vs_market
+                opportunity["overall_score"] = overall_score
+                opportunity["final_score"] = overall_score
+
                 listings.append(opportunity)
             except Exception as e_item:
                 logger.warning(f"Error parseando item individual de Idealista: {e_item}")
 
-        logger.info(f"[Idealista Parser] Extraídos {len(listings)} inmuebles estructurados con éxito.")
+        # Ordenar dentro de cada página por score general y rentabilidad descendente
+        listings.sort(
+            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            reverse=True
+        )
+
+        logger.info(f"[Idealista Parser] Extraídos {len(listings)} inmuebles estructurados y ordenados por score y yield.")
         return listings
 
     @classmethod
@@ -239,30 +283,193 @@ class IdealistaMarkdownParser:
                     "population_growth_rate": data["growth"]
                 }
 
-        # Fallbacks estándar por provincia
+        # Fallbacks estándar por provincia y mercados estratégicos
         prov_lower = default_province.lower()
-        if "barcelona" in prov_lower:
+        if "talavera" in t_lower or ("toledo" in prov_lower and "talavera" in t_lower):
+            return {
+                "address": title, "locality": "Talavera de la Reina", "province": "Toledo",
+                "postal_code": "45600", "lat": 39.9635, "lon": -4.8308, "district_label": "Talavera Centro",
+                "avg_household_income": 28000, "area_m2_price": 950.0, "population_growth_rate": 2.8
+            }
+        elif "toledo" in prov_lower:
+            return {
+                "address": title, "locality": "Toledo", "province": "Toledo",
+                "postal_code": "45001", "lat": 39.8628, "lon": -4.0273, "district_label": "Toledo Casco",
+                "avg_household_income": 34000, "area_m2_price": 1600.0, "population_growth_rate": 1.6
+            }
+        elif "barcelona" in prov_lower:
             return {
                 "address": title, "locality": "Barcelona", "province": "Barcelona",
-                "lat": 41.3879, "lon": 2.1699, "district_label": "Barcelona Centro",
+                "postal_code": "08001", "lat": 41.3879, "lon": 2.1699, "district_label": "Barcelona Centro",
                 "avg_household_income": 45000, "area_m2_price": 4500.0, "population_growth_rate": 1.2
             }
         elif "valencia" in prov_lower:
             return {
                 "address": title, "locality": "Valencia", "province": "Valencia",
-                "lat": 39.4699, "lon": -0.3763, "district_label": "Valencia Centro",
+                "postal_code": "46001", "lat": 39.4699, "lon": -0.3763, "district_label": "Valencia Centro",
                 "avg_household_income": 36000, "area_m2_price": 3200.0, "population_growth_rate": 2.4
             }
         elif "malaga" in prov_lower or "málaga" in prov_lower:
             return {
                 "address": title, "locality": "Málaga", "province": "Málaga",
-                "lat": 36.7213, "lon": -4.4214, "district_label": "Málaga Centro",
+                "postal_code": "29001", "lat": 36.7213, "lon": -4.4214, "district_label": "Málaga Centro",
                 "avg_household_income": 35000, "area_m2_price": 3400.0, "population_growth_rate": 3.1
+            }
+        elif "alicante" in prov_lower:
+            return {
+                "address": title, "locality": "Alicante", "province": "Alicante",
+                "postal_code": "03001", "lat": 38.3452, "lon": -0.4810, "district_label": "Alicante Centro",
+                "avg_household_income": 32000, "area_m2_price": 2200.0, "population_growth_rate": 2.2
+            }
+        elif "tarragona" in prov_lower:
+            return {
+                "address": title, "locality": "Tarragona", "province": "Tarragona",
+                "postal_code": "43001", "lat": 41.1189, "lon": 1.2445, "district_label": "Tarragona Centro",
+                "avg_household_income": 34000, "area_m2_price": 2100.0, "population_growth_rate": 1.5
+            }
+        elif "guipuzcoa" in prov_lower or "guipúzcoa" in prov_lower or "gipuzkoa" in prov_lower or "san sebastian" in prov_lower or "donostia" in prov_lower:
+            return {
+                "address": title, "locality": "San Sebastián", "province": "Guipúzcoa",
+                "postal_code": "20001", "lat": 43.3183, "lon": -1.9812, "district_label": "Donostia Centro",
+                "avg_household_income": 48000, "area_m2_price": 5400.0, "population_growth_rate": 1.0
+            }
+        elif "vizcaya" in prov_lower or "bizkaia" in prov_lower or "bilbao" in prov_lower:
+            return {
+                "address": title, "locality": "Bilbao", "province": "Vizcaya",
+                "postal_code": "48001", "lat": 43.2630, "lon": -2.9350, "district_label": "Bilbao Abando",
+                "avg_household_income": 45000, "area_m2_price": 3600.0, "population_growth_rate": 1.1
+            }
+        elif "alava" in prov_lower or "álava" in prov_lower or "araba" in prov_lower or "vitoria" in prov_lower:
+            return {
+                "address": title, "locality": "Vitoria-Gasteiz", "province": "Álava",
+                "postal_code": "01001", "lat": 42.8467, "lon": -2.6716, "district_label": "Vitoria Centro",
+                "avg_household_income": 42000, "area_m2_price": 2600.0, "population_growth_rate": 1.3
+            }
+        elif "navarra" in prov_lower or "pamplona" in prov_lower:
+            return {
+                "address": title, "locality": "Pamplona", "province": "Navarra",
+                "postal_code": "31001", "lat": 42.8125, "lon": -1.6458, "district_label": "Pamplona Ensanche",
+                "avg_household_income": 43000, "area_m2_price": 2700.0, "population_growth_rate": 1.4
+            }
+        elif "cantabria" in prov_lower or "santander" in prov_lower:
+            return {
+                "address": title, "locality": "Santander", "province": "Cantabria",
+                "postal_code": "39001", "lat": 43.4623, "lon": -3.8099, "district_label": "Santander Centro",
+                "avg_household_income": 38000, "area_m2_price": 2400.0, "population_growth_rate": 0.9
+            }
+        elif "baleares" in prov_lower or "palma" in prov_lower or "mallorca" in prov_lower or "ibiza" in prov_lower:
+            return {
+                "address": title, "locality": "Palma de Mallorca", "province": "Baleares",
+                "postal_code": "07001", "lat": 39.5696, "lon": 2.6502, "district_label": "Palma Casco Antiguo",
+                "avg_household_income": 44000, "area_m2_price": 4200.0, "population_growth_rate": 2.1
+            }
+        elif "las palmas" in prov_lower or "canaria" in prov_lower:
+            return {
+                "address": title, "locality": "Las Palmas de Gran Canaria", "province": "Las Palmas",
+                "postal_code": "35001", "lat": 28.1248, "lon": -15.4300, "district_label": "Vegueta / Triana",
+                "avg_household_income": 33000, "area_m2_price": 2300.0, "population_growth_rate": 1.5
+            }
+        elif "tenerife" in prov_lower:
+            return {
+                "address": title, "locality": "Santa Cruz de Tenerife", "province": "Santa Cruz de Tenerife",
+                "postal_code": "38001", "lat": 28.4636, "lon": -16.2518, "district_label": "Santa Cruz Centro",
+                "avg_household_income": 32000, "area_m2_price": 2200.0, "population_growth_rate": 1.4
+            }
+        elif "sevilla" in prov_lower:
+            return {
+                "address": title, "locality": "Sevilla", "province": "Sevilla",
+                "postal_code": "41001", "lat": 37.3891, "lon": -5.9845, "district_label": "Sevilla Centro",
+                "avg_household_income": 34000, "area_m2_price": 2300.0, "population_growth_rate": 1.2
+            }
+        elif "zaragoza" in prov_lower:
+            return {
+                "address": title, "locality": "Zaragoza", "province": "Zaragoza",
+                "postal_code": "50001", "lat": 41.6488, "lon": -0.8891, "district_label": "Zaragoza Centro",
+                "avg_household_income": 37000, "area_m2_price": 2000.0, "population_growth_rate": 1.1
+            }
+        elif "cadiz" in prov_lower or "cádiz" in prov_lower:
+            return {
+                "address": title, "locality": "Cádiz", "province": "Cádiz",
+                "postal_code": "11001", "lat": 36.5271, "lon": -6.2886, "district_label": "Cádiz Casco",
+                "avg_household_income": 31000, "area_m2_price": 2500.0, "population_growth_rate": 0.8
+            }
+        elif "coruña" in prov_lower or "coruna" in prov_lower:
+            return {
+                "address": title, "locality": "A Coruña", "province": "A Coruña",
+                "postal_code": "15001", "lat": 43.3623, "lon": -8.4115, "district_label": "A Coruña Ciudad Vieja",
+                "avg_household_income": 36000, "area_m2_price": 2400.0, "population_growth_rate": 1.1
+            }
+        elif "asturias" in prov_lower or "oviedo" in prov_lower or "gijon" in prov_lower or "gijón" in prov_lower:
+            return {
+                "address": title, "locality": "Oviedo", "province": "Asturias",
+                "postal_code": "33001", "lat": 43.3619, "lon": -5.8494, "district_label": "Oviedo Centro",
+                "avg_household_income": 35000, "area_m2_price": 1900.0, "population_growth_rate": 0.7
+            }
+        elif "murcia" in prov_lower:
+            return {
+                "address": title, "locality": "Murcia", "province": "Murcia",
+                "postal_code": "30001", "lat": 37.9922, "lon": -1.1307, "district_label": "Murcia Centro",
+                "avg_household_income": 31000, "area_m2_price": 1400.0, "population_growth_rate": 1.7
+            }
+        elif "valladolid" in prov_lower:
+            return {
+                "address": title, "locality": "Valladolid", "province": "Valladolid",
+                "postal_code": "47001", "lat": 41.6523, "lon": -4.7245, "district_label": "Valladolid Centro",
+                "avg_household_income": 36000, "area_m2_price": 1700.0, "population_growth_rate": 0.8
+            }
+        elif "granada" in prov_lower:
+            return {
+                "address": title, "locality": "Granada", "province": "Granada",
+                "postal_code": "18001", "lat": 37.1773, "lon": -3.5986, "district_label": "Granada Centro",
+                "avg_household_income": 32000, "area_m2_price": 2100.0, "population_growth_rate": 1.4
+            }
+        elif "cordoba" in prov_lower or "córdoba" in prov_lower:
+            return {
+                "address": title, "locality": "Córdoba", "province": "Córdoba",
+                "postal_code": "14001", "lat": 37.8882, "lon": -4.7794, "district_label": "Córdoba Centro",
+                "avg_household_income": 31000, "area_m2_price": 1500.0, "population_growth_rate": 0.9
+            }
+        elif "girona" in prov_lower:
+            return {
+                "address": title, "locality": "Girona", "province": "Girona",
+                "postal_code": "17001", "lat": 41.9794, "lon": 2.8214, "district_label": "Girona Barri Vell",
+                "avg_household_income": 41000, "area_m2_price": 2600.0, "population_growth_rate": 1.6
+            }
+        elif "pontevedra" in prov_lower or "vigo" in prov_lower:
+            return {
+                "address": title, "locality": "Vigo", "province": "Pontevedra",
+                "postal_code": "36201", "lat": 42.2406, "lon": -8.7207, "district_label": "Vigo Centro",
+                "avg_household_income": 35000, "area_m2_price": 2000.0, "population_growth_rate": 1.2
+            }
+        elif "almeria" in prov_lower or "almería" in prov_lower:
+            return {
+                "address": title, "locality": "Almería", "province": "Almería",
+                "postal_code": "04001", "lat": 36.8340, "lon": -2.4637, "district_label": "Almería Centro",
+                "avg_household_income": 30000, "area_m2_price": 1300.0, "population_growth_rate": 1.5
+            }
+        elif "castellon" in prov_lower or "castellón" in prov_lower:
+            return {
+                "address": title, "locality": "Castellón de la Plana", "province": "Castellón",
+                "postal_code": "12001", "lat": 39.9864, "lon": -0.0513, "district_label": "Castellón Centro",
+                "avg_household_income": 32000, "area_m2_price": 1400.0, "population_growth_rate": 1.3
+            }
+        elif "salamanca" in prov_lower:
+            return {
+                "address": title, "locality": "Salamanca", "province": "Salamanca",
+                "postal_code": "37001", "lat": 40.9701, "lon": -5.6635, "district_label": "Salamanca Casco",
+                "avg_household_income": 33000, "area_m2_price": 1850.0, "population_growth_rate": 0.8
+            }
+        elif "burgos" in prov_lower:
+            return {
+                "address": title, "locality": "Burgos", "province": "Burgos",
+                "postal_code": "09001", "lat": 42.3440, "lon": -3.6969, "district_label": "Burgos Centro",
+                "avg_household_income": 36000, "area_m2_price": 1750.0, "population_growth_rate": 0.9
             }
         
         # Default Madrid
         return {
             "address": title, "locality": "Madrid", "province": "Madrid",
+            "postal_code": "28001",
             "lat": 40.4168, "lon": -3.7038, "district_label": "Madrid Centro",
             "avg_household_income": 46000, "area_m2_price": 4800.0, "population_growth_rate": 2.0
         }
@@ -347,9 +554,50 @@ class HabitacliaMarkdownParser:
                     "images": [],
                     "description": f"{title}. Anuncio verificado en Habitaclia."
                 }
+
+                # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
+                monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                    surface_m2=opportunity["surface_m2"],
+                    postal_code=opportunity["postal_code"],
+                    province=opportunity["province"],
+                    floor=opportunity["floor"],
+                    has_elevator=opportunity["has_elevator"]
+                )
+                rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                    listing_price=listing_price,
+                    monthly_rent=monthly_rent
+                )
+                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+
+                area_m2_price = float(loc_data.get("area_m2_price", 3900.0))
+                est_market_val = opportunity["surface_m2"] * area_m2_price
+                discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                overall_score = KPICalculator.calculate_overall_opportunity_score(
+                    discount_percentage=discount_vs_market / 100.0,
+                    poi_score=82.0,
+                    income_amount=loc_data.get("avg_household_income", 40000),
+                    population_growth=loc_data.get("population_growth_rate", 1.5),
+                    rental_yield=rental_yield
+                )
+
+                opportunity["estimated_monthly_rent"] = monthly_rent
+                opportunity["rental_yield"] = rental_yield
+                opportunity["yield_score"] = yield_score
+                opportunity["yield_color"] = yield_color
+                opportunity["discount_vs_market"] = discount_vs_market
+                opportunity["overall_score"] = overall_score
+                opportunity["final_score"] = overall_score
+
                 listings.append(opportunity)
             except Exception as e_hab:
                 logger.warning(f"Error parseando item Habitaclia: {e_hab}")
 
-        logger.info(f"[Habitaclia Parser] Extraídos {len(listings)} inmuebles con éxito.")
+        # Ordenar dentro de cada página por score general y rentabilidad descendente
+        listings.sort(
+            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            reverse=True
+        )
+
+        logger.info(f"[Habitaclia Parser] Extraídos {len(listings)} inmuebles con éxito y ordenados por score y yield.")
         return listings

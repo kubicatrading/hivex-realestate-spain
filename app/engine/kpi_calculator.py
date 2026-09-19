@@ -60,19 +60,51 @@ class KPICalculator:
         return max(0.0, round(discount, 4))
 
     @staticmethod
+    def calculate_yield_score(rental_yield: float) -> float:
+        """
+        Escala oficial HIVEX:
+        1. >= 7.0% -> 100 puntos (verde)
+        2. >= 6.0% y < 7.0% -> 90 puntos (amarillo)
+        3. >= 5.0% y < 6.0% -> 80 puntos (naranja)
+        4. < 5.0% -> 0 puntos (rojo)
+        """
+        if rental_yield >= 7.0:
+            return 100.0
+        elif rental_yield >= 6.0:
+            return 90.0
+        elif rental_yield >= 5.0:
+            return 80.0
+        else:
+            return 0.0
+
+    @staticmethod
+    def get_yield_color(rental_yield: float) -> str:
+        """Color semafórico oficial para rentabilidad de alquiler."""
+        if rental_yield >= 7.0:
+            return "verde"
+        elif rental_yield >= 6.0:
+            return "amarillo"
+        elif rental_yield >= 5.0:
+            return "naranja"
+        else:
+            return "rojo"
+
+    @staticmethod
     def calculate_detailed_scores(
         discount_percentage: float,
         poi_score: float,
         income_amount: float,
         population_growth: float,
-        has_property_m2_price: bool = True
-    ) -> Dict[str, float]:
+        has_property_m2_price: bool = True,
+        rental_yield: float = 0.0
+    ) -> Dict[str, Any]:
         """
         Calcula el desglose completo de puntuaciones (0 - 100 pts) para cada dimensión:
-        - discount_score (50%) - Pondera 0 si no hay precio de inmueble por m2
-        - poi_score (20%)
-        - income_score (15%)
-        - demographic_score (15%)
+        - discount_score (25%) - Pondera 0 si no hay precio de inmueble por m2
+        - poi_score (14%)
+        - income_score (10.5%)
+        - demographic_score (10.5%)
+        - yield_score (40%) - Rentabilidad bruta anual en alquiler con +10% gastos
         - overall_score (Total)
         """
         if not has_property_m2_price or discount_percentage <= 0:
@@ -82,12 +114,15 @@ class KPICalculator:
 
         income_score = min(100.0, max(0.0, (income_amount / 45000.0) * 100.0))
         demographic_score = min(100.0, max(0.0, (population_growth / 3.0) * 100.0))
+        yield_score = KPICalculator.calculate_yield_score(rental_yield)
+        yield_color = KPICalculator.get_yield_color(rental_yield)
 
         overall = (
-            (discount_score * 0.50) +
-            (poi_score * 0.20) +
-            (income_score * 0.15) +
-            (demographic_score * 0.15)
+            (discount_score * 0.25) +
+            (poi_score * 0.14) +
+            (income_score * 0.105) +
+            (demographic_score * 0.105) +
+            (yield_score * 0.40)
         )
 
         return {
@@ -95,6 +130,9 @@ class KPICalculator:
             "income_score": round(income_score, 1),
             "demographic_score": round(demographic_score, 1),
             "poi_score": round(poi_score, 1),
+            "yield_score": round(yield_score, 1),
+            "yield_color": yield_color,
+            "rental_yield": round(rental_yield, 2),
             "overall_score": round(overall, 1)
         }
 
@@ -103,10 +141,18 @@ class KPICalculator:
         discount_percentage: float,
         poi_score: float,
         income_amount: float,
-        population_growth: float
+        population_growth: float,
+        rental_yield: float = 0.0
     ) -> float:
         """
-        Algoritmo de puntuación ponderado (0 - 100 puntos)
+        Algoritmo de puntuación ponderado (0 - 100 puntos) con 40% a rental_yield
         """
-        scores = KPICalculator.calculate_detailed_scores(discount_percentage, poi_score, income_amount, population_growth)
+        scores = KPICalculator.calculate_detailed_scores(
+            discount_percentage,
+            poi_score,
+            income_amount,
+            population_growth,
+            rental_yield=rental_yield
+        )
         return scores["overall_score"]
+

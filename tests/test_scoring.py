@@ -14,13 +14,25 @@ def test_discount_calculation():
     assert round(discount, 4) == 0.4571 # 45.71% discount
 
 def test_overall_opportunity_score():
-    score = KPICalculator.calculate_overall_opportunity_score(
+    # Con rentabilidad excelente >= 7% (100 pts con 40% peso)
+    score_top = KPICalculator.calculate_overall_opportunity_score(
         discount_percentage=0.45,
         poi_score=90.0,
         income_amount=48000.0,
-        population_growth=2.5
+        population_growth=2.5,
+        rental_yield=7.5
     )
-    assert 70.0 <= score <= 100.0
+    assert 70.0 <= score_top <= 100.0
+
+    # Test de la escala semafórica oficial de Rentabilidad de Alquiler
+    assert KPICalculator.calculate_yield_score(7.5) == 100.0
+    assert KPICalculator.get_yield_color(7.5) == "verde"
+    assert KPICalculator.calculate_yield_score(6.4) == 90.0
+    assert KPICalculator.get_yield_color(6.4) == "amarillo"
+    assert KPICalculator.calculate_yield_score(5.2) == 80.0
+    assert KPICalculator.get_yield_color(5.2) == "naranja"
+    assert KPICalculator.calculate_yield_score(4.5) == 0.0
+    assert KPICalculator.get_yield_color(4.5) == "rojo"
 
 def test_2x2_market_price_resolution():
     from app.engine.meso_market_price import resolve_meso_market_price_2x2

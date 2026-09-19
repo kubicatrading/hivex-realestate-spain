@@ -135,16 +135,32 @@ class OpportunityScoringEngine:
                     estimated_market_value=estimated_market_value
                 )
 
+                from app.engine.rental_reference import RentalReferenceEngine
+
+                monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                    surface_m2=cat_data["surface_m2"],
+                    postal_code=item.get("postal_code", ""),
+                    province=item.get("province", "Madrid"),
+                    floor="2ª planta",
+                    has_elevator=True
+                )
+                rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                    listing_price=listing_price,
+                    monthly_rent=monthly_rent
+                )
+                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+
                 overall_score = KPICalculator.calculate_overall_opportunity_score(
                     discount_percentage=discount_pct,
                     poi_score=poi_data["poi_score"],
                     income_amount=ine_data["avg_household_income"],
-                    population_growth=ine_data["population_growth_rate"]
+                    population_growth=ine_data["population_growth_rate"],
+                    rental_yield=rental_yield
                 )
 
                 logger.info(
                     f"Subasta {auction_id}: Precio salida={listing_price}€, Mercado est.={estimated_market_value}€, "
-                    f"Descuento={discount_pct * 100:.1f}%, Score={overall_score}"
+                    f"Descuento={discount_pct * 100:.1f}%, Yield={rental_yield}%, Score={overall_score}"
                 )
 
                 # 5. Guardar/Actualizar todas las oportunidades evaluadas
@@ -156,6 +172,10 @@ class OpportunityScoringEngine:
                     existing_opp.discount_percentage = discount_pct
                     existing_opp.poi_score = poi_data["poi_score"]
                     existing_opp.income_score = round(ine_data["avg_household_income"] / 500.0, 2)
+                    existing_opp.rental_yield = rental_yield
+                    existing_opp.estimated_monthly_rent = monthly_rent
+                    existing_opp.yield_score = yield_score
+                    existing_opp.yield_color = yield_color
                     existing_opp.overall_score = overall_score
                     opportunity = existing_opp
                 else:
@@ -167,6 +187,10 @@ class OpportunityScoringEngine:
                         discount_percentage=discount_pct,
                         poi_score=poi_data["poi_score"],
                         income_score=round(ine_data["avg_household_income"] / 500.0, 2),
+                        rental_yield=rental_yield,
+                        estimated_monthly_rent=monthly_rent,
+                        yield_score=yield_score,
+                        yield_color=yield_color,
                         overall_score=overall_score,
                         is_alert_sent=False
                     )

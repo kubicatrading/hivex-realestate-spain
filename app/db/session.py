@@ -1,7 +1,7 @@
 import os
 import re
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 from app.core.config import settings
@@ -83,6 +83,31 @@ except Exception as e_conn:
         "connected": True
     }
 
+def run_db_migrations(target_engine):
+    """Garantiza de forma idempotente que las columnas de rentabilidad y yield existan en SQLite y PostgreSQL."""
+    try:
+        inspector = inspect(target_engine)
+        if "opportunities" in inspector.get_table_names():
+            existing_columns = {col["name"] for col in inspector.get_columns("opportunities")}
+            new_cols = [
+                ("rental_yield", "FLOAT DEFAULT 0.0"),
+                ("estimated_monthly_rent", "FLOAT DEFAULT 0.0"),
+                ("yield_score", "FLOAT DEFAULT 0.0"),
+                ("yield_color", "VARCHAR(20) DEFAULT 'rojo'")
+            ]
+            with target_engine.connect() as conn:
+                for col_name, col_type in new_cols:
+                    if col_name not in existing_columns:
+                        try:
+                            conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {col_name} {col_type};"))
+                            conn.commit()
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+
+run_db_migrations(engine)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -95,3 +120,4 @@ def get_db():
         raise e
     finally:
         db.close()
+

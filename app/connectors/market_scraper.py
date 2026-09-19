@@ -115,6 +115,12 @@ class MarketScraper:
         if only_synergy_pgou:
             processed_items = [item for item in processed_items if item.get("has_pgou_synergy")]
 
+        # Ordenar oportunidades en base al score general y porcentaje de rentabilidad en orden descendente
+        processed_items.sort(
+            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            reverse=True
+        )
+
         return processed_items
 
     def _get_raw_market_listings(self, province: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -279,41 +285,88 @@ class MarketScraper:
             logger.info("SUPADATA_API_KEY no configurada. Omitiendo scraping en vivo de portales.")
             return results
 
-        # Definir targets según provincia solicitada
-        prov_map = {
+        # MATRIZ NACIONAL HIVEX: EXACTAMENTE 40 PÁGINAS (40 CRÉDITOS / DÍA = 1.200 CRÉDITOS / MES)
+        # 1. Mercados Grandes: 4 páginas cada uno (8 páginas)
+        tier_1 = {
             "madrid": [
-                ("https://www.idealista.com/venta-viviendas/madrid-madrid/", "Madrid", "idealista"),
-                ("https://www.habitaclia.com/viviendas-madrid.htm", "Madrid", "habitaclia"),
+                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-2.htm", "Madrid", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-3.htm", "Madrid", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-4.htm", "Madrid", "idealista"),
             ],
             "barcelona": [
-                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/", "Barcelona", "idealista"),
-                ("https://www.habitaclia.com/viviendas-barcelona.htm", "Barcelona", "habitaclia"),
+                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-2.htm", "Barcelona", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-3.htm", "Barcelona", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-4.htm", "Barcelona", "idealista"),
             ],
+        }
+
+        # 2. Mercados de Segundo Nivel: 2 páginas cada uno (8 páginas)
+        tier_2 = {
             "valencia": [
-                ("https://www.idealista.com/venta-viviendas/valencia-valencia/", "Valencia", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/", "Valencia", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/pagina-2.htm", "Valencia", "idealista"),
+            ],
+            "alicante": [
+                ("https://www.idealista.com/venta-viviendas/alicante-alacant/con-precio-rebajado/", "Alicante", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/alicante-alacant/con-precio-rebajado/pagina-2.htm", "Alicante", "idealista"),
+            ],
+            "tarragona": [
+                ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/", "Tarragona", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/pagina-2.htm", "Tarragona", "idealista"),
             ],
             "malaga": [
-                ("https://www.idealista.com/venta-viviendas/malaga-malaga/", "Málaga", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/malaga-costa-del-sol/con-precio-rebajado/", "Málaga", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/malaga-costa-del-sol/con-precio-rebajado/pagina-2.htm", "Málaga", "idealista"),
             ],
+        }
+
+        # 3. Resto de Mercados Estratégicos: 1 página cada uno (24 páginas)
+        tier_3 = {
+            "toledo": [("https://www.idealista.com/venta-viviendas/talavera-de-la-reina-toledo/con-precio-rebajado/", "Toledo", "idealista")],
+            "guipuzcoa": [("https://www.idealista.com/venta-viviendas/guipuzcoa/con-precio-rebajado/", "Guipúzcoa", "idealista")],
+            "vizcaya": [("https://www.idealista.com/venta-viviendas/vizcaya/con-precio-rebajado/", "Vizcaya", "idealista")],
+            "alava": [("https://www.idealista.com/venta-viviendas/alava/con-precio-rebajado/", "Álava", "idealista")],
+            "navarra": [("https://www.idealista.com/venta-viviendas/navarra/con-precio-rebajado/", "Navarra", "idealista")],
+            "cantabria": [("https://www.idealista.com/venta-viviendas/cantabria/con-precio-rebajado/", "Cantabria", "idealista")],
+            "baleares": [("https://www.idealista.com/venta-viviendas/baleares/con-precio-rebajado/", "Baleares", "idealista")],
+            "las palmas": [("https://www.idealista.com/venta-viviendas/las-palmas/con-precio-rebajado/", "Las Palmas", "idealista")],
+            "tenerife": [("https://www.idealista.com/venta-viviendas/santa-cruz-de-tenerife-provincia/con-precio-rebajado/", "Santa Cruz de Tenerife", "idealista")],
+            "sevilla": [("https://www.idealista.com/venta-viviendas/sevilla-sevilla/con-precio-rebajado/", "Sevilla", "idealista")],
+            "zaragoza": [("https://www.idealista.com/venta-viviendas/zaragoza-provincia/con-precio-rebajado/", "Zaragoza", "idealista")],
+            "cadiz": [("https://www.idealista.com/venta-viviendas/cadiz-provincia/con-precio-rebajado/", "Cádiz", "idealista")],
+            "coruña": [("https://www.idealista.com/venta-viviendas/a-coruna-provincia/con-precio-rebajado/", "A Coruña", "idealista")],
+            "asturias": [("https://www.idealista.com/venta-viviendas/asturias/con-precio-rebajado/", "Asturias", "idealista")],
+            "murcia": [("https://www.idealista.com/venta-viviendas/murcia-provincia/con-precio-rebajado/", "Murcia", "idealista")],
+            "valladolid": [("https://www.idealista.com/venta-viviendas/valladolid-provincia/con-precio-rebajado/", "Valladolid", "idealista")],
+            "granada": [("https://www.idealista.com/venta-viviendas/granada-provincia/con-precio-rebajado/", "Granada", "idealista")],
+            "cordoba": [("https://www.idealista.com/venta-viviendas/cordoba-provincia/con-precio-rebajado/", "Córdoba", "idealista")],
+            "girona": [("https://www.idealista.com/venta-viviendas/girona-provincia/con-precio-rebajado/", "Girona", "idealista")],
+            "pontevedra": [("https://www.idealista.com/venta-viviendas/pontevedra-provincia/con-precio-rebajado/", "Pontevedra", "idealista")],
+            "almeria": [("https://www.idealista.com/venta-viviendas/almeria-provincia/con-precio-rebajado/", "Almería", "idealista")],
+            "castellon": [("https://www.idealista.com/venta-viviendas/castellon-provincia/con-precio-rebajado/", "Castellón", "idealista")],
+            "salamanca": [("https://www.idealista.com/venta-viviendas/salamanca-provincia/con-precio-rebajado/", "Salamanca", "idealista")],
+            "burgos": [("https://www.idealista.com/venta-viviendas/burgos-provincia/con-precio-rebajado/", "Burgos", "idealista")],
         }
 
         targets = []
         if province:
             p_clean = province.strip().lower()
-            for k, v in prov_map.items():
+            all_tiers = {**tier_1, **tier_2, **tier_3}
+            for k, v in all_tiers.items():
                 if k in p_clean:
                     targets.extend(v)
             if not targets:
-                # Target genérico por provincia
-                targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
+                targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/con-precio-rebajado/", province.capitalize(), "idealista"))
         else:
-            # Consulta completa nacional sobre los mercados clave
-            for prov_targets in prov_map.values():
-                targets.extend(prov_targets)
+            # Sincronización completa nacional de 40 páginas exactas (8 + 8 + 24 = 40 páginas)
+            for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
+                targets.extend(t_list)
 
         for url, prov_name, portal_type in targets:
             try:
-                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata...")
+                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata [{url}]...")
                 scrape_res = self.supadata_client.scrape_url(url)
                 if not scrape_res or not scrape_res.get("content"):
                     continue
@@ -328,7 +381,13 @@ class MarketScraper:
             except Exception as e_scrape:
                 logger.warning(f"Error extrayendo {url} con Supadata: {e_scrape}")
 
-        logger.info(f"[Market Live Scraper] Total de {len(results)} oportunidades en vivo extraídas.")
+        # Ordenar globalmente todos los resultados por overall_score DESC y rental_yield DESC
+        results.sort(
+            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            reverse=True
+        )
+
+        logger.info(f"[Market Live Scraper] Total de {len(results)} oportunidades en vivo extraídas y ordenadas.")
         return results
 
     def _build_verified_market_catalog(self) -> List[Dict[str, Any]]:
@@ -1153,11 +1212,33 @@ class MarketScraper:
         discount_vs_market = round(max(0.0, ((estimated_market_value - min_price) / estimated_market_value) * 100), 1) if estimated_market_value > 0 else 0.0
 
         scores = item.get("score_components", {})
-        final_score = item.get("final_score") or round(
-            (scores.get("discount_score", 85.0) * 0.35) +
-            (scores.get("poi_score", 88.0) * 0.25) +
-            (scores.get("income_score", 86.0) * 0.20) +
-            (scores.get("demographic_score", 85.0) * 0.20),
+
+        from app.engine.rental_reference import RentalReferenceEngine
+
+        monthly_rent = item.get("estimated_monthly_rent") or RentalReferenceEngine.estimate_monthly_rent(
+            surface_m2=surface,
+            postal_code=item.get("postal_code") or "28001",
+            province=item.get("province") or "Madrid",
+            floor=item.get("floor") or "2ª planta",
+            has_elevator=item.get("has_elevator", True)
+        )
+        rental_yield = item.get("rental_yield") or RentalReferenceEngine.calculate_rental_yield(
+            listing_price=min_price,
+            monthly_rent=monthly_rent
+        )
+        yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+
+        discount_score = scores.get("discount_score") or min(100.0, max(0.0, (discount_vs_market / 0.50) * 100.0))
+        poi_score = scores.get("poi_score", 85.0)
+        income_score = scores.get("income_score", 80.0)
+        demographic_score = scores.get("demographic_score", 80.0)
+
+        final_score = item.get("overall_score") or round(
+            (discount_score * 0.25) +
+            (poi_score * 0.14) +
+            (income_score * 0.105) +
+            (demographic_score * 0.105) +
+            (yield_score * 0.40),
             1
         )
 
@@ -1204,12 +1285,16 @@ class MarketScraper:
             "appraisal_value": original_price,
             "potential_gross_profit": potential_profit,
             
+            "rental_yield": rental_yield,
+            "estimated_monthly_rent": monthly_rent,
+            "yield_score": yield_score,
+            "yield_color": yield_color,
             "overall_score": final_score,
             "final_score": final_score,
-            "discount_score": scores.get("discount_score", 85.0),
-            "poi_score": scores.get("poi_score", 88.0),
-            "income_score": scores.get("income_score", 86.0),
-            "demographic_score": scores.get("demographic_score", 85.0),
+            "discount_score": discount_score,
+            "poi_score": poi_score,
+            "income_score": income_score,
+            "demographic_score": demographic_score,
             "avg_household_income": census.get("avg_household_income", 36000),
             "avg_person_income": census.get("avg_person_income", 16500),
             "population_growth_rate": census.get("population_growth_rate", 1.8),

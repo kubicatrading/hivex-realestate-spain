@@ -55,10 +55,11 @@ def test_idealista_markdown_parser():
     listings = IdealistaMarkdownParser.parse_listings(SAMPLE_IDEALISTA_MARKDOWN, default_province="Madrid")
     
     assert len(listings) == 2
+    # Comprobar que dentro de cada página vienen ordenadas por score general y yield descendente
+    assert listings[0]["overall_score"] >= listings[1]["overall_score"]
     
-    # Inmueble 1 (Goya)
-    item1 = listings[0]
-    assert item1["id"] == "MKT-IDEALISTA-112270818"
+    # Inmueble Goya
+    item1 = next(x for x in listings if "112270818" in x["id"])
     assert "Conde de Peñalver" in item1["title"]
     assert item1["listing_price"] == 1350000.0
     assert item1["original_listing_price"] == 1450000.0
@@ -69,15 +70,16 @@ def test_idealista_markdown_parser():
     assert len(item1["images"]) > 0
     assert item1["lat"] is not None and item1["lon"] is not None
     assert item1["census_tract_data"]["avg_household_income"] > 50000
+    assert item1.get("rental_yield") is not None
 
-    # Inmueble 2 (Malasaña)
-    item2 = listings[1]
-    assert item2["id"] == "MKT-IDEALISTA-111433413"
+    # Inmueble Malasaña
+    item2 = next(x for x in listings if "111433413" in x["id"])
     assert item2["listing_price"] == 750000.0
     assert item2["original_listing_price"] == 798000.0
     assert item2["rooms"] == 2
     assert item2["surface_m2"] == 102.0
     assert item2["publications"][0]["agency"] == "Gilmar Centro"
+    assert item2.get("rental_yield") is not None
 
 
 def test_habitaclia_markdown_parser():

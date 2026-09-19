@@ -27,6 +27,7 @@ from typing import List, Optional, Dict, Tuple, Any, Union
 from datetime import datetime
 import json
 
+from sqlalchemy import text
 from app.db.session import get_db, Base, engine
 from app.db.models import Opportunity, Auction, StrategyType, PipelineSyncState
 from app.connectors.boe_scraper import BOESubastasScraper
@@ -50,6 +51,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        for col_def in [
+            "rental_yield FLOAT",
+            "estimated_monthly_rent FLOAT",
+            "yield_score FLOAT",
+            "yield_color VARCHAR",
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS {col_def};"))
+                conn.commit()
+            except Exception:
+                pass
 except Exception as e:
     pass
 
@@ -91,10 +104,10 @@ class LoginRequest(BaseModel):
 # Estado de sincronización en memoria para destacar oportunidades nuevas (cron y escáner manual)
 LATEST_SYNC_STATE: Dict[str, Any] = {
     "last_sync_timestamp": None,
-    "new_auction_ids": set(),
-    "new_pgou_ids": set(),
-    "new_edicto_ids": set(),
-    "new_market_ids": set()
+    "new_auction_ids": None,
+    "new_pgou_ids": None,
+    "new_edicto_ids": None,
+    "new_market_ids": None
 }
 
 # Coordinates fallback map for Spanish provinces/cities
@@ -744,13 +757,12 @@ def get_opportunities(
         import json
 
         # Obtener IDs de nuevas oportunidades del lote de sincronización activo
-        active_new_auction_ids = set(LATEST_SYNC_STATE.get("new_auction_ids") or [])
-        active_new_pgou_ids = set(LATEST_SYNC_STATE.get("new_pgou_ids") or [])
-        active_new_edicto_ids = set(LATEST_SYNC_STATE.get("new_edicto_ids") or [])
-        active_new_market_ids = set(LATEST_SYNC_STATE.get("new_market_ids") or [])
-
         # Si no hay estado en memoria (por ejemplo, reinicio del servicio), recuperar el último registro de sincronización
-        if not active_new_auction_ids and not active_new_pgou_ids and not active_new_edicto_ids and not active_new_market_ids:
+        if LATEST_SYNC_STATE.get("new_auction_ids") is None:
+            LATEST_SYNC_STATE["new_auction_ids"] = set()
+            LATEST_SYNC_STATE["new_pgou_ids"] = set()
+            LATEST_SYNC_STATE["new_edicto_ids"] = set()
+            LATEST_SYNC_STATE["new_market_ids"] = set()
             try:
                 last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
                 if last_sync and last_sync.sync_time:
@@ -760,19 +772,20 @@ def get_opportunities(
                         if last_sync.new_auction_ids_json:
                             db_ids = json.loads(last_sync.new_auction_ids_json)
                             if db_ids:
-                                active_new_auction_ids = set(db_ids)
-                                LATEST_SYNC_STATE["new_auction_ids"] = active_new_auction_ids
+                                LATEST_SYNC_STATE["new_auction_ids"] = set(db_ids)
                         if last_sync.new_pgou_ids_json:
-                            active_new_pgou_ids = set(json.loads(last_sync.new_pgou_ids_json))
-                            LATEST_SYNC_STATE["new_pgou_ids"] = active_new_pgou_ids
+                            LATEST_SYNC_STATE["new_pgou_ids"] = set(json.loads(last_sync.new_pgou_ids_json))
                         if last_sync.new_edicto_ids_json:
-                            active_new_edicto_ids = set(json.loads(last_sync.new_edicto_ids_json))
-                            LATEST_SYNC_STATE["new_edicto_ids"] = active_new_edicto_ids
+                            LATEST_SYNC_STATE["new_edicto_ids"] = set(json.loads(last_sync.new_edicto_ids_json))
                         if getattr(last_sync, "new_market_ids_json", None):
-                            active_new_market_ids = set(json.loads(last_sync.new_market_ids_json))
-                            LATEST_SYNC_STATE["new_market_ids"] = active_new_market_ids
+                            LATEST_SYNC_STATE["new_market_ids"] = set(json.loads(last_sync.new_market_ids_json))
             except Exception as e_ls:
                 pass
+
+        active_new_auction_ids = set(LATEST_SYNC_STATE.get("new_auction_ids") or [])
+        active_new_pgou_ids = set(LATEST_SYNC_STATE.get("new_pgou_ids") or [])
+        active_new_edicto_ids = set(LATEST_SYNC_STATE.get("new_edicto_ids") or [])
+        active_new_market_ids = set(LATEST_SYNC_STATE.get("new_market_ids") or [])
 
         for opp in opportunities:
             try:

@@ -123,6 +123,10 @@ class Opportunity(Base):
     
     poi_score = Column(Float, default=0.0)             # Puntuación de servicios (OSM: transporte, colegios, etc.)
     income_score = Column(Float, default=0.0)          # Puntuación nivel adquisitivo (INE ADREH)
+    rental_yield = Column(Float, default=0.0)          # Rentabilidad bruta estimada (%)
+    estimated_monthly_rent = Column(Float, default=0.0)# Alquiler mensual estimado (€)
+    yield_score = Column(Float, default=0.0)           # Puntuación de rentabilidad (0 - 100)
+    yield_color = Column(String(20), default="rojo")   # "verde", "amarillo", "naranja", "rojo"
     overall_score = Column(Float, default=0.0)         # Score global de oportunidad (0 - 100)
     
     is_alert_sent = Column(Boolean, default=False)
