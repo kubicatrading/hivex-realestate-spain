@@ -14,7 +14,7 @@ if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"
     del os.environ["SSL_CERT_DIR"]
 
 import time
-from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request
+from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import urllib.request
@@ -704,6 +704,52 @@ async def trigger_ingestion_pipeline(
     return {
         "status": "processing",
         "message": "Escáner en vivo de Subastas BOE, Desarrollos PGOU y Edictos/Registros activado en segundo plano."
+    }
+
+@app.api_route("/api/v1/alerts/daily-run", methods=["GET", "POST"])
+async def trigger_daily_alerts(
+    force: bool = Query(False, description="Forzar envío de alertas aunque se hayan emitido previamente"),
+    authorization: Optional[str] = Header(None),
+    cron_header: Optional[str] = Header(None, alias="x-vercel-cron"),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para ejecución programada (Vercel Cron 8:00 AM) o manual
+    del bot de alertas de Real Estate para Telegram (24h).
+    """
+    cron_secret = os.environ.get("CRON_SECRET", "").strip()
+    is_cron = bool(cron_header)
+    is_authorized = False
+
+    if cron_secret and authorization:
+        token_candidate = authorization.replace("Bearer ", "").strip()
+        if token_candidate == cron_secret:
+            is_authorized = True
+
+    if not is_cron and not is_authorized:
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+            try:
+                from app.api.main import decode_access_token
+                payload = decode_access_token(token)
+                if payload:
+                    is_authorized = True
+            except Exception:
+                pass
+
+    if not is_cron and not is_authorized:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida para disparar alertas de Telegram."
+        )
+
+    from app.services.alert_engine import RealEstateAlertEngine
+    alert_engine = RealEstateAlertEngine()
+    result = alert_engine.run_daily_alert_check(db=db, force_all=force)
+
+    return {
+        "status": "success" if result.get("status") in ["sent", "skipped"] else "error",
+        "alert_result": result
     }
 
 @app.get("/api/v1/opportunities")
@@ -1423,6 +1469,103 @@ def get_opportunities(
         "limit": limit if limit is not None else total_count,
         "opportunities": paginated_results
     }
+
+@app.get("/api/v1/opportunities/{opp_id}")
+def get_opportunity_by_id(
+    opp_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Recupera una oportunidad individual por su identificador único (ID de Market, PGOU, Edicto o Subasta BOE).
+    Permite acceso directo para Deep-Links procedentes del bot de alertas de Telegram.
+    """
+    clean_id = opp_id.strip()
+
+    # 1. Búsqueda en Oportunidades de Mercado
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        from app.connectors.pgou_scraper import PGOUScraper
+        ms = MarketScraper()
+        pgou_items = PGOUScraper().fetch_pgou_opportunities()
+        m_items = ms.fetch_market_opportunities(pgou_items=pgou_items, live_scrape=False)
+        for m in m_items:
+            if str(m.get("id")) == clean_id:
+                return m
+    except Exception as e_m:
+        print(f"Error buscando en market por ID {clean_id}: {e_m}")
+
+    # 2. Búsqueda en Desarrollos PGOU
+    try:
+        from app.connectors.pgou_scraper import PGOUScraper
+        p_items = PGOUScraper().fetch_pgou_opportunities()
+        for p in p_items:
+            if str(p.get("id")) == clean_id or str(p.get("gazette_code")) == clean_id:
+                return p
+    except Exception as e_p:
+        print(f"Error buscando en PGOU por ID {clean_id}: {e_p}")
+
+    # 3. Búsqueda en Edictos Judiciales
+    try:
+        from app.connectors.edictos_scraper import EdictosScraper
+        e_items = EdictosScraper().fetch_edictos_opportunities()
+        for e in e_items:
+            if str(e.get("id")) == clean_id:
+                return e
+    except Exception as e_e:
+        print(f"Error buscando en edictos por ID {clean_id}: {e_e}")
+
+    # 4. Búsqueda en Subastas BOE en Base de Datos
+    try:
+        from sqlalchemy.orm import joinedload
+        opp = db.query(Opportunity).options(
+            joinedload(Opportunity.auction).joinedload(Auction.parcel)
+        ).outerjoin(Auction).filter(
+            (Opportunity.id == int(clean_id) if clean_id.isdigit() else False) |
+            (Auction.id_subasta == clean_id)
+        ).first()
+
+        if opp:
+            # Reutilizar extractor normalizado de subastas
+            res_list = []
+            auc = opp.auction
+            if auc:
+                strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
+                base_lat, base_lon = get_spanish_province_coords(auc.province, auc.locality)
+                lat = auc.lat or base_lat
+                lon = auc.lon or base_lon
+                return {
+                    "id": opp.id,
+                    "id_subasta": auc.id_subasta,
+                    "title": auc.title,
+                    "description": auc.description,
+                    "address": auc.address,
+                    "locality": auc.locality,
+                    "province": auc.province,
+                    "postal_code": auc.postal_code,
+                    "lat": lat,
+                    "lon": lon,
+                    "strategy": strategy_val,
+                    "property_type": auc.property_type or "VIVIENDA",
+                    "listing_price": opp.listing_price,
+                    "appraisal_value": auc.appraisal_value or opp.estimated_reference_value,
+                    "estimated_reference_value": opp.estimated_reference_value,
+                    "discount_percentage": opp.discount_percentage,
+                    "overall_score": opp.overall_score,
+                    "discount_score": opp.discount_score if hasattr(opp, "discount_score") else 80.0,
+                    "poi_score": opp.poi_score,
+                    "income_score": opp.income_score,
+                    "rental_yield": opp.rental_yield,
+                    "estimated_monthly_rent": opp.estimated_monthly_rent,
+                    "yield_score": opp.yield_score,
+                    "yield_color": opp.yield_color,
+                    "btl_score": opp.btl_score,
+                    "source_type": "subastas",
+                    "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}"
+                }
+    except Exception as e_db:
+        print(f"Error buscando subasta por ID {clean_id}: {e_db}")
+
+    raise HTTPException(status_code=404, detail=f"Oportunidad con ID '{clean_id}' no encontrada.")
 
 @app.get("/api/v1/streetview_photo")
 def get_streetview_photo(address: Optional[str] = Query(None), lat: Optional[float] = Query(None), lon: Optional[float] = Query(None), key: Optional[str] = Query(None)):

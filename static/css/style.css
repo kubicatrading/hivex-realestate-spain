@@ -1656,3 +1656,167 @@ body {
     box-shadow: 0 4px 20px rgba(16, 185, 129, 0.12), 0 0 0 1px rgba(16, 185, 129, 0.25);
 }
 
+/* ==========================================================================
+   ADAPTACIÓN EXCLUSIVA DE LA FICHA DETALLE A IPAD Y DISPOSITIVOS MÓVILES
+   (La plataforma general es de escritorio; solo la ficha se adapta para Telegram)
+   ========================================================================== */
+
+/* IPAD Y TABLETS (<= 1024px) */
+@media screen and (max-width: 1024px) {
+    #modal-property-detail {
+        padding: 16px !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+
+    #modal-property-detail .modal-large {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 92vh !important;
+        padding: 24px 20px !important;
+        box-sizing: border-box !important;
+    }
+
+    #modal-property-detail .modal-close-btn {
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        min-height: 44px !important;
+        font-size: 1.6rem !important;
+        top: 14px !important;
+        right: 16px !important;
+    }
+
+    #modal-property-detail .card-financials {
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 12px !important;
+    }
+}
+
+/* SMARTPHONES Y MÓVILES (<= 768px) */
+@media screen and (max-width: 768px) {
+    #modal-property-detail {
+        padding: 0 !important;
+        align-items: flex-start !important;
+        background: rgba(10, 15, 29, 0.98) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    #modal-property-detail .modal-large {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        min-height: 100vh !important;
+        height: auto !important;
+        max-height: none !important;
+        border-radius: 0 !important;
+        border: none !important;
+        padding: 16px 14px 44px 14px !important;
+        box-sizing: border-box !important;
+        box-shadow: none !important;
+    }
+
+    #modal-property-detail .modal-close-btn {
+        position: sticky !important;
+        float: right !important;
+        top: 8px !important;
+        right: 8px !important;
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        min-height: 44px !important;
+        font-size: 1.8rem !important;
+        background: rgba(239, 68, 68, 0.25) !important;
+        border: 1px solid rgba(239, 68, 68, 0.5) !important;
+        color: #ef4444 !important;
+        z-index: 1000 !important;
+        margin-bottom: 8px !important;
+    }
+
+    #modal-property-detail h2 {
+        font-size: 1.15rem !important;
+        line-height: 1.35 !important;
+        margin-top: 4px !important;
+        padding-right: 48px !important;
+        word-break: break-word !important;
+    }
+
+    #modal-property-detail .modal-prop-address {
+        font-size: 0.85rem !important;
+        gap: 8px !important;
+    }
+
+    #modal-property-detail .address-maps-link {
+        font-size: 0.85rem !important;
+        width: 100% !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 6px !important;
+        box-sizing: border-box !important;
+    }
+
+    #modal-property-detail .card-financials {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px !important;
+        padding: 12px 10px !important;
+    }
+
+    #modal-property-detail .card-financials > div:empty {
+        display: none !important;
+    }
+
+    #modal-property-detail .fin-item {
+        padding: 4px 0 !important;
+    }
+
+    #modal-property-detail .fin-item .fin-val {
+        font-size: 1.05rem !important;
+    }
+
+    #modal-property-detail img {
+        max-width: 100% !important;
+        height: auto !important;
+        max-height: 240px !important;
+        object-fit: cover !important;
+        border-radius: 8px !important;
+    }
+
+    /* Columnas de Scores y Datos Urbanísticos en pantalla pequeña */
+    #modal-property-detail [style*="grid-template-columns: repeat(3, 1fr)"],
+    #modal-property-detail [style*="grid-template-columns: repeat(4, 1fr)"],
+    #modal-property-detail [style*="grid-template-columns: repeat(2, 1fr)"] {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+    }
+
+    /* Botones de acción inferiores adaptados a touch móvil vertical */
+    #modal-property-detail [style*="display: flex; justify-content: flex-end; align-items: center; gap: 12px"] {
+        flex-direction: column-reverse !important;
+        width: 100% !important;
+        gap: 10px !important;
+        margin-top: 20px !important;
+    }
+
+    #modal-property-detail [style*="display: flex; justify-content: flex-end; align-items: center; gap: 12px"] button,
+    #modal-property-detail [style*="display: flex; justify-content: flex-end; align-items: center; gap: 12px"] a {
+        width: 100% !important;
+        min-height: 48px !important;
+        justify-content: center !important;
+        text-align: center !important;
+        font-size: 0.95rem !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Badges ajustados para no romper el layout */
+    #modal-property-detail .badge-new-pill,
+    #modal-property-detail .badge-xpublicacion,
+    #modal-property-detail .badge-synergy,
+    #modal-property-detail .badge-lote {
+        font-size: 0.72rem !important;
+        padding: 3px 8px !important;
+    }
+}
+
+

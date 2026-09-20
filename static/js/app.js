@@ -114,8 +114,43 @@ document.addEventListener('DOMContentLoaded', () => {
         return map;
     }
 
+    // Carga directa de ficha de oportunidad desde enlace de alerta de Telegram (?opp_id=...)
+    async function loadAndDisplayDirectOpportunity(oppId) {
+        if (!oppId || window._openedDeepLinkOpp) return;
+        window._openedDeepLinkOpp = true;
+
+        try {
+            // 1. Si ya se habían cargado oportunidades en memoria, abrirla directamente
+            if (state.allOpportunities && state.allOpportunities.length > 0) {
+                const found = state.allOpportunities.find(o => String(o.id) === String(oppId) || String(o.id_subasta) === String(oppId));
+                if (found) {
+                    window.openPropertyDetailModal(found);
+                    return;
+                }
+            }
+
+            // 2. Si no está en memoria, consultar endpoint específico
+            const headers = state.token ? { 'Authorization': `Bearer ${state.token}` } : {};
+            const res = await fetch(`/api/v1/opportunities/${encodeURIComponent(oppId)}`, { headers });
+            if (res.ok) {
+                const opp = await res.json();
+                if (opp && (opp.id || opp.title)) {
+                    window.openPropertyDetailModal(opp);
+                }
+            }
+        } catch (err) {
+            console.error('Error cargando oportunidad directa por ID:', err);
+        }
+    }
+
     // Authentication Checks
     async function checkAuthSession() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const directOppId = urlParams.get('opp_id');
+        if (directOppId) {
+            loadAndDisplayDirectOpportunity(directOppId);
+        }
+
         if (!state.token) {
             showLoginOverlay();
             return;
@@ -289,6 +324,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateTabBadges(newOpps);
                 updateKPIs(newOpps);
                 applyFilters();
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const directOppId = urlParams.get('opp_id');
+            if (directOppId && !window._openedDeepLinkOpp) {
+                loadAndDisplayDirectOpportunity(directOppId);
             }
 
             state.isLoading = false;
@@ -1774,6 +1815,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closePropertyDetailModal = function() {
         const modal = document.getElementById('modal-property-detail');
         if (modal) modal.classList.add('hidden');
+        if (!state.token) {
+            showLoginOverlay();
+        }
     };
 
     window.requestNotaSimpleOnDemand = async function(idx) {

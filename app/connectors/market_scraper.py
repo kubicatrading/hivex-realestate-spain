@@ -368,28 +368,47 @@ class MarketScraper:
                 if k in p_clean:
                     targets.extend(v)
             if not targets:
-                targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/con-precio-rebajado/", province.capitalize(), "idealista"))
+                targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
         else:
-            # Sincronización completa nacional de 40 páginas exactas (8 + 8 + 24 = 40 páginas)
-            for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
+            # En sincronizaciones automáticas, priorizar Tier 1 y Tier 2 de alta liquidez para respetar ventanas serverless
+            for t_list in list(tier_1.values()) + list(tier_2.values()):
                 targets.extend(t_list)
 
-        for url, prov_name, portal_type in targets:
-            try:
-                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata [{url}]...")
-                scrape_res = self.supadata_client.scrape_url(url)
-                if not scrape_res or not scrape_res.get("content"):
-                    continue
+        # Limitar a un máximo de 6 páginas estratégicas concurrentes para garantizar finalización < 15s
+        targets = targets[:6]
 
+        def _scrape_worker(target_info):
+            url, prov_name, portal_type = target_info
+            try:
+                # Limpiar slugs problemáticos como /con-precio-rebajado/
+                clean_url = url.replace("/con-precio-rebajado/", "/")
+                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata [{clean_url}]...")
+                scrape_res = self.supadata_client.scrape_url(clean_url)
+                if not scrape_res or not scrape_res.get("content"):
+                    return []
                 content = scrape_res.get("content", "")
                 if portal_type == "idealista":
-                    parsed = IdealistaMarkdownParser.parse_listings(content, default_province=prov_name)
-                    results.extend(parsed)
+                    return IdealistaMarkdownParser.parse_listings(content, default_province=prov_name)
                 elif portal_type == "habitaclia":
-                    parsed = HabitacliaMarkdownParser.parse_listings(content, default_province=prov_name)
-                    results.extend(parsed)
-            except Exception as e_scrape:
-                logger.warning(f"Error extrayendo {url} con Supadata: {e_scrape}")
+                    return HabitacliaMarkdownParser.parse_listings(content, default_province=prov_name)
+                return []
+            except Exception as e_w:
+                logger.warning(f"Aviso extrayendo {url}: {e_w}")
+                return []
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_target = {executor.submit(_scrape_worker, t): t for t in targets}
+            try:
+                for future in concurrent.futures.as_completed(future_to_target, timeout=12.0):
+                    try:
+                        parsed_items = future.result()
+                        if parsed_items:
+                            results.extend(parsed_items)
+                    except Exception as e_res:
+                        logger.warning(f"Error en worker de scraping: {e_res}")
+            except concurrent.futures.TimeoutError:
+                logger.info("[Market Live Scraper] Timeout preventivo alcanzado. Continuando con resultados disponibles.")
 
         # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         results.sort(
@@ -1171,6 +1190,96 @@ class MarketScraper:
                     "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80"
                 ],
                 "description": "Vivienda completamente actualizada con calefacción individual de gas natural, ascensor a cota cero y excelente ratio de rentabilidad para alquiler residencial."
+            },
+
+            # ==========================================
+            # SOLARES Y SUELOS (MKT)
+            # ==========================================
+            {
+                "id": "MKT-SOLAR-2026-001",
+                "title": "Solar urbano residencial en casco consolidado",
+                "address": "Camino de Griñón, 14",
+                "locality": "Griñón",
+                "province": "Madrid",
+                "postal_code": "28971",
+                "lat": 40.2140,
+                "lon": -3.8560,
+                "property_type": "SOLAR",
+                "strategy": "LAND_DEVELOPMENT",
+                "surface_m2": 540.0,
+                "original_listing_price": 125000.0,
+                "listing_price": 89000.0,
+                "first_published_date": "2026-02-05",
+                "publications": [
+                    {
+                        "portal": "Idealista",
+                        "price": 89000.0,
+                        "url": "https://www.idealista.com/venta-terrenos/grinon-madrid/",
+                        "agency": "Inmobiliaria Suroeste Madrid",
+                        "published_date": "2026-02-18"
+                    },
+                    {
+                        "portal": "Fotocasa",
+                        "price": 98000.0,
+                        "url": "https://www.fotocasa.es/es/comprar/terrenos/grinon/l",
+                        "agency": "Fincas Madrid Sur",
+                        "published_date": "2026-02-05"
+                    }
+                ],
+                "census_tract_data": {
+                    "district": "Griñón Casco",
+                    "avg_household_income": 39500,
+                    "avg_person_income": 17800,
+                    "area_m2_price": 280.0,
+                    "population_growth_rate": 2.1
+                },
+                "images": [
+                    "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=800&q=80"
+                ],
+                "description": "Parcela urbana con acometidas a pie de parcela (agua, luz, saneamiento y gas). Edificabilidad 0.60 m2c/m2s para vivienda unifamiliar aislada o pareada. Sin cargas."
+            },
+            {
+                "id": "MKT-SOLAR-2026-002",
+                "title": "Suelo finalista en ámbito de desarrollo Los Berrocales",
+                "address": "Sector Los Berrocales - Gran Vía del Sureste, Parcela 12",
+                "locality": "Madrid",
+                "province": "Madrid",
+                "postal_code": "28052",
+                "lat": 40.3810,
+                "lon": -3.5850,
+                "property_type": "SOLAR",
+                "strategy": "LAND_DEVELOPMENT",
+                "surface_m2": 1250.0,
+                "original_listing_price": 420000.0,
+                "listing_price": 310000.0,
+                "first_published_date": "2026-01-20",
+                "publications": [
+                    {
+                        "portal": "Idealista",
+                        "price": 310000.0,
+                        "url": "https://www.idealista.com/venta-terrenos/madrid/vicalvaro/",
+                        "agency": "Suelos y Desarrollos Madrid",
+                        "published_date": "2026-02-15"
+                    },
+                    {
+                        "portal": "Fotocasa",
+                        "price": 345000.0,
+                        "url": "https://www.fotocasa.es/es/comprar/terrenos/madrid-capital/vicalvaro/l",
+                        "agency": "Gestora del Sureste",
+                        "published_date": "2026-01-20"
+                    }
+                ],
+                "census_tract_data": {
+                    "district": "Vicálvaro - Los Berrocales",
+                    "avg_household_income": 37200,
+                    "avg_person_income": 16900,
+                    "area_m2_price": 420.0,
+                    "population_growth_rate": 3.4
+                },
+                "images": [
+                    "https://images.unsplash.com/photo-1524813686514-a57563d77d66?auto=format&fit=crop&w=800&q=80"
+                ],
+                "description": "Suelo urbanizable sectorizado en el desarrollo de Los Berrocales, Gran Vía del Sureste. Aprobada junta de compensación y obras de urbanización de Etapa 1 y 2 en marcha."
             }
         ]
 
@@ -1290,8 +1399,8 @@ class MarketScraper:
             
             "listing_price": min_price,
             "original_listing_price": original_price,
-            "price_drop_amount": price_drop,
-            "discount_percentage": discount_pct,
+            "discount_percentage": max(discount_pct, discount_vs_market),
+            "price_drop_percentage": discount_pct,
             "discount_vs_market": discount_vs_market,
             
             "x_publicacion": x_publicacion,

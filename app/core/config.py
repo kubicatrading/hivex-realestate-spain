@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
     # Telegram
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_BOT_TOKEN: str = "8889706886:AAGu97kanMwK9L3d5_7yGXQR-d5ojfYRUHs"
+    TELEGRAM_CHAT_ID: str = "-1003904392737"
+    PLATFORM_BASE_URL: str = "https://hivex-realestate-spain.vercel.app"
 
     # Opportunity Rules
     MIN_DISCOUNT_THRESHOLD: float = 0.10  # 10% below reference price

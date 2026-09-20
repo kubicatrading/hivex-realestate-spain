@@ -2,7 +2,7 @@ import logging
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 
-from app.db.models import Auction, Opportunity, CadastralParcel, CensusSection
+from app.db.models import Auction, Opportunity, CadastralParcel, CensusSection, StrategyType
 from app.connectors.boe_scraper import BOESubastasScraper
 from app.connectors.catastro_client import CatastroClient
 from app.connectors.ine_client import INEClient
@@ -58,8 +58,8 @@ class OpportunityScoringEngine:
                                 new_parcel = CadastralParcel(
                                     refcat=item_refcat,
                                     address=item.get("address"),
-                                    built_surface_m2=item.get("surface_m2") or 100.0,
-                                    main_use=item.get("property_type", "Vivienda")
+                                    surface_m2=item.get("surface_m2") or 100.0,
+                                    land_use=item.get("property_type", "Vivienda")
                                 )
                                 self.db.add(new_parcel)
                                 self.db.commit()
