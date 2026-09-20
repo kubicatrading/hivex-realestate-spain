@@ -355,7 +355,7 @@ def health_check(db: Session = Depends(get_db)):
 
     return {
         "status": "online",
-        "version": "v3.2.0-telegram-modal",
+        "version": "v3.2.1-telegram-modal",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENV,
         "database": {
@@ -1481,6 +1481,7 @@ def get_opportunity_by_id(
     Permite acceso directo para Deep-Links procedentes del bot de alertas de Telegram.
     """
     clean_id = opp_id.strip()
+    errors = []
 
     # 1. Búsqueda directa en catálogo verificado de mercado (inmediata, sin llamadas externas)
     try:
@@ -1491,7 +1492,8 @@ def get_opportunity_by_id(
             if str(raw.get("id", "")).strip().upper() == clean_id.upper():
                 return ms._process_market_listing(dict(raw))
     except Exception as e_cat:
-        print(f"Error en catálogo de mercado para ID {clean_id}: {e_cat}")
+        import traceback
+        errors.append(f"cat: {e_cat} [{traceback.format_exc()[-150:]}]")
 
     # 2. Búsqueda en Oportunidades de Mercado completas
     try:
@@ -1502,7 +1504,7 @@ def get_opportunity_by_id(
             if str(m.get("id")) == clean_id:
                 return m
     except Exception as e_m:
-        print(f"Error buscando en market por ID {clean_id}: {e_m}")
+        errors.append(f"market: {e_m}")
 
     # 3. Búsqueda en Desarrollos PGOU
     try:
@@ -1512,7 +1514,7 @@ def get_opportunity_by_id(
             if str(p.get("id")) == clean_id or str(p.get("gazette_code")) == clean_id:
                 return p
     except Exception as e_p:
-        print(f"Error buscando en PGOU por ID {clean_id}: {e_p}")
+        errors.append(f"pgou: {e_p}")
 
     # 4. Búsqueda en Edictos Judiciales
     try:
@@ -1522,9 +1524,9 @@ def get_opportunity_by_id(
             if str(e.get("id")) == clean_id:
                 return e
     except Exception as e_e:
-        print(f"Error buscando en edictos por ID {clean_id}: {e_e}")
+        errors.append(f"edictos: {e_e}")
 
-    # 4. Búsqueda en Subastas BOE en Base de Datos
+    # 5. Búsqueda en Subastas BOE en Base de Datos
     try:
         from sqlalchemy.orm import joinedload
         opp = db.query(Opportunity).options(
@@ -1573,9 +1575,12 @@ def get_opportunity_by_id(
                     "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}"
                 }
     except Exception as e_db:
-        print(f"Error buscando subasta por ID {clean_id}: {e_db}")
+        errors.append(f"db: {e_db}")
 
-    raise HTTPException(status_code=404, detail=f"Oportunidad con ID '{clean_id}' no encontrada.")
+    detail_msg = f"Oportunidad con ID '{clean_id}' no encontrada."
+    if errors:
+        detail_msg += f" [Diag: {' ; '.join(errors)}]"
+    raise HTTPException(status_code=404, detail=detail_msg)
 
 @app.get("/api/v1/streetview_photo")
 def get_streetview_photo(address: Optional[str] = Query(None), lat: Optional[float] = Query(None), lon: Optional[float] = Query(None), key: Optional[str] = Query(None)):
