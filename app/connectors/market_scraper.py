@@ -45,7 +45,8 @@ class MarketScraper:
         self,
         province: Optional[str] = None,
         pgou_items: Optional[List[Dict[str, Any]]] = None,
-        only_synergy_pgou: bool = False
+        only_synergy_pgou: bool = False,
+        live_scrape: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Retorna la lista de oportunidades normalizadas de portales inmobiliarios reales.
@@ -53,7 +54,7 @@ class MarketScraper:
         y cálculo de descuento real desde su precio inicial.
         Si no hay datos reales extraídos, retorna [].
         """
-        raw_items = self._get_raw_market_listings(province=province)
+        raw_items = self._get_raw_market_listings(province=province, live_scrape=live_scrape)
 
         # Si no hay anuncios reales capturados, retornar lista vacía directamente
         if not raw_items:
@@ -115,20 +116,28 @@ class MarketScraper:
         if only_synergy_pgou:
             processed_items = [item for item in processed_items if item.get("has_pgou_synergy")]
 
-        # Ordenar oportunidades en base al score general y porcentaje de rentabilidad en orden descendente
+        # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         processed_items.sort(
-            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_percentage") or x.get("discount_vs_market") or 0.0
+            ),
             reverse=True
         )
 
         return processed_items
 
-    def _get_raw_market_listings(self, province: Optional[str] = None) -> List[Dict[str, Any]]:
+    def _get_raw_market_listings(
+        self,
+        province: Optional[str] = None,
+        live_scrape: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Ejecuta la ingesta real de datos de portales inmobiliarios:
         1. API oficial de Idealista (si las credenciales IDEALISTA_API_KEY y SECRET están configuradas).
         2. Catálogo Nacional de Mercado Inmobiliario Verificado (100% Real).
-        3. Extracción web en vivo de portales accesibles sin bloqueo.
+        3. Extracción web en vivo de portales (cuando live_scrape=True, en sincronización programada).
         NO retorna datos simulados ni fallbacks ficticios.
         """
         raw_items: List[Dict[str, Any]] = []
@@ -147,12 +156,13 @@ class MarketScraper:
         catalog_items = self._build_verified_market_catalog()
         raw_items.extend(catalog_items)
 
-        # 3. Extracción de portales en vivo
-        try:
-            live_items = self._fetch_live_portals(province=province)
-            raw_items.extend(live_items)
-        except Exception as e_live:
-            logger.warning(f"Consulta de portales en vivo finalizada: {e_live}")
+        # 3. Extracción de portales en vivo (solo durante sincronizaciones programadas con live_scrape=True)
+        if live_scrape:
+            try:
+                live_items = self._fetch_live_portals(province=province)
+                raw_items.extend(live_items)
+            except Exception as e_live:
+                logger.warning(f"Consulta de portales en vivo finalizada: {e_live}")
 
         if province:
             norm_prov = province.strip().lower()
@@ -381,9 +391,13 @@ class MarketScraper:
             except Exception as e_scrape:
                 logger.warning(f"Error extrayendo {url} con Supadata: {e_scrape}")
 
-        # Ordenar globalmente todos los resultados por overall_score DESC y rental_yield DESC
+        # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         results.sort(
-            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_percentage") or x.get("discount_vs_market") or 0.0
+            ),
             reverse=True
         )
 
@@ -1215,18 +1229,32 @@ class MarketScraper:
 
         from app.engine.rental_reference import RentalReferenceEngine
 
-        monthly_rent = item.get("estimated_monthly_rent") or RentalReferenceEngine.estimate_monthly_rent(
-            surface_m2=surface,
-            postal_code=item.get("postal_code") or "28001",
-            province=item.get("province") or "Madrid",
-            floor=item.get("floor") or "2ª planta",
-            has_elevator=item.get("has_elevator", True)
-        )
-        rental_yield = item.get("rental_yield") or RentalReferenceEngine.calculate_rental_yield(
-            listing_price=min_price,
-            monthly_rent=monthly_rent
-        )
-        yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+        strategy = item.get("strategy", "HOUSE_FLIPPING")
+        prop_type = (item.get("property_type") or "").lower()
+        is_solar = (strategy == "LAND_DEVELOPMENT" or "solar" in prop_type or "terreno" in prop_type or "parcela" in prop_type or "suelo" in prop_type)
+
+        if is_solar:
+            monthly_rent = 0.0
+            rental_yield = 0.0
+            yield_score = 0.0
+            yield_color = "rojo"
+            btl_score = None
+            btl_color = None
+        else:
+            monthly_rent = item.get("estimated_monthly_rent") or RentalReferenceEngine.estimate_monthly_rent(
+                surface_m2=surface,
+                postal_code=item.get("postal_code") or "28001",
+                province=item.get("province") or "Madrid",
+                floor=item.get("floor") or "2ª planta",
+                has_elevator=item.get("has_elevator", True)
+            )
+            rental_yield = item.get("rental_yield") or RentalReferenceEngine.calculate_rental_yield(
+                listing_price=min_price,
+                monthly_rent=monthly_rent
+            )
+            yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+            btl_score = yield_score
+            btl_color = yield_color
 
         discount_score = scores.get("discount_score") or min(100.0, max(0.0, (discount_vs_market / 0.50) * 100.0))
         poi_score = scores.get("poi_score", 85.0)
@@ -1234,11 +1262,10 @@ class MarketScraper:
         demographic_score = scores.get("demographic_score", 80.0)
 
         final_score = item.get("overall_score") or round(
-            (discount_score * 0.25) +
-            (poi_score * 0.14) +
-            (income_score * 0.105) +
-            (demographic_score * 0.105) +
-            (yield_score * 0.40),
+            (discount_score * 0.50) +
+            (poi_score * 0.20) +
+            (income_score * 0.15) +
+            (demographic_score * 0.15),
             1
         )
 
@@ -1285,10 +1312,12 @@ class MarketScraper:
             "appraisal_value": original_price,
             "potential_gross_profit": potential_profit,
             
-            "rental_yield": rental_yield,
-            "estimated_monthly_rent": monthly_rent,
-            "yield_score": yield_score,
-            "yield_color": yield_color,
+            "rental_yield": rental_yield if not is_solar else None,
+            "estimated_monthly_rent": monthly_rent if not is_solar else None,
+            "yield_score": yield_score if not is_solar else 0.0,
+            "yield_color": yield_color if not is_solar else None,
+            "btl_score": btl_score,
+            "btl_color": btl_color,
             "overall_score": final_score,
             "final_score": final_score,
             "discount_score": discount_score,

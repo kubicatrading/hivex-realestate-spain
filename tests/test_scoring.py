@@ -24,15 +24,25 @@ def test_overall_opportunity_score():
     )
     assert 70.0 <= score_top <= 100.0
 
-    # Test de la escala semafórica oficial de Rentabilidad de Alquiler
+    # Test de la escala semafórica oficial de Rentabilidad de Alquiler y BTL
     assert KPICalculator.calculate_yield_score(7.5) == 100.0
     assert KPICalculator.get_yield_color(7.5) == "verde"
     assert KPICalculator.calculate_yield_score(6.4) == 90.0
     assert KPICalculator.get_yield_color(6.4) == "amarillo"
     assert KPICalculator.calculate_yield_score(5.2) == 80.0
     assert KPICalculator.get_yield_color(5.2) == "naranja"
-    assert KPICalculator.calculate_yield_score(4.5) == 0.0
-    assert KPICalculator.get_yield_color(4.5) == "rojo"
+    assert KPICalculator.calculate_yield_score(4.5) == 50.0
+    assert KPICalculator.get_yield_color(4.5) == "naranja_rojizo"
+    assert KPICalculator.calculate_yield_score(3.5) == 0.0
+    assert KPICalculator.get_yield_color(3.5) == "rojo"
+
+    # BTL Score y discriminación de Solares
+    assert KPICalculator.calculate_btl_score(7.2, is_solar=False) == 100.0
+    assert KPICalculator.get_btl_color(7.2, is_solar=False) == "verde"
+    assert KPICalculator.calculate_btl_score(4.35, is_solar=False) == 50.0
+    assert KPICalculator.get_btl_color(4.35, is_solar=False) == "naranja_rojizo"
+    assert KPICalculator.calculate_btl_score(7.2, is_solar=True) is None
+    assert KPICalculator.get_btl_color(7.2, is_solar=True) is None
 
 def test_2x2_market_price_resolution():
     from app.engine.meso_market_price import resolve_meso_market_price_2x2

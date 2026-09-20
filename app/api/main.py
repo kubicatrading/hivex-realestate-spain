@@ -550,7 +550,7 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         # 4. Ingesta y monitorización de Oportunidades de Mercado (Idealista, Fotocasa, Habitaclia, etc.)
         from app.connectors.market_scraper import MarketScraper
         market_scraper = MarketScraper()
-        market_items = market_scraper.fetch_market_opportunities()
+        market_items = market_scraper.fetch_market_opportunities(live_scrape=True)
         MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
 
         new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])
@@ -1117,12 +1117,16 @@ def get_opportunities(
                 population_growth_rate = ine_stats.get("population_growth_rate", 1.8)
 
                 discount_frac = (discount_m2_pct / 100.0) if discount_m2_pct > 0 else 0.0
+                is_solar_subasta = (strategy_val == "LAND_DEVELOPMENT" or ("solar" in (auc.property_type or "").lower() if auc else False))
+                rental_yield_subasta = getattr(opp, "rental_yield", 0.0) or 0.0
                 detailed_scores = KPICalculator.calculate_detailed_scores(
                     discount_percentage=discount_frac,
                     poi_score=opp.poi_score or 75.0,
                     income_amount=avg_household_income,
                     population_growth=population_growth_rate,
-                    has_property_m2_price=has_property_m2
+                    has_property_m2_price=has_property_m2,
+                    rental_yield=rental_yield_subasta,
+                    is_solar=is_solar_subasta
                 )
 
                 results.append({
@@ -1174,6 +1178,10 @@ def get_opportunities(
                     "demographic_score": detailed_scores["demographic_score"],
                     "poi_score": detailed_scores["poi_score"],
                     "discount_score": detailed_scores["discount_score"],
+                    "yield_score": detailed_scores.get("yield_score", 0.0),
+                    "btl_score": detailed_scores.get("btl_score"),
+                    "btl_color": detailed_scores.get("btl_color"),
+                    "rental_yield": detailed_scores.get("rental_yield"),
                     "overall_score": detailed_scores["overall_score"],
                     
                     "lat": lat,
@@ -1340,7 +1348,8 @@ def get_opportunities(
             market_items = market_scraper.fetch_market_opportunities(
                 province=province,
                 pgou_items=current_pgou,
-                only_synergy_pgou=bool(only_synergy_pgou)
+                only_synergy_pgou=bool(only_synergy_pgou),
+                live_scrape=False
             )
 
             for m_item in market_items:
@@ -1389,12 +1398,12 @@ def get_opportunities(
             print(f"Error procesando BBOX {bbox}: {e_bbox}")
 
     # Order results: newly synchronized opportunities first (is_new=True),
-    # followed by discount percentage and overall score descending (best investment opportunities first)
+    # followed by max(overall_score/discount_score, btl_score) descending, then discount percentage descending
     results.sort(
         key=lambda x: (
             1 if x.get("is_new") else 0,
-            x.get("discount_percentage") or 0.0,
-            x.get("overall_score") or 0.0
+            max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+            x.get("discount_percentage") or x.get("discount_vs_market") or 0.0
         ),
         reverse=True
     )

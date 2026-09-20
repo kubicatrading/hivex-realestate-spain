@@ -1059,9 +1059,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="card-bottom-row" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%;">
                             <div class="scores-compact" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
                                 <span class="score-chip" title="Score Global Oportunidad" style="${getScoreBgStyle(opp.overall_score)}">Score: <strong>${formatScore(opp.overall_score)}</strong></span>
-                                ${(opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
-                                <span class="score-chip" title="Rentabilidad de Alquiler Anual Estimada (Yield)" style="background: ${opp.rental_yield >= 7 ? 'rgba(34, 197, 94, 0.22)' : (opp.rental_yield >= 6 ? 'rgba(234, 179, 8, 0.22)' : (opp.rental_yield >= 5 ? 'rgba(249, 115, 22, 0.22)' : 'rgba(239, 68, 68, 0.22)'))}; border: 1px solid ${opp.rental_yield >= 7 ? '#22c55e' : (opp.rental_yield >= 6 ? '#eab308' : (opp.rental_yield >= 5 ? '#f97316' : '#ef4444'))}; color: ${opp.rental_yield >= 7 ? '#4ade80' : (opp.rental_yield >= 6 ? '#fde047' : (opp.rental_yield >= 5 ? '#fb923c' : '#f87171'))};">Yield: <strong>${Number(opp.rental_yield).toFixed(1)}%</strong></span>
-                                ` : ''}
+                                ${renderBtlBadge(opp, 'card')}
                                 ${opp.source_type === 'pgou' ? '' : `<span class="score-chip" title="Score Descuento vs Mercado" style="${getScoreBgStyle((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}">Desc: <strong>${formatScore((opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0)}</strong></span>`}
                                 <span class="score-chip" title="Score POIs / Entorno (OSM)" style="${getScoreBgStyle(opp.poi_score)}">POI: <strong>${formatScore(opp.poi_score)}</strong></span>
                                 <span class="score-chip" title="Score Renta INE" style="${getScoreBgStyle(opp.income_score)}">Renta: <strong>${formatScore(opp.income_score)}</strong></span>
@@ -1560,9 +1558,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span style="font-weight: 700; font-size: 0.98rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
                         <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8;"></i> KPIs ${opp.source_type === 'pgou' ? '(Entorno Urbano)' : ''}
                     </span>
-                    <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
-                        Score General: <strong>${formatScore(opp.overall_score)} / 100 pts</strong>
-                    </span>
+                    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                        <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
+                            Score General: <strong>${formatScore(opp.overall_score)} / 100 pts</strong>
+                        </span>
+                        ${renderBtlBadge(opp, 'modal')}
+                    </div>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.82rem;">
                     <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
@@ -1586,15 +1587,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
                     </div>
                     ${discountScoreBoxHtml}
-                    ${(opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
+                    ${(!isSolarOpportunity(opp) && opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
                     <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Rentabilidad Bruta Alquiler (Yield 40% Score)</span>
-                                <strong style="color: ${opp.rental_yield >= 7 ? '#4ade80' : (opp.rental_yield >= 6 ? '#fde047' : (opp.rental_yield >= 5 ? '#fb923c' : '#f87171'))}; font-size: 1.05rem;">
-                                    ${Number(opp.rental_yield).toFixed(2)}% anual
+                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Rentabilidad Bruta Alquiler (BTL / Buy to Let)</span>
+                                <strong style="color: ${getBtlStyle(opp.rental_yield).color}; font-size: 1.05rem;">
+                                    ${Number(opp.rental_yield).toFixed(2).replace('.', ',')}% anual
                                 </strong>
-                                <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 6px;">(${formatScore(opp.yield_score || 0)} pts)</span>
+                                <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 6px;">(${Math.round(opp.btl_score !== undefined && opp.btl_score !== null ? opp.btl_score : (opp.yield_score || 0))} pts)</span>
                             </div>
                             ${opp.estimated_monthly_rent ? `
                             <div style="text-align: right;">
@@ -2481,6 +2482,56 @@ document.addEventListener('DOMContentLoaded', () => {
     function getScoreBgStyle(val) {
         const color = getScoreColor(val);
         return `background: ${color}1a; color: ${color}; border: 1px solid ${color}55;`;
+    }
+
+    function isSolarOpportunity(opp) {
+        if (!opp) return false;
+        if (opp.source_type === 'pgou') return true;
+        if (opp.strategy === 'LAND_DEVELOPMENT') return true;
+        const pt = (opp.property_type || '').toLowerCase();
+        if (pt.includes('solar') || pt.includes('suelo') || pt.includes('terreno') || pt.includes('parcela')) return true;
+        return false;
+    }
+
+    function getBtlStyle(rentalYield) {
+        if (rentalYield === null || rentalYield === undefined || isNaN(rentalYield)) {
+            return { bg: 'rgba(239, 68, 68, 0.22)', border: '#ef4444', color: '#f87171', pts: 0 };
+        }
+        const y = parseFloat(rentalYield);
+        if (y >= 7.0) {
+            return { bg: 'rgba(34, 197, 94, 0.22)', border: '#22c55e', color: '#4ade80', pts: 100 };
+        } else if (y >= 6.0) {
+            return { bg: 'rgba(234, 179, 8, 0.22)', border: '#eab308', color: '#fde047', pts: 90 };
+        } else if (y >= 5.0) {
+            return { bg: 'rgba(249, 115, 22, 0.22)', border: '#f97316', color: '#fb923c', pts: 80 };
+        } else if (y >= 4.0) {
+            // Naranja degradado hacia rojo (sin azul, color más rojo)
+            return { bg: 'rgba(234, 88, 12, 0.25)', border: '#ea580c', color: '#fb923c', pts: 50 };
+        } else {
+            return { bg: 'rgba(239, 68, 68, 0.22)', border: '#ef4444', color: '#f87171', pts: 0 };
+        }
+    }
+
+    function renderBtlBadge(opp, context = 'card') {
+        if (!opp || isSolarOpportunity(opp)) return '';
+        if (opp.rental_yield === undefined || opp.rental_yield === null) return '';
+        const yNum = parseFloat(opp.rental_yield);
+        if (isNaN(yNum) || yNum <= 0) return '';
+
+        const style = getBtlStyle(yNum);
+        const pts = (opp.btl_score !== undefined && opp.btl_score !== null) ? Math.round(opp.btl_score) : style.pts;
+        const yieldFormatted = yNum.toFixed(2).replace('.', ',');
+        const label = `${yieldFormatted}% BTL (${pts} pts)`;
+
+        if (context === 'modal') {
+            return `<span class="score-chip" title="Estrategia Buy to Let (Rentabilidad Bruta Alquiler)" style="background: ${style.bg}; border: 1px solid ${style.border}; color: ${style.color}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
+                <strong>${label}</strong>
+            </span>`;
+        }
+
+        return `<span class="score-chip" title="Estrategia Buy to Let (Rentabilidad Bruta Alquiler)" style="background: ${style.bg}; border: 1px solid ${style.border}; color: ${style.color};">
+            <strong>${label}</strong>
+        </span>`;
     }
 
     function escapeHtml(str) {

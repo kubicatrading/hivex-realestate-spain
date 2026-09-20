@@ -256,7 +256,8 @@ class RentalReferenceEngine:
         1. >= 7.0% -> 100 puntos (verde)
         2. >= 6.0% y < 7.0% -> 90 puntos (amarillo)
         3. >= 5.0% y < 6.0% -> 80 puntos (naranja)
-        4. < 5.0% -> 0 puntos (rojo)
+        4. >= 4.0% y < 5.0% -> 50 puntos (naranja_rojizo - degradado hacia rojo)
+        5. < 4.0% -> 0 puntos (rojo)
         """
         if rental_yield >= 7.0:
             return 100.0, "verde"
@@ -264,5 +265,7 @@ class RentalReferenceEngine:
             return 90.0, "amarillo"
         elif rental_yield >= 5.0:
             return 80.0, "naranja"
+        elif rental_yield >= 4.0:
+            return 50.0, "naranja_rojizo"
         else:
             return 0.0, "rojo"

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.db.models import StrategyType
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,8 @@ class KPICalculator:
         1. >= 7.0% -> 100 puntos (verde)
         2. >= 6.0% y < 7.0% -> 90 puntos (amarillo)
         3. >= 5.0% y < 6.0% -> 80 puntos (naranja)
-        4. < 5.0% -> 0 puntos (rojo)
+        4. >= 4.0% y < 5.0% -> 50 puntos (naranja_rojizo - degradado hacia rojo)
+        5. < 4.0% -> 0 puntos (rojo)
         """
         if rental_yield >= 7.0:
             return 100.0
@@ -74,6 +75,8 @@ class KPICalculator:
             return 90.0
         elif rental_yield >= 5.0:
             return 80.0
+        elif rental_yield >= 4.0:
+            return 50.0
         else:
             return 0.0
 
@@ -86,8 +89,24 @@ class KPICalculator:
             return "amarillo"
         elif rental_yield >= 5.0:
             return "naranja"
+        elif rental_yield >= 4.0:
+            return "naranja_rojizo"
         else:
             return "rojo"
+
+    @staticmethod
+    def calculate_btl_score(rental_yield: float, is_solar: bool = False) -> Optional[float]:
+        """Calcula el score BTL (Buy To Let). Para solares se obvia devolviendo None."""
+        if is_solar:
+            return None
+        return KPICalculator.calculate_yield_score(rental_yield)
+
+    @staticmethod
+    def get_btl_color(rental_yield: float, is_solar: bool = False) -> Optional[str]:
+        """Retorna el color semafórico BTL. Para solares se obvia devolviendo None."""
+        if is_solar:
+            return None
+        return KPICalculator.get_yield_color(rental_yield)
 
     @staticmethod
     def calculate_detailed_scores(
@@ -96,16 +115,17 @@ class KPICalculator:
         income_amount: float,
         population_growth: float,
         has_property_m2_price: bool = True,
-        rental_yield: float = 0.0
+        rental_yield: float = 0.0,
+        is_solar: bool = False
     ) -> Dict[str, Any]:
         """
         Calcula el desglose completo de puntuaciones (0 - 100 pts) para cada dimensión:
-        - discount_score (25%) - Pondera 0 si no hay precio de inmueble por m2
-        - poi_score (14%)
-        - income_score (10.5%)
-        - demographic_score (10.5%)
-        - yield_score (40%) - Rentabilidad bruta anual en alquiler con +10% gastos
-        - overall_score (Total)
+        - discount_score (50%) - Pondera 0 si no hay precio de inmueble por m2
+        - poi_score (20%)
+        - income_score (15%)
+        - demographic_score (15%)
+        - overall_score (Total) = 0.50*descuento + 0.20*POI + 0.15*Renta + 0.15*Demografía
+        - btl_score (Buy to Let): evaluado por separado según rendimiento de alquiler (None para solares)
         """
         if not has_property_m2_price or discount_percentage <= 0:
             discount_score = 0.0
@@ -114,15 +134,16 @@ class KPICalculator:
 
         income_score = min(100.0, max(0.0, (income_amount / 45000.0) * 100.0))
         demographic_score = min(100.0, max(0.0, (population_growth / 3.0) * 100.0))
-        yield_score = KPICalculator.calculate_yield_score(rental_yield)
-        yield_color = KPICalculator.get_yield_color(rental_yield)
+        
+        # BTL Score independiente (None si es solar)
+        btl_score = KPICalculator.calculate_btl_score(rental_yield, is_solar=is_solar)
+        btl_color = KPICalculator.get_btl_color(rental_yield, is_solar=is_solar)
 
         overall = (
-            (discount_score * 0.25) +
-            (poi_score * 0.14) +
-            (income_score * 0.105) +
-            (demographic_score * 0.105) +
-            (yield_score * 0.40)
+            (discount_score * 0.50) +
+            (poi_score * 0.20) +
+            (income_score * 0.15) +
+            (demographic_score * 0.15)
         )
 
         return {
@@ -130,9 +151,11 @@ class KPICalculator:
             "income_score": round(income_score, 1),
             "demographic_score": round(demographic_score, 1),
             "poi_score": round(poi_score, 1),
-            "yield_score": round(yield_score, 1),
-            "yield_color": yield_color,
-            "rental_yield": round(rental_yield, 2),
+            "yield_score": round(btl_score, 1) if btl_score is not None else 0.0,
+            "btl_score": round(btl_score, 1) if btl_score is not None else None,
+            "yield_color": btl_color or "rojo",
+            "btl_color": btl_color,
+            "rental_yield": round(rental_yield, 2) if not is_solar else None,
             "overall_score": round(overall, 1)
         }
 
@@ -142,17 +165,21 @@ class KPICalculator:
         poi_score: float,
         income_amount: float,
         population_growth: float,
-        rental_yield: float = 0.0
+        rental_yield: float = 0.0,
+        is_solar: bool = False
     ) -> float:
         """
-        Algoritmo de puntuación ponderado (0 - 100 puntos) con 40% a rental_yield
+        Algoritmo de puntuación ponderado original (0 - 100 puntos):
+        Score = 0.50*descuento + 0.20*POI + 0.15*Renta + 0.15*Demografía
         """
         scores = KPICalculator.calculate_detailed_scores(
             discount_percentage,
             poi_score,
             income_amount,
             population_growth,
-            rental_yield=rental_yield
+            rental_yield=rental_yield,
+            is_solar=is_solar
         )
         return scores["overall_score"]
+
 

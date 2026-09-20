@@ -215,19 +215,29 @@ class IdealistaMarkdownParser:
                     "description": description
                 }
 
-                # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
-                monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
-                    surface_m2=surface_m2,
-                    postal_code=opportunity["postal_code"],
-                    province=opportunity["province"],
-                    floor=floor,
-                    has_elevator=has_elevator
-                )
-                rental_yield = RentalReferenceEngine.calculate_rental_yield(
-                    listing_price=listing_price,
-                    monthly_rent=monthly_rent
-                )
-                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                is_solar = (opportunity.get("strategy") == "LAND_DEVELOPMENT" or "solar" in (opportunity.get("property_type") or "").lower() or "terreno" in (opportunity.get("property_type") or "").lower())
+
+                if is_solar:
+                    monthly_rent = 0.0
+                    rental_yield = 0.0
+                    yield_score = 0.0
+                    yield_color = "rojo"
+                    btl_score = None
+                else:
+                    # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=floor,
+                        has_elevator=has_elevator
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
 
                 area_m2_price = float(location_data.get("area_m2_price", 3800.0))
                 est_market_val = surface_m2 * area_m2_price
@@ -238,13 +248,16 @@ class IdealistaMarkdownParser:
                     poi_score=85.0,
                     income_amount=location_data.get("avg_household_income", 42000),
                     population_growth=location_data.get("population_growth_rate", 2.0),
-                    rental_yield=rental_yield
+                    rental_yield=rental_yield,
+                    is_solar=is_solar
                 )
 
-                opportunity["estimated_monthly_rent"] = monthly_rent
-                opportunity["rental_yield"] = rental_yield
-                opportunity["yield_score"] = yield_score
-                opportunity["yield_color"] = yield_color
+                opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
+                opportunity["rental_yield"] = rental_yield if not is_solar else None
+                opportunity["yield_score"] = yield_score if not is_solar else 0.0
+                opportunity["yield_color"] = yield_color if not is_solar else None
+                opportunity["btl_score"] = btl_score
+                opportunity["btl_color"] = yield_color if not is_solar else None
                 opportunity["discount_vs_market"] = discount_vs_market
                 opportunity["overall_score"] = overall_score
                 opportunity["final_score"] = overall_score
@@ -253,13 +266,17 @@ class IdealistaMarkdownParser:
             except Exception as e_item:
                 logger.warning(f"Error parseando item individual de Idealista: {e_item}")
 
-        # Ordenar dentro de cada página por score general y rentabilidad descendente
+        # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         listings.sort(
-            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
             reverse=True
         )
 
-        logger.info(f"[Idealista Parser] Extraídos {len(listings)} inmuebles estructurados y ordenados por score y yield.")
+        logger.info(f"[Idealista Parser] Extraídos {len(listings)} inmuebles estructurados y ordenados por max(score, btl).")
         return listings
 
     @classmethod
@@ -555,19 +572,29 @@ class HabitacliaMarkdownParser:
                     "description": f"{title}. Anuncio verificado en Habitaclia."
                 }
 
-                # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
-                monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
-                    surface_m2=opportunity["surface_m2"],
-                    postal_code=opportunity["postal_code"],
-                    province=opportunity["province"],
-                    floor=opportunity["floor"],
-                    has_elevator=opportunity["has_elevator"]
-                )
-                rental_yield = RentalReferenceEngine.calculate_rental_yield(
-                    listing_price=listing_price,
-                    monthly_rent=monthly_rent
-                )
-                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                is_solar = (opportunity.get("strategy") == "LAND_DEVELOPMENT" or "solar" in (opportunity.get("property_type") or "").lower() or "terreno" in (opportunity.get("property_type") or "").lower())
+
+                if is_solar:
+                    monthly_rent = 0.0
+                    rental_yield = 0.0
+                    yield_score = 0.0
+                    yield_color = "rojo"
+                    btl_score = None
+                else:
+                    # Cálculo de Rentabilidad Bruta Anual de Alquiler (+10% gastos adquisición)
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=opportunity["surface_m2"],
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=opportunity["floor"],
+                        has_elevator=opportunity["has_elevator"]
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
 
                 area_m2_price = float(loc_data.get("area_m2_price", 3900.0))
                 est_market_val = opportunity["surface_m2"] * area_m2_price
@@ -578,13 +605,16 @@ class HabitacliaMarkdownParser:
                     poi_score=82.0,
                     income_amount=loc_data.get("avg_household_income", 40000),
                     population_growth=loc_data.get("population_growth_rate", 1.5),
-                    rental_yield=rental_yield
+                    rental_yield=rental_yield,
+                    is_solar=is_solar
                 )
 
-                opportunity["estimated_monthly_rent"] = monthly_rent
-                opportunity["rental_yield"] = rental_yield
-                opportunity["yield_score"] = yield_score
-                opportunity["yield_color"] = yield_color
+                opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
+                opportunity["rental_yield"] = rental_yield if not is_solar else None
+                opportunity["yield_score"] = yield_score if not is_solar else 0.0
+                opportunity["yield_color"] = yield_color if not is_solar else None
+                opportunity["btl_score"] = btl_score
+                opportunity["btl_color"] = yield_color if not is_solar else None
                 opportunity["discount_vs_market"] = discount_vs_market
                 opportunity["overall_score"] = overall_score
                 opportunity["final_score"] = overall_score
@@ -593,11 +623,15 @@ class HabitacliaMarkdownParser:
             except Exception as e_hab:
                 logger.warning(f"Error parseando item Habitaclia: {e_hab}")
 
-        # Ordenar dentro de cada página por score general y rentabilidad descendente
+        # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         listings.sort(
-            key=lambda x: (x.get("overall_score", 0.0), x.get("rental_yield", 0.0)),
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
             reverse=True
         )
 
-        logger.info(f"[Habitaclia Parser] Extraídos {len(listings)} inmuebles con éxito y ordenados por score y yield.")
+        logger.info(f"[Habitaclia Parser] Extraídos {len(listings)} inmuebles con éxito y ordenados por max(score, btl).")
         return listings

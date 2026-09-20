@@ -93,7 +93,8 @@ def run_db_migrations(target_engine):
                 ("rental_yield", "FLOAT DEFAULT 0.0"),
                 ("estimated_monthly_rent", "FLOAT DEFAULT 0.0"),
                 ("yield_score", "FLOAT DEFAULT 0.0"),
-                ("yield_color", "VARCHAR(20) DEFAULT 'rojo'")
+                ("yield_color", "VARCHAR(20) DEFAULT 'rojo'"),
+                ("btl_score", "FLOAT DEFAULT NULL")
             ]
             with target_engine.connect() as conn:
                 for col_name, col_type in new_cols:
