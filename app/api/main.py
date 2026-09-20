@@ -355,6 +355,7 @@ def health_check(db: Session = Depends(get_db)):
 
     return {
         "status": "online",
+        "version": "v3.2.0-telegram-modal",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENV,
         "database": {
@@ -1487,7 +1488,7 @@ def get_opportunity_by_id(
         ms = MarketScraper()
         catalog = ms._build_verified_market_catalog()
         for raw in catalog:
-            if str(raw.get("id")) == clean_id:
+            if str(raw.get("id", "")).strip().upper() == clean_id.upper():
                 return ms._process_market_listing(dict(raw))
     except Exception as e_cat:
         print(f"Error en catálogo de mercado para ID {clean_id}: {e_cat}")
