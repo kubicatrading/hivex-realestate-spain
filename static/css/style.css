@@ -1382,6 +1382,221 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+/* ==========================================================================
+   CAROUSEL & PHOTO GALLERY (Cards & Detail Modal)
+   ========================================================================== */
+.card-carousel-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.25s ease, background 0.2s ease, transform 0.2s ease, color 0.2s ease;
+    padding: 0;
+}
+
+.card-carousel-prev { left: 8px; }
+.card-carousel-next { right: 8px; }
+
+.card-image-banner:hover .card-carousel-btn {
+    opacity: 1;
+}
+
+@media (pointer: coarse), (hover: none) {
+    .card-carousel-btn {
+        opacity: 0.85;
+    }
+}
+
+.card-carousel-btn:hover {
+    background: #38bdf8;
+    color: #020617;
+    transform: translateY(-50%) scale(1.12);
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+    border-color: #38bdf8;
+}
+
+.card-carousel-btn svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2.5;
+}
+
+.card-carousel-counter {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    z-index: 4;
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #f8fafc;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Modal Interactive Photo Gallery */
+.modal-gallery-box {
+    position: relative;
+    user-select: none;
+}
+
+.modal-gallery-main {
+    position: relative;
+    width: 100%;
+    height: 380px;
+    background: #020617;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-gallery-main img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: opacity 0.2s ease;
+}
+
+.modal-gallery-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+
+.modal-gallery-prev { left: 12px; }
+.modal-gallery-next { right: 12px; }
+
+.modal-gallery-btn:hover {
+    background: #38bdf8;
+    color: #020617;
+    transform: translateY(-50%) scale(1.08);
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.5);
+    border-color: #38bdf8;
+}
+
+.modal-gallery-btn svg {
+    width: 24px;
+    height: 24px;
+    stroke-width: 2.5;
+}
+
+.modal-gallery-counter-badge {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.modal-gallery-thumbnails {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+.modal-gallery-thumbnails::-webkit-scrollbar {
+    height: 6px;
+}
+
+.modal-gallery-thumbnails::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 4px;
+}
+
+.modal-gallery-thumbnails::-webkit-scrollbar-thumb {
+    background: rgba(56, 189, 248, 0.4);
+    border-radius: 4px;
+}
+
+.gallery-thumb-item {
+    flex-shrink: 0;
+    width: 76px;
+    height: 52px;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-thumb-item:hover {
+    transform: scale(1.05);
+    border-color: rgba(56, 189, 248, 0.8);
+}
+
+.gallery-thumb-item.active {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+    transform: scale(1.04);
+}
+
+@media (max-width: 640px) {
+    .modal-gallery-main {
+        height: 260px;
+    }
+    .modal-gallery-btn {
+        width: 36px;
+        height: 36px;
+    }
+    .modal-gallery-btn svg {
+        width: 20px;
+        height: 20px;
+    }
+    .gallery-thumb-item {
+        width: 60px;
+        height: 42px;
+    }
+}
+
 /* Urbanism Block for LAND_DEVELOPMENT / Solares */
 .card-urbanism {
     background: rgba(245, 158, 11, 0.08);

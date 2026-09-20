@@ -77,6 +77,7 @@ class RealEstateAlertEngine:
     def select_top_opportunities(
         self,
         market_items: List[Dict[str, Any]],
+        pgou_items: Optional[List[Dict[str, Any]]] = None,
         db: Optional[Session] = None,
         force_all: bool = False
     ) -> Dict[str, Dict[str, Any]]:
@@ -118,28 +119,7 @@ class RealEstateAlertEngine:
                 results["BTL"] = c
                 break
 
-        # 2. 2.2. Mejor oportunidad 'market' de house flipping en Madrid
-        flipping_madrid_candidates = [
-            it for it in market_items
-            if ("madrid" in (it.get("province") or "").lower() or "madrid" in (it.get("locality") or "").lower())
-            and it.get("strategy") == "HOUSE_FLIPPING"
-            and not any(k in (it.get("property_type") or "").lower() for k in ["solar", "terreno", "suelo", "parcela"])
-        ]
-        flipping_madrid_candidates.sort(
-            key=lambda x: (
-                x.get("overall_score") or 0.0,
-                x.get("potential_gross_profit") or 0.0,
-                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
-            ),
-            reverse=True
-        )
-        for c in flipping_madrid_candidates:
-            # Evitar repetir la misma oportunidad asignada en BTL si hay otra disponible
-            if (force_all or c["id"] not in already_alerted_ids) and (c["id"] != results.get("BTL", {}).get("id") or len(flipping_madrid_candidates) == 1):
-                results["House Flipping"] = c
-                break
-
-        # 3. 2.3. Mejor oportunidad 'market' de alquiler/house flipping con sinergia PGOU
+        # 2. 2.3. Mejor oportunidad 'market' de alquiler/house flipping con sinergia PGOU
         flipping_pgou_candidates = [
             it for it in market_items
             if it.get("has_pgou_synergy")
@@ -155,7 +135,28 @@ class RealEstateAlertEngine:
                 results["House Flipping PGOU"] = c
                 break
 
-        # 4. 2.4. Mejor oportunidad 'market' solar en precio
+        # 3. 2.2. Mejor oportunidad 'market' de house flipping en Madrid (diferente a PGOU)
+        flipping_madrid_candidates = [
+            it for it in market_items
+            if ("madrid" in (it.get("province") or "").lower() or "madrid" in (it.get("locality") or "").lower())
+            and it.get("strategy") == "HOUSE_FLIPPING"
+            and not any(k in (it.get("property_type") or "").lower() for k in ["solar", "terreno", "suelo", "parcela"])
+        ]
+        flipping_madrid_candidates.sort(
+            key=lambda x: (
+                x.get("overall_score") or 0.0,
+                x.get("potential_gross_profit") or 0.0,
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
+            reverse=True
+        )
+        for c in flipping_madrid_candidates:
+            assigned_ids = {results.get("BTL", {}).get("id"), results.get("House Flipping PGOU", {}).get("id")}
+            if (force_all or c["id"] not in already_alerted_ids) and (c["id"] not in assigned_ids or len(flipping_madrid_candidates) <= len(assigned_ids)):
+                results["House Flipping"] = c
+                break
+
+        # 4. 2.4. Mejor oportunidad solar en precio (Market o Subasta BOE de suelo)
         solar_candidates = [
             it for it in market_items
             if it.get("strategy") == "LAND_DEVELOPMENT"
@@ -174,7 +175,36 @@ class RealEstateAlertEngine:
                 results["Solar"] = c
                 break
 
-        # 5. 2.5. Mejor oportunidad 'market' solar con sinergia PGOU
+        if "Solar" not in results:
+            try:
+                from app.db.session import SessionLocal
+                from app.db.models import Opportunity as DBOpp, Auction as DBAuc
+                _db = db or SessionLocal()
+                db_solar = _db.query(DBOpp).join(DBAuc).filter(
+                    DBOpp.strategy == 'LAND_DEVELOPMENT',
+                    DBOpp.discount_percentage > 0.15
+                ).order_by(DBOpp.overall_score.desc(), DBOpp.discount_percentage.desc()).first()
+                if db_solar and db_solar.auction:
+                    auc = db_solar.auction
+                    sub_clean_id = auc.id_subasta if str(auc.id_subasta).startswith("SUB-") else f"SUB-{auc.id_subasta}"
+                    results["Solar"] = {
+                        "id": sub_clean_id,
+                        "title": f"Suelo/Solar en {auc.locality or auc.province}",
+                        "address": auc.address or f"Finca en {auc.province}",
+                        "locality": auc.locality or "",
+                        "province": auc.province or "",
+                        "property_type": "SOLAR",
+                        "strategy": "LAND_DEVELOPMENT",
+                        "surface_m2": float(auc.parcel.surface_m2) if auc.parcel and auc.parcel.surface_m2 else None,
+                        "discount_percentage": float(db_solar.discount_percentage * 100.0) if db_solar.discount_percentage <= 1.0 else float(db_solar.discount_percentage),
+                        "property_m2_price": round(float(auc.appraisal_value or db_solar.estimated_reference_value or 0) / float(auc.parcel.surface_m2), 2) if auc.parcel and auc.parcel.surface_m2 and float(auc.parcel.surface_m2) > 0 else None,
+                        "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
+                        "primary_portal": "BOE"
+                    }
+            except Exception as e_sol:
+                logger.warning(f"Aviso consultando solar en DB: {e_sol}")
+
+        # 5. 2.5. Mejor oportunidad solar con sinergia PGOU (Market o Sector PGOU)
         solar_pgou_candidates = [
             it for it in market_items
             if it.get("has_pgou_synergy")
@@ -191,6 +221,24 @@ class RealEstateAlertEngine:
             if force_all or c["id"] not in already_alerted_ids:
                 results["Solar PGOU"] = c
                 break
+
+        if "Solar PGOU" not in results and pgou_items:
+            for p in pgou_items:
+                if force_all or p["id"] not in already_alerted_ids:
+                    results["Solar PGOU"] = {
+                        "id": p["id"],
+                        "title": p.get("title") or "Sector Urbanístico PGOU",
+                        "address": p.get("address") or p.get("title"),
+                        "locality": p.get("locality") or "",
+                        "province": p.get("province") or "",
+                        "property_type": "SUELO URBANIZABLE",
+                        "strategy": "LAND_DEVELOPMENT",
+                        "pgou_title": p.get("title"),
+                        "pgou_uplift": p.get("density_uplift") or "x2.00",
+                        "boe_url": p.get("bulletin_url") or "https://www.bocm.es",
+                        "primary_portal": "BOCM / Boletín Oficial"
+                    }
+                    break
 
         return results
 
@@ -255,7 +303,12 @@ class RealEstateAlertEngine:
                     if uplift:
                         extra_info += f" ({uplift.split()[0]})"
 
-                lines.append(f"{icon} *{key}:* [{safe_text}]({deep_link}){extra_info}")
+                # Enlace directo contrastado al portal inmobiliario (Idealista, Fotocasa, BOE...)
+                portal_url = opp.get("portal_url") or opp.get("boe_url")
+                portal_name = opp.get("primary_portal") or ("Idealista" if "idealista" in str(portal_url).lower() else "Portal")
+                direct_portal_badge = f" • [{portal_name} ↗]({portal_url})" if portal_url else ""
+
+                lines.append(f"{icon} *{key}:* [{safe_text}]({deep_link}){extra_info}{direct_portal_badge}")
 
         return "\n".join(lines)
 
@@ -310,7 +363,7 @@ class RealEstateAlertEngine:
         pgou_items = pgou_scraper.fetch_pgou_opportunities()
         MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
 
-        selected = self.select_top_opportunities(market_items, db=db, force_all=force_all)
+        selected = self.select_top_opportunities(market_items, pgou_items=pgou_items, db=db, force_all=force_all)
         if not selected:
             return {
                 "status": "skipped",
@@ -343,3 +396,6 @@ class RealEstateAlertEngine:
             "selected_categories": list(selected.keys()),
             "alerted_ids": alerted_ids
         }
+
+# Alias de compatibilidad
+AlertEngine = RealEstateAlertEngine

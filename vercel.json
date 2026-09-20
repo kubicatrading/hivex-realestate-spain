@@ -3,7 +3,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
-      "includeFiles": "hivex_local.db"
+      "includeFiles": "{hivex_local.db,app/data/**}"
     }
   },
   "crons": [

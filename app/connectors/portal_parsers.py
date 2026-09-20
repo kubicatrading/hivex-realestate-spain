@@ -252,6 +252,11 @@ class IdealistaMarkdownParser:
                     is_solar=is_solar
                 )
 
+                opportunity["portal_id"] = str(item_id)
+                opportunity["portal_url"] = url
+                opportunity["primary_portal"] = "Idealista"
+                opportunity["discount_percentage"] = discount_percentage if discount_percentage > 0 else discount_vs_market
+
                 opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
                 opportunity["rental_yield"] = rental_yield if not is_solar else None
                 opportunity["yield_score"] = yield_score if not is_solar else 0.0
@@ -608,6 +613,11 @@ class HabitacliaMarkdownParser:
                     rental_yield=rental_yield,
                     is_solar=is_solar
                 )
+
+                opportunity["portal_id"] = str(item_id)
+                opportunity["portal_url"] = url
+                opportunity["primary_portal"] = "Habitaclia"
+                opportunity["discount_percentage"] = discount_vs_market
 
                 opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
                 opportunity["rental_yield"] = rental_yield if not is_solar else None

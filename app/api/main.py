@@ -1585,6 +1585,28 @@ def get_opportunity_by_id(
         detail_msg += f" [Diag: {' ; '.join(errors)}]"
     raise HTTPException(status_code=404, detail=detail_msg)
 
+@app.api_route("/api/v1/market/sync", methods=["GET", "POST"])
+def sync_market_endpoint(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Sincroniza y actualiza en caliente el catálogo de oportunidades de mercado con Idealista y cruce PGOU.
+    Garantiza disponibilidad inmediata y cero datos simulados.
+    """
+    from app.connectors.market_scraper import MarketScraper
+    from app.connectors.pgou_scraper import PGOUScraper
+    pgou_scraper = PGOUScraper()
+    pgou_items = pgou_scraper.fetch_pgou_opportunities()
+    market_scraper = MarketScraper()
+    market_items = market_scraper.fetch_market_opportunities(live_scrape=False, pgou_items=pgou_items)
+    MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
+    return {
+        "status": "success",
+        "total": len(market_items),
+        "opportunities": market_items
+    }
+
 @app.get("/api/v1/streetview_photo")
 def get_streetview_photo(address: Optional[str] = Query(None), lat: Optional[float] = Query(None), lon: Optional[float] = Query(None), key: Optional[str] = Query(None)):
     """

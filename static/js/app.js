@@ -596,6 +596,12 @@ document.addEventListener('DOMContentLoaded', () => {
             synergyFilterGroup.style.display = (sourceType === 'market' || sourceType === 'subastas') ? 'flex' : 'none';
         }
 
+        // Show/hide dedicated Market sync button
+        const btnSyncMarket = document.getElementById('btn-sync-market');
+        if (btnSyncMarket) {
+            btnSyncMarket.style.display = (sourceType === 'market') ? 'inline-flex' : 'none';
+        }
+
         // Ensure Leaflet map recalculates its dimensions and renders tiles crisply
         if (typeof map !== 'undefined' && map) {
             setTimeout(() => {
@@ -640,6 +646,45 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`⚖️ Edictos y Registros: Mostrando ${currentCount} herencias y procedimientos de proindiviso`, 'info');
         } else if (sourceType === 'market') {
             showToast(`🏪 Market: Mostrando ${currentCount} oportunidades en portales inmobiliarios (menor precio garantizado y cruce PGOU)`, 'success');
+        }
+    };
+
+    // Sincronización dedicada e instantánea de la pestaña Market
+    window.syncMarketOpportunities = async function() {
+        const btn = document.getElementById('btn-sync-market');
+        const txt = document.getElementById('text-sync-market');
+        if (btn) {
+            btn.disabled = true;
+            if (txt) txt.textContent = 'Sincronizando...';
+        }
+        showToast('🏪 Sincronizando oportunidades de Market (Idealista/Fotocasa/PGOU)...', 'info');
+        try {
+            const res = await fetch('/api/v1/market/sync', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const mktItems = data.opportunities || data.items || [];
+                // Reemplazar los inmuebles de market preservando subastas y pgou
+                const nonMarket = state.allOpportunities.filter(o => o.source_type !== 'market');
+                state.allOpportunities = [...nonMarket, ...mktItems];
+                updateTabBadges(state.allOpportunities);
+                updateKPIs(state.allOpportunities);
+                applyFilters();
+                showToast(`✅ Sincronización completada: ${mktItems.length} inmuebles reales de Market actualizados.`, 'success');
+            } else {
+                throw new Error('Error en sincronización');
+            }
+        } catch (err) {
+            console.error('Error sincronizando Market:', err);
+            showToast('Actualizando datos de mercado...', 'info');
+            await fetchOpportunities(true);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                if (txt) txt.textContent = 'Sincronizar Market';
+            }
         }
     };
 
@@ -726,20 +771,110 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Helper function to return Street View static facade photo
-    function getOpportunityMainImage(opp) {
-        if (opp.images && opp.images.length > 0) {
-            const realPhoto = opp.images.find(img => img && typeof img === 'string' && !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
-            if (realPhoto) {
-                return { url: realPhoto, isMap: false };
+    // Helper function to return verified photo list or Street View static facade photo
+    function getOpportunityImagesList(opp) {
+        if (opp.images && Array.isArray(opp.images) && opp.images.length > 0) {
+            const valid = opp.images.filter(img => img && typeof img === 'string' && !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
+            if (valid.length > 0) {
+                return valid;
             }
         }
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
         const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
-        return {
-            url: `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`,
-            isMap: false
-        };
+        return [`https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`];
+    }
+
+    // Helper function to return Street View or main facade photo
+    function getOpportunityMainImage(opp) {
+        const imgs = getOpportunityImagesList(opp);
+        return { url: imgs[0], isMap: false };
+    }
+
+    // Global Carousel Handlers for Cards
+    window.cardCarouselState = window.cardCarouselState || {};
+
+    window.cardCarouselNav = function(event, idx, dir) {
+        if (event) {
+            event.stopPropagation();
+            event.preventDefault();
+        }
+        const opps = window._lastOpportunities || [];
+        const opp = opps[idx];
+        if (!opp) return;
+        const imgs = getOpportunityImagesList(opp);
+        if (imgs.length <= 1) return;
+
+        let cur = window.cardCarouselState[idx] || 0;
+        cur = (cur + dir + imgs.length) % imgs.length;
+        window.cardCarouselState[idx] = cur;
+
+        const imgEl = document.getElementById(`card-carousel-img-${idx}`);
+        const numEl = document.getElementById(`card-carousel-num-${idx}`);
+        if (imgEl) {
+            imgEl.style.backgroundImage = `url('${imgs[cur]}')`;
+        }
+        if (numEl) {
+            numEl.textContent = cur + 1;
+        }
+    };
+
+    // Global Modal Gallery Handlers
+    window.modalGalleryState = {
+        images: [],
+        currentIndex: 0,
+        portal: 'Idealista'
+    };
+
+    window.modalGalleryNav = function(dir) {
+        if (!window.modalGalleryState || !window.modalGalleryState.images || window.modalGalleryState.images.length <= 1) return;
+        const len = window.modalGalleryState.images.length;
+        let nextIdx = (window.modalGalleryState.currentIndex + dir + len) % len;
+        window.modalGalleryGoTo(nextIdx);
+    };
+
+    window.modalGalleryGoTo = function(targetIdx) {
+        if (!window.modalGalleryState || !window.modalGalleryState.images) return;
+        const images = window.modalGalleryState.images;
+        if (targetIdx < 0 || targetIdx >= images.length) return;
+        window.modalGalleryState.currentIndex = targetIdx;
+
+        const mainImg = document.getElementById('modal-gallery-active-img');
+        const numEl = document.getElementById('modal-gallery-cur-num');
+        if (mainImg) {
+            mainImg.style.opacity = '0.3';
+            setTimeout(() => {
+                mainImg.src = images[targetIdx];
+                mainImg.style.opacity = '1';
+            }, 80);
+        }
+        if (numEl) {
+            numEl.textContent = targetIdx + 1;
+        }
+
+        // Highlight active thumbnail and scroll into view
+        document.querySelectorAll('.gallery-thumb-item').forEach((el, i) => {
+            if (i === targetIdx) {
+                el.classList.add('active');
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            } else {
+                el.classList.remove('active');
+            }
+        });
+    };
+
+    // Keyboard navigation listener (Left / Right arrows)
+    if (!window._modalGalleryKeyAttached) {
+        window._modalGalleryKeyAttached = true;
+        window.addEventListener('keydown', (e) => {
+            const modal = document.getElementById('property-detail-modal');
+            if (modal && modal.style.display !== 'none' && !modal.classList.contains('hidden')) {
+                if (e.key === 'ArrowLeft') {
+                    window.modalGalleryNav(-1);
+                } else if (e.key === 'ArrowRight') {
+                    window.modalGalleryNav(1);
+                }
+            }
+        });
     }
 
     // Render Opportunity Cards Feed
@@ -780,9 +915,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const subastaBadgeBg = isFlipping ? '#e11d48' : '#d97706';
             
-            const imgInfo = getOpportunityMainImage(opp);
-            const mainImg = imgInfo.url;
-            const imgCount = opp.images ? opp.images.length : 0;
+            const oppImages = getOpportunityImagesList(opp);
+            const mainImg = oppImages[0];
+            const imgCount = oppImages.length;
             const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
             const refVal = (opp.source_type === 'pgou' || opp.source_type === 'edictos')
                 ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
@@ -1003,8 +1138,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
                 <div class="deal-card ${opp.is_new ? 'deal-card-new' : ''}" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
-                    <div class="card-image-banner" style="background-image: url('${mainImg}'); position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background-size: cover; background-position: center;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
-                        <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;">
+                    <div class="card-image-banner" id="card-carousel-${idx}" style="position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background: #020617;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
+                        <div class="card-carousel-img" id="card-carousel-img-${idx}" style="position: absolute; inset: 0; background-image: url('${mainImg}'); background-size: cover; background-position: center; transition: background-image 0.25s ease;"></div>
+                        ${imgCount > 1 ? `
+                            <button type="button" class="card-carousel-btn card-carousel-prev" onclick="window.cardCarouselNav(event, ${idx}, -1)" title="Foto anterior" aria-label="Foto anterior">
+                                <i data-lucide="chevron-left"></i>
+                            </button>
+                            <button type="button" class="card-carousel-btn card-carousel-next" onclick="window.cardCarouselNav(event, ${idx}, 1)" title="Foto siguiente" aria-label="Foto siguiente">
+                                <i data-lucide="chevron-right"></i>
+                            </button>
+                            <div class="card-carousel-counter" id="card-carousel-counter-${idx}">
+                                <i data-lucide="camera" style="width: 11px; height: 11px;"></i> <span id="card-carousel-num-${idx}">1</span>/${imgCount}
+                            </div>
+                        ` : ''}
+                        <div class="card-image-overlay" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, transparent 60%); display: flex; justify-content: space-between; align-items: flex-start; padding: 10px; pointer-events: none;">
                             ${opp.source_type === 'pgou' ? `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: #9333ea; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">📐 DESARROLLO SUELO</span>
@@ -1703,13 +1850,53 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
+        const modalImages = getOpportunityImagesList(opp);
+        window.modalGalleryState = {
+            images: modalImages,
+            currentIndex: 0,
+            portal: opp.primary_portal || 'Idealista'
+        };
+
+        const modalGalleryHtml = `
+            <div class="modal-media-wrapper modal-gallery-box" style="margin-bottom: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); padding: 12px; position: relative;">
+                <div class="modal-gallery-main" id="modal-gallery-main-view">
+                    <img id="modal-gallery-active-img" src="${modalImages[0]}" alt="${escapeHtml(opp.title)}">
+                    
+                    ${modalImages.length > 1 ? `
+                        <button type="button" class="modal-gallery-btn modal-gallery-prev" onclick="window.modalGalleryNav(-1)" title="Foto anterior (←)" aria-label="Foto anterior">
+                            <i data-lucide="chevron-left"></i>
+                        </button>
+                        <button type="button" class="modal-gallery-btn modal-gallery-next" onclick="window.modalGalleryNav(1)" title="Foto siguiente (→)" aria-label="Foto siguiente">
+                            <i data-lucide="chevron-right"></i>
+                        </button>
+                        <div class="modal-gallery-counter-badge" id="modal-gallery-counter">
+                            <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
+                            <span>Foto <strong id="modal-gallery-cur-num">1</strong> de ${modalImages.length}</span>
+                            <span style="opacity: 0.6; margin-left: 6px;">• Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                        </div>
+                    ` : `
+                        <div class="modal-gallery-counter-badge">
+                            <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
+                            <span>Foto 1 de 1 • Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                        </div>
+                    `}
+                </div>
+
+                ${modalImages.length > 1 ? `
+                    <div class="modal-gallery-thumbnails" id="modal-gallery-thumbs">
+                        ${modalImages.map((imgUrl, thumbIdx) => `
+                            <div class="gallery-thumb-item ${thumbIdx === 0 ? 'active' : ''}" id="gallery-thumb-${thumbIdx}" onclick="window.modalGalleryGoTo(${thumbIdx})" title="Ver foto ${thumbIdx + 1}">
+                                <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" alt="Miniatura ${thumbIdx + 1}">
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
         body.innerHTML = `
             <div class="modal-prop-container">
-                <div class="modal-media-wrapper" style="margin-bottom: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); padding: 12px;">
-                    <div style="width: 100%; height: 320px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); position: relative; background: #020617;">
-                        <img src="${getOpportunityMainImage(opp).url}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
-                    </div>
-                </div>
+                ${modalGalleryHtml}
 
                 <div class="modal-prop-header">
                     <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -1812,6 +1999,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (window.lucide) lucide.createIcons();
         modal.classList.remove('hidden');
+
+        // Soporte de navegación táctil (swipe) para smartphones y tablets
+        const mainViewEl = document.getElementById('modal-gallery-main-view');
+        if (mainViewEl) {
+            let touchStartX = 0;
+            let touchEndX = 0;
+            mainViewEl.addEventListener('touchstart', (e) => {
+                if (e.changedTouches && e.changedTouches[0]) {
+                    touchStartX = e.changedTouches[0].screenX;
+                }
+            }, { passive: true });
+            mainViewEl.addEventListener('touchend', (e) => {
+                if (e.changedTouches && e.changedTouches[0]) {
+                    touchEndX = e.changedTouches[0].screenX;
+                    if (touchEndX < touchStartX - 40) {
+                        window.modalGalleryNav(1); // Deslizar izquierda -> siguiente
+                    } else if (touchEndX > touchStartX + 40) {
+                        window.modalGalleryNav(-1); // Deslizar derecha -> anterior
+                    }
+                }
+            }, { passive: true });
+        }
     };
 
     window.closePropertyDetailModal = function() {
@@ -2423,7 +2632,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnRunPipeline.disabled = true;
             document.getElementById('text-run').textContent = 'Escaneando...';
 
-            showToast('🔍 Escáner activado. Sincronizando Subastas BOE y Desarrollos PGOU con la base de datos...', 'info');
+            showToast('🔍 Escáner activado. Sincronizando Subastas BOE, Desarrollos PGOU y Oportunidades de Mercado...', 'info');
 
             // 1. Lanzar la sincronización garantizada en el servidor
             const res = await fetch('/api/v1/pipeline/run?sync=true', {
@@ -2438,9 +2647,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!res.ok) throw new Error('Error durante el escaneado');
             const data = await res.json();
-            const count = data?.result?.raw_auctions_processed || 'varias';
+            const subCount = data?.result?.raw_auctions_processed || 'varias';
+            const mktCount = data?.result?.market_total || 0;
+            const newMkt = data?.result?.new_market_detected || 0;
 
-            showToast(`✅ Escáner completado con éxito (${count} subastas analizadas). Oportunidades sincronizadas y actualizadas.`, 'success');
+            showToast(`✅ Escáner completado: ${subCount} subastas y ${mktCount} oportunidades de Mercado (${newMkt} novedades) sincronizadas.`, 'success');
 
             // 2. Refrescar datos en el mapa y listado
             await fetchOpportunities(true);
