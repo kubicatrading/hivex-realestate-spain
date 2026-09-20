@@ -39,10 +39,20 @@ class SupadataClient:
         
         # Directorio de caché local para no consumir créditos en peticiones idénticas
         if cache_dir is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            cache_dir = os.path.join(base_dir, "data", "cache_supadata")
+            if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+                cache_dir = os.path.join("/tmp", "cache_supadata")
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                cache_dir = os.path.join(base_dir, "data", "cache_supadata")
         self.cache_dir = cache_dir
-        os.makedirs(self.cache_dir, exist_ok=True)
+        try:
+            os.makedirs(self.cache_dir, exist_ok=True)
+        except OSError:
+            self.cache_dir = os.path.join("/tmp", "cache_supadata")
+            try:
+                os.makedirs(self.cache_dir, exist_ok=True)
+            except Exception:
+                pass
 
     def _get_cache_path(self, url: str) -> str:
         url_hash = hashlib.md5(url.encode("utf-8")).hexdigest()

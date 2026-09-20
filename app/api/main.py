@@ -355,7 +355,7 @@ def health_check(db: Session = Depends(get_db)):
 
     return {
         "status": "online",
-        "version": "v3.2.1-telegram-modal",
+        "version": "v3.2.2-telegram-modal",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENV,
         "database": {
@@ -1529,11 +1529,14 @@ def get_opportunity_by_id(
     # 5. Búsqueda en Subastas BOE en Base de Datos
     try:
         from sqlalchemy.orm import joinedload
+        from sqlalchemy import or_
+        filters = [Auction.id_subasta == clean_id]
+        if clean_id.isdigit():
+            filters.append(Opportunity.id == int(clean_id))
         opp = db.query(Opportunity).options(
             joinedload(Opportunity.auction).joinedload(Auction.parcel)
         ).outerjoin(Auction).filter(
-            (Opportunity.id == int(clean_id) if clean_id.isdigit() else False) |
-            (Auction.id_subasta == clean_id)
+            or_(*filters)
         ).first()
 
         if opp:
