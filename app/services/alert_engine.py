@@ -43,7 +43,7 @@ class RealEstateAlertEngine:
         self.bot_token = bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", None) or os.environ.get("TELEGRAM_BOT_TOKEN", "8889706886:AAGu97kanMwK9L3d5_7yGXQR-d5ojfYRUHs")
         raw_chat_id = chat_id or getattr(settings, "TELEGRAM_CHAT_ID", None) or os.environ.get("TELEGRAM_CHAT_ID", "-1003904392737")
         self.chat_id = self._normalize_chat_id(str(raw_chat_id))
-        self.base_url = (base_url or getattr(settings, "PLATFORM_BASE_URL", None) or os.environ.get("PLATFORM_BASE_URL", "https://hivex-backend-realestate.vercel.app")).rstrip("/")
+        self.base_url = (base_url or getattr(settings, "PLATFORM_BASE_URL", None) or os.environ.get("PLATFORM_BASE_URL", "https://hivex-realestate-spain.vercel.app")).rstrip("/")
 
     @staticmethod
     def _normalize_chat_id(chat_id: str) -> str:
