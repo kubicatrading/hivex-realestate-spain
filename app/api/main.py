@@ -1481,20 +1481,29 @@ def get_opportunity_by_id(
     """
     clean_id = opp_id.strip()
 
-    # 1. Búsqueda en Oportunidades de Mercado
+    # 1. Búsqueda directa en catálogo verificado de mercado (inmediata, sin llamadas externas)
     try:
         from app.connectors.market_scraper import MarketScraper
-        from app.connectors.pgou_scraper import PGOUScraper
         ms = MarketScraper()
-        pgou_items = PGOUScraper().fetch_pgou_opportunities()
-        m_items = ms.fetch_market_opportunities(pgou_items=pgou_items, live_scrape=False)
+        catalog = ms._build_verified_market_catalog()
+        for raw in catalog:
+            if str(raw.get("id")) == clean_id:
+                return ms._process_market_listing(dict(raw))
+    except Exception as e_cat:
+        print(f"Error en catálogo de mercado para ID {clean_id}: {e_cat}")
+
+    # 2. Búsqueda en Oportunidades de Mercado completas
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        ms = MarketScraper()
+        m_items = ms.fetch_market_opportunities(live_scrape=False)
         for m in m_items:
             if str(m.get("id")) == clean_id:
                 return m
     except Exception as e_m:
         print(f"Error buscando en market por ID {clean_id}: {e_m}")
 
-    # 2. Búsqueda en Desarrollos PGOU
+    # 3. Búsqueda en Desarrollos PGOU
     try:
         from app.connectors.pgou_scraper import PGOUScraper
         p_items = PGOUScraper().fetch_pgou_opportunities()
@@ -1504,7 +1513,7 @@ def get_opportunity_by_id(
     except Exception as e_p:
         print(f"Error buscando en PGOU por ID {clean_id}: {e_p}")
 
-    # 3. Búsqueda en Edictos Judiciales
+    # 4. Búsqueda en Edictos Judiciales
     try:
         from app.connectors.edictos_scraper import EdictosScraper
         e_items = EdictosScraper().fetch_edictos_opportunities()

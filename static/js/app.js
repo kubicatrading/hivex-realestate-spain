@@ -135,6 +135,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const opp = await res.json();
                 if (opp && (opp.id || opp.title)) {
+                    const loginOverlay = document.getElementById('login-overlay');
+                    if (loginOverlay) loginOverlay.classList.add('hidden');
                     window.openPropertyDetailModal(opp);
                 }
             }

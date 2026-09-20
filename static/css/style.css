@@ -1661,6 +1661,11 @@ body {
    (La plataforma general es de escritorio; solo la ficha se adapta para Telegram)
    ========================================================================== */
 
+/* MODAL DETALLE DE PROPIEDAD SIEMPRE POR ENCIMA DE CUALQUIER OVERLAY */
+#modal-property-detail {
+    z-index: 20000 !important;
+}
+
 /* IPAD Y TABLETS (<= 1024px) */
 @media screen and (max-width: 1024px) {
     #modal-property-detail {
