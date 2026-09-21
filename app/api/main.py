@@ -1587,6 +1587,7 @@ def get_opportunity_by_id(
 
 @app.api_route("/api/v1/market/sync", methods=["GET", "POST"])
 def sync_market_endpoint(
+    live: bool = Query(False, description="Ejecutar raspado en vivo multiciudad dentro de la ventana de 300s"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -1599,7 +1600,7 @@ def sync_market_endpoint(
     pgou_scraper = PGOUScraper()
     pgou_items = pgou_scraper.fetch_pgou_opportunities()
     market_scraper = MarketScraper()
-    market_items = market_scraper.fetch_market_opportunities(live_scrape=False, pgou_items=pgou_items)
+    market_items = market_scraper.fetch_market_opportunities(live_scrape=live, pgou_items=pgou_items)
     MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
     return {
         "status": "success",

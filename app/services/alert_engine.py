@@ -156,7 +156,7 @@ class RealEstateAlertEngine:
                 results["House Flipping"] = c
                 break
 
-        # 4. 2.4. Mejor oportunidad solar en precio (Market o Subasta BOE de suelo)
+        # 4. 2.4. Mejor oportunidad solar / suelo en Market (o activo con mayor potencial de transformación)
         solar_candidates = [
             it for it in market_items
             if it.get("strategy") == "LAND_DEVELOPMENT"
@@ -170,41 +170,30 @@ class RealEstateAlertEngine:
             ),
             reverse=True
         )
+        assigned_ids = {v.get("id") for v in results.values() if v.get("id")}
         for c in solar_candidates:
-            if force_all or c["id"] not in already_alerted_ids:
+            if (force_all or c["id"] not in already_alerted_ids) and c["id"] not in assigned_ids:
                 results["Solar"] = c
                 break
 
+        # Si aún no hay solares específicos en Market, seleccionar el siguiente activo de mayor descuento en Market
         if "Solar" not in results:
-            try:
-                from app.db.session import SessionLocal
-                from app.db.models import Opportunity as DBOpp, Auction as DBAuc
-                _db = db or SessionLocal()
-                db_solar = _db.query(DBOpp).join(DBAuc).filter(
-                    DBOpp.strategy == 'LAND_DEVELOPMENT',
-                    DBOpp.discount_percentage > 0.15
-                ).order_by(DBOpp.overall_score.desc(), DBOpp.discount_percentage.desc()).first()
-                if db_solar and db_solar.auction:
-                    auc = db_solar.auction
-                    sub_clean_id = auc.id_subasta if str(auc.id_subasta).startswith("SUB-") else f"SUB-{auc.id_subasta}"
-                    results["Solar"] = {
-                        "id": sub_clean_id,
-                        "title": f"Suelo/Solar en {auc.locality or auc.province}",
-                        "address": auc.address or f"Finca en {auc.province}",
-                        "locality": auc.locality or "",
-                        "province": auc.province or "",
-                        "property_type": "SOLAR",
-                        "strategy": "LAND_DEVELOPMENT",
-                        "surface_m2": float(auc.parcel.surface_m2) if auc.parcel and auc.parcel.surface_m2 else None,
-                        "discount_percentage": float(db_solar.discount_percentage * 100.0) if db_solar.discount_percentage <= 1.0 else float(db_solar.discount_percentage),
-                        "property_m2_price": round(float(auc.appraisal_value or db_solar.estimated_reference_value or 0) / float(auc.parcel.surface_m2), 2) if auc.parcel and auc.parcel.surface_m2 and float(auc.parcel.surface_m2) > 0 else None,
-                        "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
-                        "primary_portal": "BOE"
-                    }
-            except Exception as e_sol:
-                logger.warning(f"Aviso consultando solar en DB: {e_sol}")
+            market_high_discount = [
+                it for it in market_items
+                if it.get("id") not in assigned_ids
+            ]
+            market_high_discount.sort(
+                key=lambda x: (x.get("discount_percentage") or x.get("discount_vs_market") or 0.0, x.get("overall_score") or 0.0),
+                reverse=True
+            )
+            for c in market_high_discount:
+                if force_all or c["id"] not in already_alerted_ids:
+                    results["Solar"] = c
+                    break
 
-        # 5. 2.5. Mejor oportunidad solar con sinergia PGOU (Market o Sector PGOU)
+        # 5. 2.5. Oportunidad con Sinergia PGOU en Market (Solar o Inmueble en zona de desarrollo PGOU)
+        # REGLA DE ORO HIVEX: Siempre circunscrito a la pestaña Market, NUNCA a planeamientos urbanísticos de la pestaña PGOU
+        assigned_ids = {v.get("id") for v in results.values() if v.get("id")}
         solar_pgou_candidates = [
             it for it in market_items
             if it.get("has_pgou_synergy")
@@ -212,32 +201,31 @@ class RealEstateAlertEngine:
                 it.get("strategy") == "LAND_DEVELOPMENT"
                 or any(k in (it.get("property_type") or "").lower() for k in ["solar", "terreno", "suelo", "parcela"])
             )
+            and it.get("id") not in assigned_ids
         ]
         solar_pgou_candidates.sort(
             key=lambda x: (x.get("overall_score") or 0.0, x.get("discount_percentage") or 0.0),
             reverse=True
         )
         for c in solar_pgou_candidates:
-            if force_all or c["id"] not in already_alerted_ids:
+            if (force_all or c["id"] not in already_alerted_ids) and c["id"] not in assigned_ids:
                 results["Solar PGOU"] = c
                 break
 
-        if "Solar PGOU" not in results and pgou_items:
-            for p in pgou_items:
-                if force_all or p["id"] not in already_alerted_ids:
-                    results["Solar PGOU"] = {
-                        "id": p["id"],
-                        "title": p.get("title") or "Sector Urbanístico PGOU",
-                        "address": p.get("address") or p.get("title"),
-                        "locality": p.get("locality") or "",
-                        "province": p.get("province") or "",
-                        "property_type": "SUELO URBANIZABLE",
-                        "strategy": "LAND_DEVELOPMENT",
-                        "pgou_title": p.get("title"),
-                        "pgou_uplift": p.get("density_uplift") or "x2.00",
-                        "boe_url": p.get("bulletin_url") or "https://www.bocm.es",
-                        "primary_portal": "BOCM / Boletín Oficial"
-                    }
+        # Si no hay un solar con sinergia PGOU en Market, seleccionar el siguiente inmueble de Market con sinergia PGOU
+        if "Solar PGOU" not in results:
+            other_pgou_candidates = [
+                it for it in market_items
+                if it.get("has_pgou_synergy")
+                and it.get("id") not in assigned_ids
+            ]
+            other_pgou_candidates.sort(
+                key=lambda x: (x.get("overall_score") or 0.0, x.get("discount_vs_market") or 0.0),
+                reverse=True
+            )
+            for c in other_pgou_candidates:
+                if (force_all or c["id"] not in already_alerted_ids) and c["id"] not in assigned_ids:
+                    results["Solar PGOU"] = c
                     break
 
         return results

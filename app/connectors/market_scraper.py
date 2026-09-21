@@ -296,19 +296,19 @@ class MarketScraper:
             return results
 
         # MATRIZ NACIONAL HIVEX: EXACTAMENTE 40 PÁGINAS (40 CRÉDITOS / DÍA = 1.200 CRÉDITOS / MES)
-        # 1. Mercados Grandes: 4 páginas cada uno (8 páginas)
+        # 1. Mercados Grandes: 4 páginas cada uno (8 páginas: 3 residenciales + 1 de solares/terrenos)
         tier_1 = {
             "madrid": [
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-2.htm", "Madrid", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-3.htm", "Madrid", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-4.htm", "Madrid", "idealista"),
+                ("https://www.idealista.com/venta-terrenos/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
             ],
             "barcelona": [
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-2.htm", "Barcelona", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-3.htm", "Barcelona", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-4.htm", "Barcelona", "idealista"),
+                ("https://www.idealista.com/venta-terrenos/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
             ],
         }
 
@@ -362,20 +362,19 @@ class MarketScraper:
 
         targets = []
         if province:
-            p_clean = province.strip().lower()
-            all_tiers = {**tier_1, **tier_2, **tier_3}
-            for k, v in all_tiers.items():
-                if k in p_clean:
-                    targets.extend(v)
+            p_clean = province.lower().strip()
+            for t_dict in [tier_1, tier_2, tier_3]:
+                if p_clean in t_dict:
+                    targets.extend(t_dict[p_clean])
             if not targets:
                 targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
         else:
-            # En sincronizaciones automáticas, priorizar Tier 1 y Tier 2 de alta liquidez para respetar ventanas serverless
-            for t_list in list(tier_1.values()) + list(tier_2.values()):
+            # En sincronizaciones completas, procesar la matriz completa (Tier 1, Tier 2 y Tier 3 = 40 páginas)
+            for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
                 targets.extend(t_list)
 
-        # Limitar a un máximo de 6 páginas estratégicas concurrentes para garantizar finalización < 15s
-        targets = targets[:6]
+        # Con el límite de 300s en Vercel Pro, procesamos la matriz de 40 páginas con un pool concurrente
+        targets = targets[:40]
 
         def _scrape_worker(target_info):
             url, prov_name, portal_type = target_info
@@ -400,10 +399,11 @@ class MarketScraper:
                 return []
 
         import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        # Con 6 workers concurrentes y 300s de tiempo máximo, 40 páginas toman ~35-50 segundos
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             future_to_target = {executor.submit(_scrape_worker, t): t for t in targets}
             try:
-                for future in concurrent.futures.as_completed(future_to_target, timeout=12.0):
+                for future in concurrent.futures.as_completed(future_to_target, timeout=240.0):
                     try:
                         parsed_items = future.result()
                         if parsed_items:
@@ -411,7 +411,7 @@ class MarketScraper:
                     except Exception as e_res:
                         logger.warning(f"Error en worker de scraping: {e_res}")
             except concurrent.futures.TimeoutError:
-                logger.info("[Market Live Scraper] Timeout preventivo alcanzado. Continuando con resultados disponibles.")
+                logger.info("[Market Live Scraper] Timeout preventivo (240s) alcanzado. Continuando con resultados disponibles.")
 
         # Ordenar oportunidades por new primero, luego max(score/descuento, btl) descendente
         results.sort(
