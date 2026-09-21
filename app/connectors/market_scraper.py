@@ -423,8 +423,44 @@ class MarketScraper:
             reverse=True
         )
 
+        # Persistir resultados recién extraídos en el catálogo verificado
+        if results:
+            self._save_to_verified_catalog(results)
+
         logger.info(f"[Market Live Scraper] Total de {len(results)} oportunidades en vivo extraídas y ordenadas.")
         return results
+
+    def _save_to_verified_catalog(self, new_items: List[Dict[str, Any]]) -> None:
+        """
+        Acumula de forma persistente los inmuebles reales recién extraídos en el catálogo de mercado.
+        """
+        if not new_items:
+            return
+        import json
+        from pathlib import Path
+        existing_items = self._build_verified_market_catalog()
+        existing_map = {}
+        for it in existing_items:
+            key = it.get("portal_url") or it.get("portal_id") or it.get("id")
+            if key:
+                existing_map[key] = it
+        for it in new_items:
+            key = it.get("portal_url") or it.get("portal_id") or it.get("id")
+            if key:
+                existing_map[key] = it
+        combined = list(existing_map.values())
+        targets = [
+            Path("/tmp/verified_market_catalog.json"),
+            Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
+            Path.cwd() / "app" / "data" / "verified_market_catalog.json"
+        ]
+        for tgt in targets:
+            try:
+                tgt.parent.mkdir(parents=True, exist_ok=True)
+                with open(tgt, "w", encoding="utf-8") as f:
+                    json.dump(combined, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
     def _build_verified_market_catalog(self) -> List[Dict[str, Any]]:
         """
@@ -435,6 +471,7 @@ class MarketScraper:
         import json
         from pathlib import Path
         candidate_paths = [
+            Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
             Path.cwd() / "app" / "data" / "verified_market_catalog.json",
             Path("/var/task/app/data/verified_market_catalog.json"),
