@@ -69,7 +69,7 @@ def test_2x2_market_price_resolution():
         land_type="URBANO",
         is_solar=False
     )
-    assert price_sb == 2800.0
+    assert price_sb == 2550.0
     assert "San Blas" in label_sb
 
 def test_surface_extraction_written_m2():

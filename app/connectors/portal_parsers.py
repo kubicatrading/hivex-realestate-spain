@@ -11,59 +11,135 @@ from typing import List, Dict, Any, Optional
 from app.engine.rental_reference import RentalReferenceEngine
 from app.engine.kpi_calculator import KPICalculator
 from app.connectors.boe_scraper import BOESubastasScraper
+from app.engine.meso_market_price import (
+    resolve_meso_market_price_2x2,
+    extract_postal_code,
+    DISTRICT_NEIGHBORHOOD_TO_CP,
+    CP_DISTRICT_MARKET_2X2,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # Centroides de coordenadas y datos socioeconómicos de referencia por distrito/localidad
 DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
-    # MADRID
-    "salamanca": {"lat": 40.4297, "lon": -3.6822, "income": 58000, "m2_price": 6800.0, "growth": 1.2},
-    "goya": {"lat": 40.4245, "lon": -3.6765, "income": 56000, "m2_price": 6500.0, "growth": 1.1},
-    "recoletos": {"lat": 40.4225, "lon": -3.6885, "income": 69000, "m2_price": 8500.0, "growth": 0.9},
-    "el viso": {"lat": 40.4465, "lon": -3.6820, "income": 72000, "m2_price": 7200.0, "growth": 0.7},
-    "chamartin": {"lat": 40.4625, "lon": -3.6765, "income": 54200, "m2_price": 5400.0, "growth": 1.9},
-    "castilla": {"lat": 40.4725, "lon": -3.6845, "income": 53000, "m2_price": 5200.0, "growth": 1.8},
-    "chamberi": {"lat": 40.4350, "lon": -3.7020, "income": 58900, "m2_price": 6300.0, "growth": 0.8},
-    "trafalgar": {"lat": 40.4320, "lon": -3.7015, "income": 57000, "m2_price": 6100.0, "growth": 0.9},
-    "almagro": {"lat": 40.4310, "lon": -3.6920, "income": 64000, "m2_price": 7100.0, "growth": 0.8},
-    "centro": {"lat": 40.4180, "lon": -3.7060, "income": 42000, "m2_price": 5200.0, "growth": 1.5},
-    "malasaña": {"lat": 40.4265, "lon": -3.7045, "income": 44500, "m2_price": 5300.0, "growth": 1.6},
-    "chueca": {"lat": 40.4230, "lon": -3.6980, "income": 46000, "m2_price": 5500.0, "growth": 1.4},
-    "retiro": {"lat": 40.4110, "lon": -3.6780, "income": 53500, "m2_price": 5900.0, "growth": 1.0},
-    "ibiza": {"lat": 40.4185, "lon": -3.6760, "income": 52000, "m2_price": 5800.0, "growth": 1.0},
-    "vallecas": {"lat": 40.3850, "lon": -3.6600, "income": 28500, "m2_price": 2400.0, "growth": 3.2},
-    "ensanche de vallecas": {"lat": 40.3620, "lon": -3.6010, "income": 37200, "m2_price": 3350.0, "growth": 3.8},
-    "vicalvaro": {"lat": 40.4020, "lon": -3.6080, "income": 34500, "m2_price": 2800.0, "growth": 3.9},
-    "el cañaveral": {"lat": 40.4150, "lon": -3.5600, "income": 38000, "m2_price": 3200.0, "growth": 4.8},
-    "los berrocales": {"lat": 40.3685, "lon": -3.5890, "income": 36500, "m2_price": 3100.0, "growth": 4.5},
-    "carabanchel": {"lat": 40.3850, "lon": -3.7400, "income": 28500, "m2_price": 2750.0, "growth": 2.1},
-    "vista alegre": {"lat": 40.3885, "lon": -3.7420, "income": 29000, "m2_price": 2700.0, "growth": 2.0},
-    "tetuan": {"lat": 40.4580, "lon": -3.7020, "income": 37000, "m2_price": 4100.0, "growth": 2.2},
-    "moncloa": {"lat": 40.4350, "lon": -3.7250, "income": 51000, "m2_price": 4900.0, "growth": 1.1},
-    "fuencarral": {"lat": 40.4950, "lon": -3.7050, "income": 49000, "m2_price": 4400.0, "growth": 2.6},
-    "hortaleza": {"lat": 40.4700, "lon": -3.6550, "income": 47000, "m2_price": 4200.0, "growth": 2.1},
+    # MADRID CAPITAL Y DISTRITOS
+    "salamanca": {"lat": 40.4297, "lon": -3.6822, "income": 58000, "m2_price": 6800.0, "growth": 1.2, "cp": "28001"},
+    "goya": {"lat": 40.4245, "lon": -3.6765, "income": 56000, "m2_price": 6500.0, "growth": 1.1, "cp": "28009"},
+    "recoletos": {"lat": 40.4225, "lon": -3.6885, "income": 69000, "m2_price": 8500.0, "growth": 0.9, "cp": "28001"},
+    "castellana": {"lat": 40.4355, "lon": -3.6850, "income": 62000, "m2_price": 7200.0, "growth": 1.0, "cp": "28006"},
+    "guindalera": {"lat": 40.4360, "lon": -3.6680, "income": 48000, "m2_price": 5100.0, "growth": 1.4, "cp": "28028"},
+    "fuente del berro": {"lat": 40.4260, "lon": -3.6630, "income": 51000, "m2_price": 5400.0, "growth": 1.3, "cp": "28028"},
+    "el viso": {"lat": 40.4465, "lon": -3.6820, "income": 72000, "m2_price": 7200.0, "growth": 0.7, "cp": "28002"},
+    "chamartin": {"lat": 40.4625, "lon": -3.6765, "income": 54200, "m2_price": 5400.0, "growth": 1.9, "cp": "28036"},
+    "prosperidad": {"lat": 40.4440, "lon": -3.6730, "income": 47000, "m2_price": 4900.0, "growth": 1.5, "cp": "28002"},
+    "ciudad jardin": {"lat": 40.4500, "lon": -3.6710, "income": 49000, "m2_price": 5100.0, "growth": 1.4, "cp": "28002"},
+    "hispanoamerica": {"lat": 40.4560, "lon": -3.6780, "income": 57000, "m2_price": 5600.0, "growth": 1.2, "cp": "28016"},
+    "nueva españa": {"lat": 40.4650, "lon": -3.6790, "income": 61000, "m2_price": 5800.0, "growth": 1.1, "cp": "28036"},
+    "castilla": {"lat": 40.4725, "lon": -3.6845, "income": 53000, "m2_price": 5200.0, "growth": 1.8, "cp": "28036"},
+    "chamberi": {"lat": 40.4350, "lon": -3.7020, "income": 58900, "m2_price": 6300.0, "growth": 0.8, "cp": "28010"},
+    "trafalgar": {"lat": 40.4320, "lon": -3.7015, "income": 57000, "m2_price": 6100.0, "growth": 0.9, "cp": "28010"},
+    "almagro": {"lat": 40.4310, "lon": -3.6920, "income": 64000, "m2_price": 7100.0, "growth": 0.8, "cp": "28010"},
+    "arapiles": {"lat": 40.4340, "lon": -3.7070, "income": 55000, "m2_price": 5900.0, "growth": 0.9, "cp": "28015"},
+    "gaztambide": {"lat": 40.4360, "lon": -3.7140, "income": 54000, "m2_price": 5800.0, "growth": 0.9, "cp": "28015"},
+    "vallehermoso": {"lat": 40.4430, "lon": -3.7110, "income": 59000, "m2_price": 6200.0, "growth": 0.8, "cp": "28003"},
+    "rios rosas": {"lat": 40.4420, "lon": -3.6980, "income": 58000, "m2_price": 6100.0, "growth": 0.9, "cp": "28003"},
+    "centro": {"lat": 40.4180, "lon": -3.7060, "income": 42000, "m2_price": 5200.0, "growth": 1.5, "cp": "28012"},
+    "malasaña": {"lat": 40.4265, "lon": -3.7045, "income": 44500, "m2_price": 5300.0, "growth": 1.6, "cp": "28004"},
+    "chueca": {"lat": 40.4230, "lon": -3.6980, "income": 46000, "m2_price": 5500.0, "growth": 1.4, "cp": "28004"},
+    "palacio": {"lat": 40.4150, "lon": -3.7130, "income": 46000, "m2_price": 5400.0, "growth": 1.2, "cp": "28013"},
+    "sol": {"lat": 40.4170, "lon": -3.7035, "income": 43000, "m2_price": 5600.0, "growth": 1.3, "cp": "28013"},
+    "cortes": {"lat": 40.4140, "lon": -3.6970, "income": 48000, "m2_price": 5800.0, "growth": 1.1, "cp": "28014"},
+    "justicia": {"lat": 40.4240, "lon": -3.6960, "income": 52000, "m2_price": 6400.0, "growth": 1.2, "cp": "28004"},
+    "universidad": {"lat": 40.4270, "lon": -3.7070, "income": 44000, "m2_price": 5300.0, "growth": 1.5, "cp": "28004"},
+    "lavapies": {"lat": 40.4090, "lon": -3.7010, "income": 36000, "m2_price": 4500.0, "growth": 1.8, "cp": "28012"},
+    "embajadores": {"lat": 40.4080, "lon": -3.7020, "income": 36500, "m2_price": 4500.0, "growth": 1.8, "cp": "28012"},
+    "retiro": {"lat": 40.4110, "lon": -3.6780, "income": 53500, "m2_price": 5900.0, "growth": 1.0, "cp": "28009"},
+    "ibiza": {"lat": 40.4185, "lon": -3.6760, "income": 52000, "m2_price": 5800.0, "growth": 1.0, "cp": "28009"},
+    "pacifico": {"lat": 40.4040, "lon": -3.6780, "income": 46000, "m2_price": 4800.0, "growth": 1.4, "cp": "28007"},
+    "adelfas": {"lat": 40.3990, "lon": -3.6680, "income": 42000, "m2_price": 4400.0, "growth": 1.6, "cp": "28007"},
+    "estrella": {"lat": 40.4110, "lon": -3.6650, "income": 49000, "m2_price": 4900.0, "growth": 1.3, "cp": "28007"},
+    "vallecas": {"lat": 40.3850, "lon": -3.6600, "income": 28500, "m2_price": 2300.0, "growth": 3.2, "cp": "28018"},
+    "puente de vallecas": {"lat": 40.3850, "lon": -3.6600, "income": 28500, "m2_price": 2300.0, "growth": 3.2, "cp": "28018"},
+    "palomeras sureste": {"lat": 40.3880, "lon": -3.6380, "income": 28500, "m2_price": 2300.0, "growth": 3.2, "cp": "28018"},
+    "palomeras": {"lat": 40.3880, "lon": -3.6380, "income": 28500, "m2_price": 2300.0, "growth": 3.2, "cp": "28018"},
+    "san diego": {"lat": 40.3920, "lon": -3.6680, "income": 27000, "m2_price": 2300.0, "growth": 2.9, "cp": "28018"},
+    "entrevias": {"lat": 40.3800, "lon": -3.6700, "income": 26000, "m2_price": 2100.0, "growth": 2.8, "cp": "28018"},
+    "portazgo": {"lat": 40.3900, "lon": -3.6550, "income": 28000, "m2_price": 2300.0, "growth": 3.0, "cp": "28018"},
+    "numancia": {"lat": 40.3980, "lon": -3.6580, "income": 29000, "m2_price": 2400.0, "growth": 2.7, "cp": "28038"},
+    "santa eugenia": {"lat": 40.3840, "lon": -3.6110, "income": 34000, "m2_price": 2400.0, "growth": 2.8, "cp": "28031"},
+    "villa de vallecas": {"lat": 40.3780, "lon": -3.6180, "income": 34000, "m2_price": 2400.0, "growth": 2.8, "cp": "28031"},
+    "casco historico de vallecas": {"lat": 40.3780, "lon": -3.6180, "income": 33000, "m2_price": 2350.0, "growth": 2.8, "cp": "28031"},
+    "ensanche de vallecas": {"lat": 40.3620, "lon": -3.6010, "income": 37200, "m2_price": 3100.0, "growth": 3.8, "cp": "28051"},
+    "vicalvaro": {"lat": 40.4020, "lon": -3.6080, "income": 34500, "m2_price": 2800.0, "growth": 3.9, "cp": "28032"},
+    "el cañaveral": {"lat": 40.4150, "lon": -3.5600, "income": 38000, "m2_price": 3200.0, "growth": 4.8, "cp": "28052"},
+    "los berrocales": {"lat": 40.3685, "lon": -3.5890, "income": 36500, "m2_price": 3100.0, "growth": 4.5, "cp": "28052"},
+    "carabanchel": {"lat": 40.3850, "lon": -3.7400, "income": 28500, "m2_price": 2750.0, "growth": 2.1, "cp": "28025"},
+    "vista alegre": {"lat": 40.3885, "lon": -3.7420, "income": 29000, "m2_price": 2700.0, "growth": 2.0, "cp": "28025"},
+    "san isidro": {"lat": 40.3950, "lon": -3.7250, "income": 31000, "m2_price": 2900.0, "growth": 2.1, "cp": "28019"},
+    "opañel": {"lat": 40.3880, "lon": -3.7180, "income": 30000, "m2_price": 2800.0, "growth": 2.0, "cp": "28019"},
+    "buena vista": {"lat": 40.3720, "lon": -3.7500, "income": 29500, "m2_price": 2650.0, "growth": 2.2, "cp": "28025"},
+    "aluche": {"lat": 40.3870, "lon": -3.7650, "income": 30000, "m2_price": 2500.0, "growth": 2.2, "cp": "28024"},
+    "campamento": {"lat": 40.3950, "lon": -3.7750, "income": 31000, "m2_price": 2500.0, "growth": 2.0, "cp": "28024"},
+    "latina": {"lat": 40.4050, "lon": -3.7480, "income": 31000, "m2_price": 2650.0, "growth": 1.9, "cp": "28011"},
+    "puerta del angel": {"lat": 40.4120, "lon": -3.7310, "income": 32000, "m2_price": 2650.0, "growth": 2.0, "cp": "28011"},
+    "lucero": {"lat": 40.4050, "lon": -3.7400, "income": 30500, "m2_price": 2650.0, "growth": 2.0, "cp": "28011"},
+    "usera": {"lat": 40.3820, "lon": -3.7050, "income": 27000, "m2_price": 2250.0, "growth": 2.4, "cp": "28026"},
+    "moscardo": {"lat": 40.3890, "lon": -3.7050, "income": 27500, "m2_price": 2250.0, "growth": 2.3, "cp": "28026"},
+    "orcasitas": {"lat": 40.3700, "lon": -3.7150, "income": 25000, "m2_price": 2100.0, "growth": 2.1, "cp": "28041"},
+    "san fermin": {"lat": 40.3680, "lon": -3.6920, "income": 25500, "m2_price": 2100.0, "growth": 2.1, "cp": "28041"},
+    "villaverde": {"lat": 40.3450, "lon": -3.7100, "income": 26000, "m2_price": 1950.0, "growth": 2.1, "cp": "28021"},
+    "san cristobal": {"lat": 40.3410, "lon": -3.6920, "income": 23000, "m2_price": 1750.0, "growth": 2.0, "cp": "28021"},
+    "butarque": {"lat": 40.3380, "lon": -3.6820, "income": 29000, "m2_price": 2100.0, "growth": 3.0, "cp": "28021"},
+    "villaverde alto": {"lat": 40.3450, "lon": -3.7150, "income": 25500, "m2_price": 1950.0, "growth": 2.0, "cp": "28021"},
+    "villaverde bajo": {"lat": 40.3520, "lon": -3.6950, "income": 26500, "m2_price": 2000.0, "growth": 2.1, "cp": "28021"},
+    "san blas": {"lat": 40.4350, "lon": -3.6180, "income": 32000, "m2_price": 2550.0, "growth": 2.5, "cp": "28037"},
+    "simancas": {"lat": 40.4300, "lon": -3.6260, "income": 31000, "m2_price": 2550.0, "growth": 2.5, "cp": "28037"},
+    "canillejas": {"lat": 40.4420, "lon": -3.6050, "income": 33000, "m2_price": 2700.0, "growth": 2.4, "cp": "28022"},
+    "moratalaz": {"lat": 40.4070, "lon": -3.6450, "income": 34000, "m2_price": 2750.0, "growth": 1.8, "cp": "28030"},
+    "ciudad lineal": {"lat": 40.4450, "lon": -3.6520, "income": 38000, "m2_price": 3100.0, "growth": 1.7, "cp": "28017"},
+    "ventas": {"lat": 40.4310, "lon": -3.6590, "income": 37000, "m2_price": 3100.0, "growth": 1.7, "cp": "28017"},
+    "pueblo nuevo": {"lat": 40.4320, "lon": -3.6420, "income": 33000, "m2_price": 2850.0, "growth": 1.8, "cp": "28017"},
+    "quintana": {"lat": 40.4360, "lon": -3.6490, "income": 35000, "m2_price": 3000.0, "growth": 1.7, "cp": "28027"},
+    "concepcion": {"lat": 40.4410, "lon": -3.6520, "income": 36000, "m2_price": 3050.0, "growth": 1.6, "cp": "28027"},
+    "barajas": {"lat": 40.4730, "lon": -3.5800, "income": 41000, "m2_price": 3400.0, "growth": 2.0, "cp": "28042"},
+    "alameda de osuna": {"lat": 40.4570, "lon": -3.5880, "income": 45000, "m2_price": 3600.0, "growth": 1.8, "cp": "28042"},
+    "arganzuela": {"lat": 40.3990, "lon": -3.6980, "income": 46000, "m2_price": 4400.0, "growth": 2.1, "cp": "28045"},
+    "delicias": {"lat": 40.4010, "lon": -3.6920, "income": 45000, "m2_price": 4400.0, "growth": 2.0, "cp": "28045"},
+    "legazpi": {"lat": 40.3910, "lon": -3.6960, "income": 44000, "m2_price": 4400.0, "growth": 2.2, "cp": "28045"},
+    "tetuan": {"lat": 40.4580, "lon": -3.7020, "income": 37000, "m2_price": 4100.0, "growth": 2.2, "cp": "28020"},
+    "cuatro caminos": {"lat": 40.4490, "lon": -3.7020, "income": 39000, "m2_price": 4300.0, "growth": 2.0, "cp": "28020"},
+    "moncloa": {"lat": 40.4350, "lon": -3.7250, "income": 51000, "m2_price": 4900.0, "growth": 1.1, "cp": "28008"},
+    "fuencarral": {"lat": 40.4950, "lon": -3.7050, "income": 49000, "m2_price": 4400.0, "growth": 2.6, "cp": "28034"},
+    "hortaleza": {"lat": 40.4700, "lon": -3.6550, "income": 47000, "m2_price": 4200.0, "growth": 2.1, "cp": "28043"},
 
     # BARCELONA
-    "eixample": {"lat": 41.3880, "lon": 2.1620, "income": 49800, "m2_price": 5100.0, "growth": 0.6},
-    "gracia": {"lat": 41.4030, "lon": 2.1580, "income": 44100, "m2_price": 4900.0, "growth": 1.1},
-    "poblenou": {"lat": 41.4020, "lon": 2.2020, "income": 48200, "m2_price": 4600.0, "growth": 2.9},
-    "sant marti": {"lat": 41.4150, "lon": 2.2000, "income": 42000, "m2_price": 4100.0, "growth": 2.4},
-    "sarria": {"lat": 41.4010, "lon": 2.1220, "income": 68000, "m2_price": 6200.0, "growth": 0.5},
-    "ciutat vella": {"lat": 41.3820, "lon": 2.1750, "income": 33000, "m2_price": 4400.0, "growth": 1.2},
-    "sants": {"lat": 41.3750, "lon": 2.1380, "income": 38500, "m2_price": 3800.0, "growth": 1.4},
+    "eixample": {"lat": 41.3880, "lon": 2.1620, "income": 49800, "m2_price": 5100.0, "growth": 0.6, "cp": "08007"},
+    "gracia": {"lat": 41.4030, "lon": 2.1580, "income": 44100, "m2_price": 4900.0, "growth": 1.1, "cp": "08012"},
+    "poblenou": {"lat": 41.4020, "lon": 2.2020, "income": 48200, "m2_price": 4600.0, "growth": 2.9, "cp": "08005"},
+    "sant marti": {"lat": 41.4150, "lon": 2.2000, "income": 42000, "m2_price": 4100.0, "growth": 2.4, "cp": "08020"},
+    "sarria": {"lat": 41.4010, "lon": 2.1220, "income": 68000, "m2_price": 6200.0, "growth": 0.5, "cp": "08017"},
+    "ciutat vella": {"lat": 41.3820, "lon": 2.1750, "income": 33000, "m2_price": 4400.0, "growth": 1.2, "cp": "08001"},
+    "sants": {"lat": 41.3750, "lon": 2.1380, "income": 38500, "m2_price": 3800.0, "growth": 1.4, "cp": "08014"},
+    "les corts": {"lat": 41.3850, "lon": 2.1280, "income": 56000, "m2_price": 5300.0, "growth": 0.8, "cp": "08028"},
+    "sant andreu": {"lat": 41.4350, "lon": 2.1900, "income": 35000, "m2_price": 3300.0, "growth": 1.5, "cp": "08030"},
+    "nou barris": {"lat": 41.4420, "lon": 2.1750, "income": 27000, "m2_price": 2700.0, "growth": 1.8, "cp": "08031"},
+    "horta": {"lat": 41.4310, "lon": 2.1550, "income": 36000, "m2_price": 3400.0, "growth": 1.3, "cp": "08032"},
 
     # VALENCIA
-    "ruzafa": {"lat": 41.4625, "lon": -0.3735, "income": 38900, "m2_price": 3600.0, "growth": 1.7},
-    "el grau": {"lat": 39.4605, "lon": -0.3370, "income": 33400, "m2_price": 2950.0, "growth": 3.4},
-    "ciutat vella valencia": {"lat": 39.4750, "lon": -0.3780, "income": 41000, "m2_price": 3700.0, "growth": 1.2},
-    "campanar": {"lat": 39.4830, "lon": -0.3950, "income": 36000, "m2_price": 2800.0, "growth": 2.2},
+    "ruzafa": {"lat": 39.4625, "lon": -0.3735, "income": 38900, "m2_price": 3600.0, "growth": 1.7, "cp": "46006"},
+    "el grau": {"lat": 39.4605, "lon": -0.3370, "income": 33400, "m2_price": 2950.0, "growth": 3.4, "cp": "46024"},
+    "ciutat vella valencia": {"lat": 39.4750, "lon": -0.3780, "income": 41000, "m2_price": 3700.0, "growth": 1.2, "cp": "46001"},
+    "campanar": {"lat": 39.4830, "lon": -0.3950, "income": 36000, "m2_price": 2800.0, "growth": 2.2, "cp": "46015"},
+    "benimaclet": {"lat": 39.4870, "lon": -0.3580, "income": 35000, "m2_price": 2850.0, "growth": 2.0, "cp": "46020"},
+    "patraix": {"lat": 39.4610, "lon": -0.3950, "income": 31000, "m2_price": 2300.0, "growth": 2.1, "cp": "46018"},
 
     # MALAGA
-    "soho": {"lat": 36.7170, "lon": -4.4230, "income": 41800, "m2_price": 4200.0, "growth": 2.5},
-    "teatinos": {"lat": 36.7190, "lon": -4.4750, "income": 38000, "m2_price": 3100.0, "growth": 3.6},
-    "cortijo merino": {"lat": 36.7020, "lon": -4.4810, "income": 31200, "m2_price": 2650.0, "growth": 3.9},
-    "cruz de humilladero": {"lat": 36.7120, "lon": -4.4450, "income": 30500, "m2_price": 2550.0, "growth": 2.8},
+    "soho": {"lat": 36.7170, "lon": -4.4230, "income": 41800, "m2_price": 4200.0, "growth": 2.5, "cp": "29001"},
+    "teatinos": {"lat": 36.7190, "lon": -4.4750, "income": 38000, "m2_price": 3100.0, "growth": 3.6, "cp": "29010"},
+    "cortijo merino": {"lat": 36.7020, "lon": -4.4810, "income": 31200, "m2_price": 2650.0, "growth": 3.9, "cp": "29004"},
+    "cruz de humilladero": {"lat": 36.7120, "lon": -4.4450, "income": 30500, "m2_price": 2550.0, "growth": 2.8, "cp": "29006"},
+    "carretera de cadiz": {"lat": 36.6980, "lon": -4.4420, "income": 29000, "m2_price": 2600.0, "growth": 3.2, "cp": "29003"},
 }
 
 
@@ -299,215 +375,108 @@ class IdealistaMarkdownParser:
         return listings
 
     @classmethod
-    def _resolve_location_and_kpis(cls, title: str, default_province: str) -> Dict[str, Any]:
-        """Resuelve coordenadas y KPIs meso a partir del título o dirección."""
-        t_lower = title.lower()
-        
-        # Buscar coincidencias con distritos conocidos
-        for district_key, data in DISTRICT_COORDINATES.items():
-            if district_key in t_lower:
-                return {
-                    "address": title,
-                    "locality": default_province,
-                    "province": default_province,
-                    "postal_code": "28001" if default_province.lower() == "madrid" else "08001",
-                    "lat": data["lat"],
-                    "lon": data["lon"],
-                    "district_label": district_key.capitalize(),
-                    "avg_household_income": data["income"],
-                    "area_m2_price": data["m2_price"],
-                    "population_growth_rate": data["growth"]
-                }
+    def _resolve_location_and_kpis(cls, title: str, default_province: str, explicit_cp: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Resuelve con exactitud el código postal, distrito, coordenadas y KPIs meso (precio m2, renta per cápita)
+        a partir del título o dirección utilizando la matriz MIVAU / INE CP_DISTRICT_MARKET_2X2.
+        """
+        t_lower = (title or "").lower()
+        prov_lower = (default_province or "Madrid").lower().strip()
 
-        # Fallbacks estándar por provincia y mercados estratégicos
-        prov_lower = default_province.lower()
-        if "talavera" in t_lower or ("toledo" in prov_lower and "talavera" in t_lower):
-            return {
-                "address": title, "locality": "Talavera de la Reina", "province": "Toledo",
-                "postal_code": "45600", "lat": 39.9635, "lon": -4.8308, "district_label": "Talavera Centro",
-                "avg_household_income": 28000, "area_m2_price": 950.0, "population_growth_rate": 2.8
-            }
-        elif "toledo" in prov_lower:
-            return {
-                "address": title, "locality": "Toledo", "province": "Toledo",
-                "postal_code": "45001", "lat": 39.8628, "lon": -4.0273, "district_label": "Toledo Casco",
-                "avg_household_income": 34000, "area_m2_price": 1600.0, "population_growth_rate": 1.6
-            }
-        elif "barcelona" in prov_lower:
-            return {
-                "address": title, "locality": "Barcelona", "province": "Barcelona",
-                "postal_code": "08001", "lat": 41.3879, "lon": 2.1699, "district_label": "Barcelona Centro",
-                "avg_household_income": 45000, "area_m2_price": 4500.0, "population_growth_rate": 1.2
-            }
-        elif "valencia" in prov_lower:
-            return {
-                "address": title, "locality": "Valencia", "province": "Valencia",
-                "postal_code": "46001", "lat": 39.4699, "lon": -0.3763, "district_label": "Valencia Centro",
-                "avg_household_income": 36000, "area_m2_price": 3200.0, "population_growth_rate": 2.4
-            }
-        elif "malaga" in prov_lower or "málaga" in prov_lower:
-            return {
-                "address": title, "locality": "Málaga", "province": "Málaga",
-                "postal_code": "29001", "lat": 36.7213, "lon": -4.4214, "district_label": "Málaga Centro",
-                "avg_household_income": 35000, "area_m2_price": 3400.0, "population_growth_rate": 3.1
-            }
-        elif "alicante" in prov_lower:
-            return {
-                "address": title, "locality": "Alicante", "province": "Alicante",
-                "postal_code": "03001", "lat": 38.3452, "lon": -0.4810, "district_label": "Alicante Centro",
-                "avg_household_income": 32000, "area_m2_price": 2200.0, "population_growth_rate": 2.2
-            }
-        elif "tarragona" in prov_lower:
-            return {
-                "address": title, "locality": "Tarragona", "province": "Tarragona",
-                "postal_code": "43001", "lat": 41.1189, "lon": 1.2445, "district_label": "Tarragona Centro",
-                "avg_household_income": 34000, "area_m2_price": 2100.0, "population_growth_rate": 1.5
-            }
-        elif "guipuzcoa" in prov_lower or "guipúzcoa" in prov_lower or "gipuzkoa" in prov_lower or "san sebastian" in prov_lower or "donostia" in prov_lower:
-            return {
-                "address": title, "locality": "San Sebastián", "province": "Guipúzcoa",
-                "postal_code": "20001", "lat": 43.3183, "lon": -1.9812, "district_label": "Donostia Centro",
-                "avg_household_income": 48000, "area_m2_price": 5400.0, "population_growth_rate": 1.0
-            }
-        elif "vizcaya" in prov_lower or "bizkaia" in prov_lower or "bilbao" in prov_lower:
-            return {
-                "address": title, "locality": "Bilbao", "province": "Vizcaya",
-                "postal_code": "48001", "lat": 43.2630, "lon": -2.9350, "district_label": "Bilbao Abando",
-                "avg_household_income": 45000, "area_m2_price": 3600.0, "population_growth_rate": 1.1
-            }
-        elif "alava" in prov_lower or "álava" in prov_lower or "araba" in prov_lower or "vitoria" in prov_lower:
-            return {
-                "address": title, "locality": "Vitoria-Gasteiz", "province": "Álava",
-                "postal_code": "01001", "lat": 42.8467, "lon": -2.6716, "district_label": "Vitoria Centro",
-                "avg_household_income": 42000, "area_m2_price": 2600.0, "population_growth_rate": 1.3
-            }
-        elif "navarra" in prov_lower or "pamplona" in prov_lower:
-            return {
-                "address": title, "locality": "Pamplona", "province": "Navarra",
-                "postal_code": "31001", "lat": 42.8125, "lon": -1.6458, "district_label": "Pamplona Ensanche",
-                "avg_household_income": 43000, "area_m2_price": 2700.0, "population_growth_rate": 1.4
-            }
-        elif "cantabria" in prov_lower or "santander" in prov_lower:
-            return {
-                "address": title, "locality": "Santander", "province": "Cantabria",
-                "postal_code": "39001", "lat": 43.4623, "lon": -3.8099, "district_label": "Santander Centro",
-                "avg_household_income": 38000, "area_m2_price": 2400.0, "population_growth_rate": 0.9
-            }
-        elif "baleares" in prov_lower or "palma" in prov_lower or "mallorca" in prov_lower or "ibiza" in prov_lower:
-            return {
-                "address": title, "locality": "Palma de Mallorca", "province": "Baleares",
-                "postal_code": "07001", "lat": 39.5696, "lon": 2.6502, "district_label": "Palma Casco Antiguo",
-                "avg_household_income": 44000, "area_m2_price": 4200.0, "population_growth_rate": 2.1
-            }
-        elif "las palmas" in prov_lower or "canaria" in prov_lower:
-            return {
-                "address": title, "locality": "Las Palmas de Gran Canaria", "province": "Las Palmas",
-                "postal_code": "35001", "lat": 28.1248, "lon": -15.4300, "district_label": "Vegueta / Triana",
-                "avg_household_income": 33000, "area_m2_price": 2300.0, "population_growth_rate": 1.5
-            }
-        elif "tenerife" in prov_lower:
-            return {
-                "address": title, "locality": "Santa Cruz de Tenerife", "province": "Santa Cruz de Tenerife",
-                "postal_code": "38001", "lat": 28.4636, "lon": -16.2518, "district_label": "Santa Cruz Centro",
-                "avg_household_income": 32000, "area_m2_price": 2200.0, "population_growth_rate": 1.4
-            }
-        elif "sevilla" in prov_lower:
-            return {
-                "address": title, "locality": "Sevilla", "province": "Sevilla",
-                "postal_code": "41001", "lat": 37.3891, "lon": -5.9845, "district_label": "Sevilla Centro",
-                "avg_household_income": 34000, "area_m2_price": 2300.0, "population_growth_rate": 1.2
-            }
-        elif "zaragoza" in prov_lower:
-            return {
-                "address": title, "locality": "Zaragoza", "province": "Zaragoza",
-                "postal_code": "50001", "lat": 41.6488, "lon": -0.8891, "district_label": "Zaragoza Centro",
-                "avg_household_income": 37000, "area_m2_price": 2000.0, "population_growth_rate": 1.1
-            }
-        elif "cadiz" in prov_lower or "cádiz" in prov_lower:
-            return {
-                "address": title, "locality": "Cádiz", "province": "Cádiz",
-                "postal_code": "11001", "lat": 36.5271, "lon": -6.2886, "district_label": "Cádiz Casco",
-                "avg_household_income": 31000, "area_m2_price": 2500.0, "population_growth_rate": 0.8
-            }
-        elif "coruña" in prov_lower or "coruna" in prov_lower:
-            return {
-                "address": title, "locality": "A Coruña", "province": "A Coruña",
-                "postal_code": "15001", "lat": 43.3623, "lon": -8.4115, "district_label": "A Coruña Ciudad Vieja",
-                "avg_household_income": 36000, "area_m2_price": 2400.0, "population_growth_rate": 1.1
-            }
-        elif "asturias" in prov_lower or "oviedo" in prov_lower or "gijon" in prov_lower or "gijón" in prov_lower:
-            return {
-                "address": title, "locality": "Oviedo", "province": "Asturias",
-                "postal_code": "33001", "lat": 43.3619, "lon": -5.8494, "district_label": "Oviedo Centro",
-                "avg_household_income": 35000, "area_m2_price": 1900.0, "population_growth_rate": 0.7
-            }
-        elif "murcia" in prov_lower:
-            return {
-                "address": title, "locality": "Murcia", "province": "Murcia",
-                "postal_code": "30001", "lat": 37.9922, "lon": -1.1307, "district_label": "Murcia Centro",
-                "avg_household_income": 31000, "area_m2_price": 1400.0, "population_growth_rate": 1.7
-            }
-        elif "valladolid" in prov_lower:
-            return {
-                "address": title, "locality": "Valladolid", "province": "Valladolid",
-                "postal_code": "47001", "lat": 41.6523, "lon": -4.7245, "district_label": "Valladolid Centro",
-                "avg_household_income": 36000, "area_m2_price": 1700.0, "population_growth_rate": 0.8
-            }
-        elif "granada" in prov_lower:
-            return {
-                "address": title, "locality": "Granada", "province": "Granada",
-                "postal_code": "18001", "lat": 37.1773, "lon": -3.5986, "district_label": "Granada Centro",
-                "avg_household_income": 32000, "area_m2_price": 2100.0, "population_growth_rate": 1.4
-            }
-        elif "cordoba" in prov_lower or "córdoba" in prov_lower:
-            return {
-                "address": title, "locality": "Córdoba", "province": "Córdoba",
-                "postal_code": "14001", "lat": 37.8882, "lon": -4.7794, "district_label": "Córdoba Centro",
-                "avg_household_income": 31000, "area_m2_price": 1500.0, "population_growth_rate": 0.9
-            }
-        elif "girona" in prov_lower:
-            return {
-                "address": title, "locality": "Girona", "province": "Girona",
-                "postal_code": "17001", "lat": 41.9794, "lon": 2.8214, "district_label": "Girona Barri Vell",
-                "avg_household_income": 41000, "area_m2_price": 2600.0, "population_growth_rate": 1.6
-            }
-        elif "pontevedra" in prov_lower or "vigo" in prov_lower:
-            return {
-                "address": title, "locality": "Vigo", "province": "Pontevedra",
-                "postal_code": "36201", "lat": 42.2406, "lon": -8.7207, "district_label": "Vigo Centro",
-                "avg_household_income": 35000, "area_m2_price": 2000.0, "population_growth_rate": 1.2
-            }
-        elif "almeria" in prov_lower or "almería" in prov_lower:
-            return {
-                "address": title, "locality": "Almería", "province": "Almería",
-                "postal_code": "04001", "lat": 36.8340, "lon": -2.4637, "district_label": "Almería Centro",
-                "avg_household_income": 30000, "area_m2_price": 1300.0, "population_growth_rate": 1.5
-            }
-        elif "castellon" in prov_lower or "castellón" in prov_lower:
-            return {
-                "address": title, "locality": "Castellón de la Plana", "province": "Castellón",
-                "postal_code": "12001", "lat": 39.9864, "lon": -0.0513, "district_label": "Castellón Centro",
-                "avg_household_income": 32000, "area_m2_price": 1400.0, "population_growth_rate": 1.3
-            }
-        elif "salamanca" in prov_lower:
-            return {
-                "address": title, "locality": "Salamanca", "province": "Salamanca",
-                "postal_code": "37001", "lat": 40.9701, "lon": -5.6635, "district_label": "Salamanca Casco",
-                "avg_household_income": 33000, "area_m2_price": 1850.0, "population_growth_rate": 0.8
-            }
-        elif "burgos" in prov_lower:
-            return {
-                "address": title, "locality": "Burgos", "province": "Burgos",
-                "postal_code": "09001", "lat": 42.3440, "lon": -3.6969, "district_label": "Burgos Centro",
-                "avg_household_income": 36000, "area_m2_price": 1750.0, "population_growth_rate": 0.9
-            }
-        
-        # Default Madrid
+        # 1. Buscar coincidencias en DISTRICT_NEIGHBORHOOD_TO_CP (priorizando nombres más largos)
+        matched_neighborhood = None
+        for n_key, cp in sorted(DISTRICT_NEIGHBORHOOD_TO_CP.items(), key=lambda x: len(x[0]), reverse=True):
+            if re.search(rf'\b{re.escape(n_key)}\b', t_lower):
+                matched_neighborhood = n_key
+                break
+
+        # 2. Determinar el Código Postal
+        # Prioridad: barrio específico > CP extraído del texto > CP explícito (si no es genérico de capital)
+        postal_code = None
+        generic_center_cps = {"28001", "08001", "46001", "29001", "03001", "41001", "50001"}
+        if matched_neighborhood:
+            postal_code = DISTRICT_NEIGHBORHOOD_TO_CP[matched_neighborhood]
+        elif explicit_cp and explicit_cp.isdigit() and len(explicit_cp) == 5 and explicit_cp not in generic_center_cps:
+            postal_code = explicit_cp
+        else:
+            extracted = extract_postal_code(title)
+            if extracted:
+                postal_code = extracted
+            elif explicit_cp and explicit_cp.isdigit() and len(explicit_cp) == 5:
+                postal_code = explicit_cp
+
+        # 3. Datos del CP desde la matriz MIVAU CP_DISTRICT_MARKET_2X2
+        cp_meta = CP_DISTRICT_MARKET_2X2.get(postal_code) if postal_code else None
+
+        # 4. Determinar Localidad, Provincia y Distrito
+        locality = default_province
+        province = default_province
+        district_label = f"{default_province} Centro"
+        avg_income = 38000
+        growth_rate = 1.5
+
+        if cp_meta:
+            _, district_label = cp_meta
+
+        if matched_neighborhood and matched_neighborhood in DISTRICT_COORDINATES:
+            coord_data = DISTRICT_COORDINATES[matched_neighborhood]
+            avg_income = coord_data.get("income", 38000)
+            growth_rate = coord_data.get("growth", 1.5)
+
+        # 5. Obtener precio meso exacto con resolve_meso_market_price_2x2
+        m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
+            province_str=province,
+            locality_str=locality,
+            full_address_str=title,
+            desc_text="",
+            postal_code=postal_code
+        )
+
+        # 6. Coordenadas geográficas
+        lat, lon = None, None
+        for d_key, coords in DISTRICT_COORDINATES.items():
+            if d_key in t_lower or (matched_neighborhood and d_key == matched_neighborhood):
+                lat = coords.get("lat")
+                lon = coords.get("lon")
+                if not postal_code and coords.get("cp"):
+                    postal_code = coords.get("cp")
+                break
+
+        # Fallback de coordenadas por provincia o capital
+        if lat is None or lon is None:
+            coords_prov = DISTRICT_COORDINATES.get(province.lower()) or DISTRICT_COORDINATES.get(locality.lower())
+            if coords_prov:
+                lat, lon = coords_prov.get("lat"), coords_prov.get("lon")
+            else:
+                lat, lon = (40.4168, -3.7038) if "madrid" in prov_lower else (41.3879, 2.1699)
+
+        # Fallback de postal_code si aún es None
+        if not postal_code:
+            if "madrid" in prov_lower:
+                postal_code = "28001"
+            elif "barcelona" in prov_lower:
+                postal_code = "08001"
+            elif "valencia" in prov_lower:
+                postal_code = "46001"
+            elif "malaga" in prov_lower or "málaga" in prov_lower:
+                postal_code = "29001"
+            elif "toledo" in prov_lower:
+                postal_code = "45600" if "talavera" in t_lower else "45001"
+            else:
+                postal_code = "28001"
+
         return {
-            "address": title, "locality": "Madrid", "province": "Madrid",
-            "postal_code": "28001",
-            "lat": 40.4168, "lon": -3.7038, "district_label": "Madrid Centro",
-            "avg_household_income": 46000, "area_m2_price": 4800.0, "population_growth_rate": 2.0
+            "address": title,
+            "locality": locality,
+            "province": province,
+            "postal_code": postal_code,
+            "lat": lat,
+            "lon": lon,
+            "district_label": district_label,
+            "avg_household_income": avg_income,
+            "area_m2_price": m2_price,
+            "population_growth_rate": growth_rate,
+            "meso_label": meso_label
         }
 
 
@@ -604,7 +573,7 @@ class HabitacliaMarkdownParser:
                         "area_m2_price": loc_data.get("area_m2_price", 3900.0),
                         "population_growth_rate": 1.5
                     },
-                    "images": [],
+                    "images": images,
                     "description": f"{title}. Anuncio verificado en Habitaclia."
                 }
 
@@ -675,4 +644,387 @@ class HabitacliaMarkdownParser:
         )
 
         logger.info(f"[Habitaclia Parser] Extraídos {len(listings)} inmuebles con éxito y ordenados por max(score, btl).")
+        return listings
+
+
+class FotocasaMarkdownParser:
+    """
+    Parser especializado para extraer oportunidades estructuradas
+    del Markdown generado por Supadata al consultar Fotocasa.es.
+    """
+
+    @classmethod
+    def parse_listings(cls, markdown_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        if not markdown_content:
+            return listings
+
+        # Fotocasa: [Título](https://www.fotocasa.es/es/comprar/vivienda/...)
+        link_pattern = re.compile(
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?fotocasa\.es/es/comprar/vivienda/[^\)]*(?:/(?P<id>\d{6,})|-(?P<alt_id>\d{6,}))[^\)]*)\)',
+            re.IGNORECASE
+        )
+
+        matches = list(link_pattern.finditer(markdown_content))
+        if not matches:
+            fallback_pattern = re.compile(
+                r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?fotocasa\.es/es/comprar/[^\)]+)\)',
+                re.IGNORECASE
+            )
+            matches = list(fallback_pattern.finditer(markdown_content))
+
+        for i, match in enumerate(matches):
+            try:
+                item_id = match.groupdict().get("id") or match.groupdict().get("alt_id") or str(200000 + i)
+                title = match.group("title").strip()
+                url = match.group("url")
+
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
+                prev_text = markdown_content[start_prev:match.start()]
+                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
+                post_text = markdown_content[match.end():end_post]
+
+                if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
+                    continue
+
+                # Precios
+                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', post_text[:500])
+                if not price_matches:
+                    continue
+
+                clean_prices = [float(p.replace(".", "")) for p in price_matches if float(p.replace(".", "")) > 15000]
+                if not clean_prices:
+                    continue
+
+                listing_price = clean_prices[0]
+                original_listing_price = clean_prices[1] if len(clean_prices) > 1 and clean_prices[1] > listing_price else listing_price
+                price_drop_amount = max(0.0, original_listing_price - listing_price)
+                price_drop_percentage = round((price_drop_amount / original_listing_price) * 100, 1) if original_listing_price > 0 else 0.0
+                price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
+
+                # Superficie, habitaciones, planta, ascensor
+                rooms = 2
+                rooms_match = re.search(r'(\d+)\s*(?:habs?|hab\b|habitaciones)', post_text[:400], re.IGNORECASE)
+                if rooms_match:
+                    rooms = int(rooms_match.group(1))
+
+                surface_m2 = 80.0
+                surf_match = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', post_text[:400])
+                if surf_match:
+                    surface_m2 = float(surf_match.group(1).replace(".", ""))
+
+                floor = "Exterior"
+                floor_match = re.search(r'(\d+[ªº]?\s*planta|bajo|ático|entreplanta)', post_text[:400], re.IGNORECASE)
+                if floor_match:
+                    floor = floor_match.group(1).strip()
+
+                has_elevator = "sin ascensor" not in post_text[:400].lower()
+
+                # Imágenes
+                images = []
+                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text[:1200])
+                for img_url in img_matches:
+                    if img_url not in images:
+                        images.append(img_url)
+
+                # Ubicación y KPIs meso
+                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+
+                opportunity = {
+                    "id": f"MKT-FOTOCASA-{item_id}",
+                    "title": title,
+                    "address": loc_data.get("address") or title,
+                    "locality": loc_data.get("locality", default_province),
+                    "province": loc_data.get("province", default_province),
+                    "postal_code": loc_data.get("postal_code", "28001"),
+                    "lat": loc_data.get("lat"),
+                    "lon": loc_data.get("lon"),
+                    "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
+                    "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                    "surface_m2": surface_m2,
+                    "rooms": rooms,
+                    "bathrooms": max(1, rooms - 1),
+                    "floor": floor,
+                    "has_elevator": has_elevator,
+                    "energy_certificate": "E",
+                    "original_listing_price": original_listing_price,
+                    "listing_price": listing_price,
+                    "price_drop_percentage": price_drop_percentage,
+                    "price_drop_amount": price_drop_amount,
+                    "price_drop_date": price_drop_date,
+                    "discount_percentage": price_drop_percentage,
+                    "first_published_date": "2026-03-01",
+                    "publications": [
+                        {
+                            "portal": "Fotocasa",
+                            "price": listing_price,
+                            "url": url,
+                            "agency": "Inmobiliaria Fotocasa",
+                            "published_date": "2026-03-01"
+                        }
+                    ],
+                    "census_tract_data": {
+                        "district": loc_data.get("district_label", default_province),
+                        "avg_household_income": loc_data.get("avg_household_income", 40000),
+                        "avg_person_income": round(loc_data.get("avg_household_income", 40000) / 2.2),
+                        "area_m2_price": loc_data.get("area_m2_price", 3400.0),
+                        "population_growth_rate": loc_data.get("population_growth_rate", 1.5)
+                    },
+                    "images": images,
+                    "description": f"{title}. Inmueble verificado en Fotocasa."
+                }
+
+                is_solar = (opportunity.get("strategy") == "LAND_DEVELOPMENT" or "solar" in (opportunity.get("property_type") or "").lower() or "terreno" in (opportunity.get("property_type") or "").lower())
+
+                if is_solar:
+                    monthly_rent = 0.0
+                    rental_yield = 0.0
+                    yield_score = 0.0
+                    yield_color = "rojo"
+                    btl_score = None
+                else:
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=floor,
+                        has_elevator=has_elevator
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
+
+                area_m2_price = float(loc_data.get("area_m2_price", 3400.0))
+                est_market_val = surface_m2 * area_m2_price
+                discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                overall_score = KPICalculator.calculate_overall_opportunity_score(
+                    discount_percentage=discount_vs_market / 100.0,
+                    poi_score=83.0,
+                    income_amount=loc_data.get("avg_household_income", 40000),
+                    population_growth=loc_data.get("population_growth_rate", 1.5),
+                    rental_yield=rental_yield,
+                    is_solar=is_solar
+                )
+
+                opportunity["portal_id"] = str(item_id)
+                opportunity["portal_url"] = url
+                opportunity["primary_portal"] = "Fotocasa"
+                opportunity["discount_percentage"] = price_drop_percentage if price_drop_percentage > 0 else discount_vs_market
+
+                opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
+                opportunity["rental_yield"] = rental_yield if not is_solar else None
+                opportunity["yield_score"] = yield_score if not is_solar else 0.0
+                opportunity["yield_color"] = yield_color if not is_solar else None
+                opportunity["btl_score"] = btl_score
+                opportunity["btl_color"] = yield_color if not is_solar else None
+                opportunity["discount_vs_market"] = discount_vs_market
+                opportunity["overall_score"] = overall_score
+                opportunity["final_score"] = overall_score
+
+                listings.append(opportunity)
+            except Exception as e_foto:
+                logger.warning(f"Error parseando item Fotocasa: {e_foto}")
+
+        listings.sort(
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
+            reverse=True
+        )
+        logger.info(f"[Fotocasa Parser] Extraídos {len(listings)} inmuebles con éxito.")
+        return listings
+
+
+class PisosComMarkdownParser:
+    """
+    Parser especializado para extraer oportunidades estructuradas
+    del Markdown generado por Supadata al consultar Pisos.com.
+    """
+
+    @classmethod
+    def parse_listings(cls, markdown_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        if not markdown_content:
+            return listings
+
+        link_pattern = re.compile(
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/comprar/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
+            re.IGNORECASE
+        )
+
+        matches = list(link_pattern.finditer(markdown_content))
+        if not matches:
+            fallback_pattern = re.compile(
+                r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/(?:comprar|venta)/[^\)]+)\)',
+                re.IGNORECASE
+            )
+            matches = list(fallback_pattern.finditer(markdown_content))
+
+        for i, match in enumerate(matches):
+            try:
+                item_id = match.groupdict().get("id") or str(300000 + i)
+                title = match.group("title").strip()
+                url = match.group("url")
+
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
+                prev_text = markdown_content[start_prev:match.start()]
+                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
+                post_text = markdown_content[match.end():end_post]
+
+                if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
+                    continue
+
+                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', post_text[:500])
+                if not price_matches:
+                    continue
+
+                clean_prices = [float(p.replace(".", "")) for p in price_matches if float(p.replace(".", "")) > 15000]
+                if not clean_prices:
+                    continue
+
+                listing_price = clean_prices[0]
+                original_listing_price = clean_prices[1] if len(clean_prices) > 1 and clean_prices[1] > listing_price else listing_price
+                price_drop_amount = max(0.0, original_listing_price - listing_price)
+                price_drop_percentage = round((price_drop_amount / original_listing_price) * 100, 1) if original_listing_price > 0 else 0.0
+                price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
+
+                rooms = 2
+                rooms_match = re.search(r'(\d+)\s*(?:habs?|hab\b|habitaciones)', post_text[:400], re.IGNORECASE)
+                if rooms_match:
+                    rooms = int(rooms_match.group(1))
+
+                surface_m2 = 80.0
+                surf_match = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', post_text[:400])
+                if surf_match:
+                    surface_m2 = float(surf_match.group(1).replace(".", ""))
+
+                floor = "Exterior"
+                floor_match = re.search(r'(\d+[ªº]?\s*planta|bajo|ático|entreplanta)', post_text[:400], re.IGNORECASE)
+                if floor_match:
+                    floor = floor_match.group(1).strip()
+
+                has_elevator = "sin ascensor" not in post_text[:400].lower()
+
+                images = []
+                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text[:1200])
+                for img_url in img_matches:
+                    if img_url not in images:
+                        images.append(img_url)
+
+                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+
+                opportunity = {
+                    "id": f"MKT-PISOSCOM-{item_id}",
+                    "title": title,
+                    "address": loc_data.get("address") or title,
+                    "locality": loc_data.get("locality", default_province),
+                    "province": loc_data.get("province", default_province),
+                    "postal_code": loc_data.get("postal_code", "28001"),
+                    "lat": loc_data.get("lat"),
+                    "lon": loc_data.get("lon"),
+                    "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
+                    "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                    "surface_m2": surface_m2,
+                    "rooms": rooms,
+                    "bathrooms": max(1, rooms - 1),
+                    "floor": floor,
+                    "has_elevator": has_elevator,
+                    "energy_certificate": "E",
+                    "original_listing_price": original_listing_price,
+                    "listing_price": listing_price,
+                    "price_drop_percentage": price_drop_percentage,
+                    "price_drop_amount": price_drop_amount,
+                    "price_drop_date": price_drop_date,
+                    "discount_percentage": price_drop_percentage,
+                    "first_published_date": "2026-03-01",
+                    "publications": [
+                        {
+                            "portal": "Pisos.com",
+                            "price": listing_price,
+                            "url": url,
+                            "agency": "Inmobiliaria Pisos.com",
+                            "published_date": "2026-03-01"
+                        }
+                    ],
+                    "census_tract_data": {
+                        "district": loc_data.get("district_label", default_province),
+                        "avg_household_income": loc_data.get("avg_household_income", 40000),
+                        "avg_person_income": round(loc_data.get("avg_household_income", 40000) / 2.2),
+                        "area_m2_price": loc_data.get("area_m2_price", 3400.0),
+                        "population_growth_rate": loc_data.get("population_growth_rate", 1.5)
+                    },
+                    "images": images,
+                    "description": f"{title}. Inmueble verificado en Pisos.com."
+                }
+
+                is_solar = (opportunity.get("strategy") == "LAND_DEVELOPMENT" or "solar" in (opportunity.get("property_type") or "").lower() or "terreno" in (opportunity.get("property_type") or "").lower())
+
+                if is_solar:
+                    monthly_rent = 0.0
+                    rental_yield = 0.0
+                    yield_score = 0.0
+                    yield_color = "rojo"
+                    btl_score = None
+                else:
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=floor,
+                        has_elevator=has_elevator
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
+
+                area_m2_price = float(loc_data.get("area_m2_price", 3400.0))
+                est_market_val = surface_m2 * area_m2_price
+                discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                overall_score = KPICalculator.calculate_overall_opportunity_score(
+                    discount_percentage=discount_vs_market / 100.0,
+                    poi_score=81.0,
+                    income_amount=loc_data.get("avg_household_income", 40000),
+                    population_growth=loc_data.get("population_growth_rate", 1.5),
+                    rental_yield=rental_yield,
+                    is_solar=is_solar
+                )
+
+                opportunity["portal_id"] = str(item_id)
+                opportunity["portal_url"] = url
+                opportunity["primary_portal"] = "Pisos.com"
+                opportunity["discount_percentage"] = price_drop_percentage if price_drop_percentage > 0 else discount_vs_market
+
+                opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
+                opportunity["rental_yield"] = rental_yield if not is_solar else None
+                opportunity["yield_score"] = yield_score if not is_solar else 0.0
+                opportunity["yield_color"] = yield_color if not is_solar else None
+                opportunity["btl_score"] = btl_score
+                opportunity["btl_color"] = yield_color if not is_solar else None
+                opportunity["discount_vs_market"] = discount_vs_market
+                opportunity["overall_score"] = overall_score
+                opportunity["final_score"] = overall_score
+
+                listings.append(opportunity)
+            except Exception as e_pisos:
+                logger.warning(f"Error parseando item Pisos.com: {e_pisos}")
+
+        listings.sort(
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
+            reverse=True
+        )
+        logger.info(f"[Pisos.com Parser] Extraídos {len(listings)} inmuebles con éxito.")
         return listings

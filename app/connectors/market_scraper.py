@@ -24,7 +24,13 @@ import re
 from typing import List, Dict, Any, Optional
 import httpx
 from app.connectors.supadata_client import SupadataClient
-from app.connectors.portal_parsers import IdealistaMarkdownParser, HabitacliaMarkdownParser
+from app.connectors.portal_parsers import (
+    IdealistaMarkdownParser,
+    HabitacliaMarkdownParser,
+    FotocasaMarkdownParser,
+    PisosComMarkdownParser
+)
+from app.engine.meso_market_price import resolve_meso_market_price_2x2
 
 logger = logging.getLogger(__name__)
 
@@ -296,39 +302,42 @@ class MarketScraper:
             return results
 
         # MATRIZ NACIONAL HIVEX: EXACTAMENTE 40 PÁGINAS (40 CRÉDITOS / DÍA = 1.200 CRÉDITOS / MES)
-        # 1. Mercados Grandes: 4 páginas cada uno (8 páginas: 3 residenciales + 1 de solares/terrenos)
+        # 1. Mercados Grandes: Idealista, Fotocasa, Habitaclia y Pisos.com
         tier_1 = {
             "madrid": [
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-2.htm", "Madrid", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-3.htm", "Madrid", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l", "Madrid", "fotocasa"),
+                ("https://www.pisos.com/comprar/pisos-madrid/", "Madrid", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
             ],
             "barcelona": [
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-2.htm", "Barcelona", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/pagina-3.htm", "Barcelona", "idealista"),
+                ("https://www.habitaclia.com/comprar-vivienda-en-barcelona/buscador.htm", "Barcelona", "habitaclia"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l", "Barcelona", "fotocasa"),
+                ("https://www.pisos.com/comprar/pisos-barcelona/", "Barcelona", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
             ],
         }
 
-        # 2. Mercados de Segundo Nivel: 2 páginas cada uno (8 páginas)
+        # 2. Mercados de Segundo Nivel
         tier_2 = {
             "valencia": [
                 ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/", "Valencia", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/pagina-2.htm", "Valencia", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l", "Valencia", "fotocasa"),
+                ("https://www.pisos.com/comprar/pisos-valencia/", "Valencia", "pisoscom"),
             ],
             "alicante": [
                 ("https://www.idealista.com/venta-viviendas/alicante-alacant/con-precio-rebajado/", "Alicante", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/alicante-alacant/con-precio-rebajado/pagina-2.htm", "Alicante", "idealista"),
+                ("https://www.pisos.com/comprar/pisos-alicante/", "Alicante", "pisoscom"),
             ],
             "tarragona": [
                 ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/", "Tarragona", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/pagina-2.htm", "Tarragona", "idealista"),
+                ("https://www.habitaclia.com/comprar-vivienda-en-tarragona/buscador.htm", "Tarragona", "habitaclia"),
             ],
             "malaga": [
                 ("https://www.idealista.com/venta-viviendas/malaga-costa-del-sol/con-precio-rebajado/", "Málaga", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/malaga-costa-del-sol/con-precio-rebajado/pagina-2.htm", "Málaga", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l", "Málaga", "fotocasa"),
             ],
         }
 
@@ -369,17 +378,16 @@ class MarketScraper:
             if not targets:
                 targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
         else:
-            # En sincronizaciones completas, procesar la matriz completa (Tier 1, Tier 2 y Tier 3 = 40 páginas)
+            # En sincronizaciones completas, procesar la matriz completa
             for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
                 targets.extend(t_list)
 
-        # Con el límite de 300s en Vercel Pro, procesamos la matriz de 40 páginas con un pool concurrente
+        # Procesamos targets con un pool concurrente
         targets = targets[:40]
 
         def _scrape_worker(target_info):
             url, prov_name, portal_type = target_info
             try:
-                # Limpiar slugs problemáticos como /con-precio-rebajado/ y aplicar ordenación por rebajas
                 clean_url = url.replace("/con-precio-rebajado/", "/")
                 if portal_type == "idealista" and "ordenado-por=" not in clean_url:
                     sep = "&" if "?" in clean_url else "?"
@@ -393,6 +401,10 @@ class MarketScraper:
                     return IdealistaMarkdownParser.parse_listings(content, default_province=prov_name)
                 elif portal_type == "habitaclia":
                     return HabitacliaMarkdownParser.parse_listings(content, default_province=prov_name)
+                elif portal_type == "fotocasa":
+                    return FotocasaMarkdownParser.parse_listings(content, default_province=prov_name)
+                elif portal_type == "pisoscom":
+                    return PisosComMarkdownParser.parse_listings(content, default_province=prov_name)
                 return []
             except Exception as e_w:
                 logger.warning(f"Aviso extrayendo {url}: {e_w}")
@@ -546,7 +558,22 @@ class MarketScraper:
         property_m2_price = round(min_price / surface, 2) if surface > 0 else 0.0
 
         census = item.get("census_tract_data", {})
-        area_m2_price = float(census.get("area_m2_price") or 3400.0)
+        postal_code = item.get("postal_code")
+        province = item.get("province", "Madrid")
+        locality = item.get("locality", province)
+        address = item.get("address", item.get("title", ""))
+
+        meso_m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
+            province_str=province,
+            locality_str=locality,
+            full_address_str=address,
+            desc_text=item.get("description", ""),
+            postal_code=postal_code
+        )
+        area_m2_price = meso_m2_price or float(census.get("area_m2_price") or 3400.0)
+        census["area_m2_price"] = area_m2_price
+        item["area_m2_price"] = area_m2_price
+
         estimated_market_value = round(surface * area_m2_price, 2)
 
         potential_profit = max(0.0, round(estimated_market_value - min_price, 2))
