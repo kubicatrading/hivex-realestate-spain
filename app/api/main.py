@@ -551,7 +551,7 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         # 4. Ingesta y monitorización de Oportunidades de Mercado (Idealista, Fotocasa, Habitaclia, etc.)
         from app.connectors.market_scraper import MarketScraper
         market_scraper = MarketScraper()
-        market_items = market_scraper.fetch_market_opportunities(live_scrape=True)
+        market_items = market_scraper.fetch_market_opportunities(live_scrape=True, pgou_items=pgou_items)
         MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
 
         new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])

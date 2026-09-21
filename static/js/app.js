@@ -596,12 +596,6 @@ document.addEventListener('DOMContentLoaded', () => {
             synergyFilterGroup.style.display = (sourceType === 'market' || sourceType === 'subastas') ? 'flex' : 'none';
         }
 
-        // Show/hide dedicated Market sync button
-        const btnSyncMarket = document.getElementById('btn-sync-market');
-        if (btnSyncMarket) {
-            btnSyncMarket.style.display = (sourceType === 'market') ? 'inline-flex' : 'none';
-        }
-
         // Ensure Leaflet map recalculates its dimensions and renders tiles crisply
         if (typeof map !== 'undefined' && map) {
             setTimeout(() => {
@@ -649,43 +643,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Sincronización dedicada e instantánea de la pestaña Market
-    window.syncMarketOpportunities = async function() {
-        const btn = document.getElementById('btn-sync-market');
-        const txt = document.getElementById('text-sync-market');
-        if (btn) {
-            btn.disabled = true;
-            if (txt) txt.textContent = 'Sincronizando...';
-        }
-        showToast('🏪 Sincronizando oportunidades de Market (Idealista/Fotocasa/PGOU)...', 'info');
-        try {
-            const res = await fetch('/api/v1/market/sync', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${state.token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                const mktItems = data.opportunities || data.items || [];
-                // Reemplazar los inmuebles de market preservando subastas y pgou
-                const nonMarket = state.allOpportunities.filter(o => o.source_type !== 'market');
-                state.allOpportunities = [...nonMarket, ...mktItems];
-                updateTabBadges(state.allOpportunities);
-                updateKPIs(state.allOpportunities);
-                applyFilters();
-                showToast(`✅ Sincronización completada: ${mktItems.length} inmuebles reales de Market actualizados.`, 'success');
-            } else {
-                throw new Error('Error en sincronización');
-            }
-        } catch (err) {
-            console.error('Error sincronizando Market:', err);
-            showToast('Actualizando datos de mercado...', 'info');
-            await fetchOpportunities(true);
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                if (txt) txt.textContent = 'Sincronizar Market';
-            }
-        }
+    // Delegación directa al escáner unificado de la plataforma
+    window.syncMarketOpportunities = function() {
+        if (btnRunPipeline) btnRunPipeline.click();
     };
 
     // Apply Filter Logic
