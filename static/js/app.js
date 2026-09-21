@@ -1229,9 +1229,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700; color: ${opp.source_type === 'market' ? '#38bdf8' : '#f8fafc'};">${formatCurrency(opp.source_type === 'market' ? opp.listing_price : refVal)}</span>
                             </div>
                             <div class="fin-cell">
-                                <span class="fin-lbl">${opp.source_type === 'market' ? '% dto.' : 'Valor Mercado Estimado'}</span>
-                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? '#4ade80' : '#cbd5e1') : (isSurfaceMissing ? '#f59e0b' : '#38bdf8')};">
-                                    ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% (${formatCurrency(opp.price_drop_amount)})` : '0% (Precio Inicial)') : (isSurfaceMissing ? '<span style="font-size: 0.76rem; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(estimatedMktVal))}
+                                <span class="fin-lbl">${opp.source_type === 'market' ? 'Bajada Anuncio' : 'Valor Mercado Estimado'}</span>
+                                <span class="fin-val" style="font-size: 0.88rem; font-weight: 700; color: ${opp.source_type === 'market' ? (opp.price_drop_amount > 0 ? '#4ade80' : '#cbd5e1') : (isSurfaceMissing ? '#f59e0b' : '#38bdf8')};">
+                                    ${opp.source_type === 'market' ? (opp.price_drop_amount > 0 ? `-${formatNumber(opp.price_drop_percentage, 1)}% (-${formatCurrency(opp.price_drop_amount)})` : '0% (Salida)') : (isSurfaceMissing ? '<span style="font-size: 0.76rem; font-weight: 700;">Pendiente Nota Simple</span>' : formatCurrency(estimatedMktVal))}
                                 </span>
                             </div>
                             <div class="fin-cell">
@@ -1241,7 +1241,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="fin-cell">
                                 <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
-                                    ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : profitFormatted}
+                                    ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : (opp.source_type === 'market' ? `${profitFormatted} ${opp.discount_vs_market > 0 ? `<span style="font-size: 0.74rem; font-weight: 700; color: #38bdf8;">(-${formatNumber(opp.discount_vs_market, 1)}% dto. mkt)</span>` : ''}` : profitFormatted)}
                                 </span>
                             </div>
                         </div>
@@ -1618,8 +1618,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${opp.distinct_prices_count || 1} precios distintos detectados
                         </span>
                     </div>
-                    <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <div class="multicanal-table-container" style="overflow-x: auto; width: 100%; max-width: 100%; -webkit-overflow-scrolling: touch;">
+                        <table class="multicanal-table" style="width: 100%; border-collapse: collapse; text-align: left;">
                             <thead>
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color: #94a3b8; font-size: 0.74rem;">
                                     <th style="padding: 6px 10px;">Portal</th>
@@ -1733,11 +1733,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         <strong style="color: #4ade80; font-size: 0.95rem;">-${formatNumber(opp.discount_percentage, 0)}% vs Mercado</strong>
                    </div>`
                 : (opp.source_type === 'market'
-                    ? `<div style="background: rgba(16, 185, 129, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25);">
-                            <span style="color: #34d399; display: block; font-size: 0.75rem; font-weight: 600;">% dto. / Rebaja Acumulada</span>
-                            <strong style="color: #34d399; font-size: 0.95rem;">${opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}%` : '0%'}</strong>
+                    ? `<div style="background: rgba(16, 185, 129, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25); min-width: 0; word-break: break-word;">
+                            <span style="color: #34d399; display: block; font-size: 0.75rem; font-weight: 600;">Bajada Anuncio en Portal</span>
+                            <strong style="color: #34d399; font-size: 0.95rem;">${opp.price_drop_amount > 0 ? `-${formatNumber(opp.price_drop_percentage, 1)}% (-${formatCurrency(opp.price_drop_amount)})` : '0% (Precio Salida)'}</strong>
+                            ${opp.price_drop_date ? `<span style="font-size: 0.70rem; color: #94a3b8; display: block; margin-top: 2px;">Fecha rebaja: ${escapeHtml(opp.price_drop_date)}</span>` : ''}
                        </div>`
-                    : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                             <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
                             <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
                        </div>`));
@@ -1755,30 +1756,30 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${renderBtlBadge(opp, 'modal')}
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.82rem;">
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                <div class="two-cols-equal-grid" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; font-size: 0.82rem; width: 100%;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Hogar</span>
                         <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_household_income || 32000)}/año</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Persona</span>
                         <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_person_income || 14500)}/año</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Renta INE</span>
                         <strong style="color: ${getScoreColor(opp.income_score)}; font-size: 0.95rem;">${formatScore(opp.income_score)} / 100 pts</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Crecimiento Demográfico INE</span>
                         <strong style="color: ${getScoreColor(opp.demographic_score)}; font-size: 0.95rem;">+${formatNumber(opp.population_growth_rate, 1)}% (${formatScore(opp.demographic_score)} pts)</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
                         <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score POIs / Entorno (OSM)</span>
                         <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
                     </div>
                     ${discountScoreBoxHtml}
                     ${(!isSolarOpportunity(opp) && opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2; min-width: 0; word-break: break-word;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
                                 <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Rentabilidad Bruta Alquiler (BTL / Buy to Let)</span>
@@ -1936,11 +1937,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 <div class="card-financials" style="padding: 16px; font-size: 0.95rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
-                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? '% dto.' : (opp.source_type === 'pgou' ? 'Valor Tasación Ref.' : 'Valor Tasación BOE')}</span>
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? 'Bajada Anuncio (Portal)' : (opp.source_type === 'pgou' ? 'Valor Tasación Ref.' : 'Valor Tasación BOE')}</span>
                         <span class="fin-val ref" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px; color: ${opp.source_type === 'market' ? '#4ade80' : 'inherit'};">
-                            ${opp.source_type === 'market' ? (opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% dto.` : '0% (Precio Inicial)') : (opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €')}
+                            ${opp.source_type === 'market' ? (opp.price_drop_amount > 0 ? `-${formatNumber(opp.price_drop_percentage, 1)}% rebaja` : '0% (Salida)') : (opp.appraisal_value > 0 ? formatCurrency(opp.appraisal_value) : '0 €')}
                         </span>
-                        ${opp.source_type === 'market' && opp.price_drop_amount > 0 ? `<span style="font-size: 0.72rem; color: #34d399;">Bajada: -${formatCurrency(opp.price_drop_amount)}</span>` : ''}
+                        ${opp.source_type === 'market' && opp.price_drop_amount > 0 ? `<div style="font-size: 0.74rem; color: #34d399; font-weight: 600;">Bajada: -${formatCurrency(opp.price_drop_amount)}</div>` : ''}
+                        ${opp.source_type === 'market' && opp.price_drop_date ? `<div style="font-size: 0.72rem; color: #94a3b8;">Fecha rebaja: ${escapeHtml(opp.price_drop_date)}</div>` : ''}
+                        ${opp.source_type === 'market' && opp.original_listing_price && opp.original_listing_price > opp.listing_price ? `<div style="font-size: 0.70rem; color: #64748b;">Salida: ${formatCurrency(opp.original_listing_price)}</div>` : ''}
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? 'Precio de Venta' : (opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : (opp.source_type === 'edictos' ? 'Salida / Tipo Estimado' : 'Valor de Subasta'))}</span>
@@ -1967,6 +1970,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
+                        ${opp.source_type === 'market' && opp.discount_vs_market > 0 ? `<div style="font-size: 0.74rem; color: #38bdf8; font-weight: 700; margin-top: 2px;">-${formatNumber(opp.discount_vs_market, 1)}% dto. vs mercado</div>` : ''}
                     </div>
                 </div>
 

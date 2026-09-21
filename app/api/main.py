@@ -837,7 +837,7 @@ def get_opportunities(
         for opp in opportunities:
             try:
                 auc = opp.auction
-                if auc and BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or ""):
+                if auc and (BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or "") or BOESubastasScraper.is_nave(auc.title or "", auc.description or "", auc.property_type or "")):
                     continue
 
                 # Auto-sync description for Calle Tejedores 21 in DB if description is abbreviated in PostgreSQL
@@ -1264,6 +1264,8 @@ def get_opportunities(
             pgou_items = pgou_scraper.fetch_pgou_opportunities(province=province)
 
             for p_item in pgou_items:
+                if BOESubastasScraper.is_nave(p_item.get("title", ""), p_item.get("description", ""), p_item.get("property_type", "")):
+                    continue
                 listing_p = p_item.get("listing_price", 0.0)
                 surf = p_item.get("surface_m2", 1.0)
                 buildability = p_item.get("buildability_m2", 0.0)
@@ -1335,6 +1337,8 @@ def get_opportunities(
             edictos_items = edictos_scraper.fetch_edictos_opportunities(province=province)
 
             for e_item in edictos_items:
+                if BOESubastasScraper.is_nave(e_item.get("title", ""), e_item.get("description", ""), e_item.get("property_type", "")):
+                    continue
                 listing_p = e_item.get("listing_price", 0.0)
                 surf = e_item.get("surface_m2", 1.0)
                 effective_surf = e_item.get("effective_surface_m2") or surf
@@ -1400,6 +1404,8 @@ def get_opportunities(
             )
 
             for m_item in market_items:
+                if BOESubastasScraper.is_nave(m_item.get("title", ""), m_item.get("description", ""), m_item.get("property_type", "")):
+                    continue
                 is_market_new = bool(m_item.get("id") in active_new_market_ids)
                 m_item["is_new"] = is_market_new
                 m_item["badge_new"] = "New!" if is_market_new else None

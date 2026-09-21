@@ -1879,22 +1879,121 @@ body {
 /* MODAL DETALLE DE PROPIEDAD SIEMPRE POR ENCIMA DE CUALQUIER OVERLAY */
 #modal-property-detail {
     z-index: 20000 !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+}
+
+#modal-property-detail .modal-content,
+#modal-property-detail .modal-large,
+#modal-property-detail #modal-prop-body,
+#modal-property-detail .modal-prop-container {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+}
+
+/* Evitar desbordamiento en elementos internos del modal */
+#modal-property-detail img,
+#modal-property-detail iframe,
+#modal-property-detail pre {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Contenedor seguro para tabla de publicaciones multicanal */
+#modal-property-detail .multicanal-table-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    box-sizing: border-box !important;
+}
+
+/* ==========================================================================
+   TABLAS Y GRIDS DE 2 COLUMNAS: CELDAS CON TAMAÑO IDÉNTICO AL 50%
+   (La celda no se ajusta al texto y ambas columnas tienen exactamente el mismo ancho)
+   ========================================================================== */
+.two-cols-table,
+#modal-property-detail table.two-cols-table,
+table.two-cols-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-collapse: collapse !important;
+}
+
+.two-cols-table th,
+.two-cols-table td,
+#modal-property-detail table.two-cols-table th,
+#modal-property-detail table.two-cols-table td,
+table.two-cols-table th,
+table.two-cols-table td {
+    width: 50% !important;
+    max-width: 50% !important;
+    min-width: 50% !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
+}
+
+/* Regla universal para cualquier fila de tabla que tenga 2 celdas dentro del modal */
+#modal-property-detail table:not(.multicanal-table) tr > td:first-child:nth-last-child(2),
+#modal-property-detail table:not(.multicanal-table) tr > td:first-child:nth-last-child(2) ~ td,
+#modal-property-detail table:not(.multicanal-table) tr > th:first-child:nth-last-child(2),
+#modal-property-detail table:not(.multicanal-table) tr > th:first-child:nth-last-child(2) ~ th {
+    width: 50% !important;
+    max-width: 50% !important;
+    min-width: 50% !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
+}
+
+/* Grids de datos en 2 columnas: 50% exacto para cada celda sin expandirse por el texto */
+.two-cols-equal-grid,
+#modal-property-detail .two-cols-equal-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    gap: 10px !important;
+}
+
+.two-cols-equal-grid > div,
+#modal-property-detail .two-cols-equal-grid > div {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    overflow: hidden !important;
 }
 
 /* IPAD Y TABLETS (<= 1024px) */
 @media screen and (max-width: 1024px) {
     #modal-property-detail {
-        padding: 16px !important;
+        padding: 12px !important;
         align-items: center !important;
         justify-content: center !important;
+        overflow-x: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
     }
 
     #modal-property-detail .modal-large {
         width: 95vw !important;
         max-width: 95vw !important;
-        max-height: 92vh !important;
-        padding: 24px 20px !important;
+        max-height: 94vh !important;
+        padding: 22px 18px !important;
         box-sizing: border-box !important;
+        overflow-x: hidden !important;
+        margin: auto !important;
     }
 
     #modal-property-detail .modal-close-btn {
@@ -1908,8 +2007,13 @@ body {
     }
 
     #modal-property-detail .card-financials {
-        grid-template-columns: repeat(3, 1fr) !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
         gap: 12px !important;
+    }
+
+    .two-cols-equal-grid,
+    #modal-property-detail .two-cols-equal-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
 }
 
@@ -1922,20 +2026,25 @@ body {
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
         overflow-y: auto !important;
+        overflow-x: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
         -webkit-overflow-scrolling: touch !important;
     }
 
     #modal-property-detail .modal-large {
-        width: 100vw !important;
-        max-width: 100vw !important;
+        width: 100% !important;
+        max-width: 100% !important;
         min-height: 100vh !important;
         height: auto !important;
         max-height: none !important;
         border-radius: 0 !important;
         border: none !important;
-        padding: 16px 14px 44px 14px !important;
+        padding: 14px 12px 40px 12px !important;
         box-sizing: border-box !important;
         box-shadow: none !important;
+        overflow-x: hidden !important;
+        margin: 0 !important;
     }
 
     #modal-property-detail .modal-close-btn {
@@ -1978,7 +2087,7 @@ body {
     }
 
     #modal-property-detail .card-financials {
-        grid-template-columns: 1fr 1fr !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 10px !important;
         padding: 12px 10px !important;
     }
@@ -2003,10 +2112,21 @@ body {
         border-radius: 8px !important;
     }
 
-    /* Columnas de Scores y Datos Urbanísticos en pantalla pequeña */
+    /* Grids de 2 columnas en móvil permanecen estrictamente fijas al 50/50 */
+    .two-cols-equal-grid,
+    #modal-property-detail .two-cols-equal-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+    }
+
+    .two-cols-equal-grid > div,
+    #modal-property-detail .two-cols-equal-grid > div {
+        padding: 6px 8px !important;
+    }
+
+    /* Columnas de 3 y 4 elementos en móvil pasan a 1fr o 2fr según espacio */
     #modal-property-detail [style*="grid-template-columns: repeat(3, 1fr)"],
-    #modal-property-detail [style*="grid-template-columns: repeat(4, 1fr)"],
-    #modal-property-detail [style*="grid-template-columns: repeat(2, 1fr)"] {
+    #modal-property-detail [style*="grid-template-columns: repeat(4, 1fr)"] {
         grid-template-columns: 1fr !important;
         gap: 10px !important;
     }

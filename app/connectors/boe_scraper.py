@@ -594,11 +594,54 @@ class BOESubastasScraper:
         if starts_with_annex or title_is_annex:
             return True
 
-        # 2. Si contiene palabras de garaje/trastero pero NO menciona vivienda/piso/casa/local/solar/nave
+        # 2. Si contiene palabras de garaje/trastero pero NO menciona vivienda/piso/casa/local/solar
         has_annex_words = any(w in text for w in ['garaje', 'trastero', 'aparcamiento', 'estacionamiento', 'cochera', 'parking'])
-        has_main_property = any(w in text for w in ['vivienda', 'piso', 'casa', 'chalet', 'dúplex', 'duplex', 'ático', 'atico', 'local comercial', 'nave industrial', 'solar', 'terreno', 'parcela'])
+        has_main_property = any(w in text for w in ['vivienda', 'piso', 'casa', 'chalet', 'dúplex', 'duplex', 'ático', 'atico', 'local comercial', 'solar', 'terreno', 'parcela'])
 
         if has_annex_words and not has_main_property:
+            return True
+
+        return False
+
+    @staticmethod
+    def is_nave(title: str = "", desc: str = "", property_type: str = "") -> bool:
+        """
+        Clasificador estricto para descartar oportunidades de NAVES (industriales, comerciales,
+        almacenes, logísticas o agrícolas) en favor exclusivo de inmuebles residenciales o solares.
+        """
+        t_low = (title or '').lower()
+        d_low = (desc or '').lower()
+        pt_low = (property_type or '').lower()
+        combined = f"{t_low} {d_low} {pt_low}"
+
+        # 1. Tipo de propiedad declarado
+        if any(w in pt_low for w in ['nave', 'industrial']):
+            return True
+
+        # 2. Título o encabezado menciona expresamente nave
+        if re.search(r'\bnaves?\b', t_low):
+            return True
+
+        # 3. Patrones directos en descripción
+        nave_patterns = [
+            r'\bnaves?\s+industriales?\b',
+            r'\bnaves?\s+almac[eé]n\b',
+            r'\bnaves?\s+agr[ií]colas?\b',
+            r'\bnaves?\s+comerciales?\b',
+            r'\bnaves?\s+adosadas?\b',
+            r'\bnaves?\s+di[aá]fanas?\b',
+            r'\bm[oó]dulo\s+o\s+nave\b',
+            r'\bse\s+alza\s+una\s+nave\b',
+            r'\bconjunto\s+industrial\b',
+            r'\bpol[ií]gono\s+industrial.*?\bnaves?\b',
+            r'\bnave\s+sita\b'
+        ]
+        if any(re.search(pat, combined) for pat in nave_patterns):
+            return True
+
+        # 4. Comienzo de descripción que especifica tipo de finca
+        clean_desc = re.sub(r'^(urbana|rústica|rustica|finca|elemento|entidad|1/\d+|100%|pleno dominio)?\s*[\d\w\.-]*\s*[\.:,-]?\s*', '', d_low.strip())
+        if clean_desc.startswith('nave ') or clean_desc.startswith('naves ') or clean_desc.startswith('modulo o nave'):
             return True
 
         return False

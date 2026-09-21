@@ -104,4 +104,56 @@ def test_api_market_opportunities_endpoint():
     data = response.json()
     assert "opportunities" in data
     assert isinstance(data["opportunities"], list)
+    # Ninguna oportunidad devuelta debe ser una nave industrial
+    for opp in data["opportunities"]:
+        title = opp.get("title", "").lower()
+        desc = opp.get("description", "").lower()
+        ptype = opp.get("property_type", "").lower()
+        assert "nave industrial" not in title
+        assert "nave" != ptype
+
+def test_market_scraper_discards_naves():
+    """Verifica que MarketScraper descarte cualquier oportunidad catalogada como nave."""
+    scraper = MarketScraper()
+    nave_sample = {
+        "id": "MKT-NAVE-001",
+        "title": "Nave industrial diáfana en polígono",
+        "description": "Excelente nave para almacenaje logístico",
+        "property_type": "NAVE",
+        "listing_price": 150000.0,
+        "original_listing_price": 180000.0,
+        "surface_m2": 450.0,
+        "publications": [{"portal": "Idealista", "price": 150000.0}]
+    }
+    processed = scraper._process_market_listing(nave_sample)
+    assert processed is None, "La nave debió ser descartada por _process_market_listing"
+
+def test_market_scraper_independent_discounts():
+    """Verifica que la bajada comercial del portal y el descuento frente al mercado sean independientes."""
+    scraper = MarketScraper()
+    sample = {
+        "id": "MKT-DISC-001",
+        "title": "Piso céntrico rebajado",
+        "address": "Gran Vía 28",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "original_listing_price": 500000.0,
+        "listing_price": 400000.0,
+        "price_drop_date": "2026-03-15",
+        "surface_m2": 100.0,
+        "publications": [{"portal": "Idealista", "price": 400000.0}]
+    }
+    processed = scraper._process_market_listing(sample)
+    assert processed is not None
+    # 1. Bajada Comercial del portal
+    assert processed["price_drop_amount"] == 100000.0
+    assert processed["price_drop_percentage"] == 20.0
+    assert processed["price_drop_date"] == "2026-03-15"
+    assert processed["original_listing_price"] == 500000.0
+    assert processed["listing_price"] == 400000.0
+    # 2. Descuento frente a valor de referencia de mercado
+    assert "discount_vs_market" in processed
+    assert "discount_vs_market_amount" in processed
+    assert processed["discount_vs_market_amount"] == processed["potential_gross_profit"]
+
 

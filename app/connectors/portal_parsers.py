@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 
 from app.engine.rental_reference import RentalReferenceEngine
 from app.engine.kpi_calculator import KPICalculator
+from app.connectors.boe_scraper import BOESubastasScraper
 
 logger = logging.getLogger(__name__)
 
@@ -104,17 +105,22 @@ class IdealistaMarkdownParser:
                 end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 2000)
                 post_text = markdown_content[match.end():end_post]
 
+                # Descartar naves para cualquier mercado
+                if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
+                    continue
+
                 # 1. Comercializadora / Agencia
                 agency = "Agencia Inmobiliaria"
                 agency_matches = list(re.finditer(r'\[(?:Comercializa)?(?P<agency>[^\]]+)\]\(https?://(?:www\.)?idealista\.com/pro/[^\)]+\)', prev_text))
                 if agency_matches:
                     agency = agency_matches[-1].group("agency").replace("Comercializa", "").strip()
 
-                # 2. Imágenes del inmueble
+                # 2. Imágenes del inmueble: capturar todas las fotos disponibles sin límite
                 images = []
-                img_matches = re.findall(r'!\[[^\]]*\]\((https?://img\d*\.idealista\.com/[^\)]+)\)', prev_text)
+                full_img_block = prev_text + "\n" + post_text[:1500]
+                img_matches = re.findall(r'!\[[^\]]*\]\((https?://img\d*\.idealista\.com/[^\)]+)\)', full_img_block)
                 for img_url in img_matches:
-                    clean_img = img_url.replace("/blur/189_120_mq/", "/blur/591_420_mq/")
+                    clean_img = img_url.replace("/blur/189_120_mq/", "/blur/591_420_mq/").replace("/blur/300_225_mq/", "/blur/591_420_mq/")
                     if clean_img not in images:
                         images.append(clean_img)
 
@@ -144,6 +150,10 @@ class IdealistaMarkdownParser:
                     if pct_match:
                         discount_percentage = float(pct_match.group(1))
                         original_listing_price = round(listing_price / (1 - (discount_percentage / 100.0)), 2)
+
+                price_drop_amount = max(0.0, original_listing_price - listing_price)
+                price_drop_percentage = discount_percentage
+                price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
 
                 # 4. Características: "Garaje incluido 3 hab.131 m²3ª planta exterior con ascensor"
                 rooms = 2
@@ -194,6 +204,10 @@ class IdealistaMarkdownParser:
                     "energy_certificate": "D",
                     "original_listing_price": original_listing_price,
                     "listing_price": listing_price,
+                    "price_drop_percentage": price_drop_percentage,
+                    "price_drop_amount": price_drop_amount,
+                    "price_drop_date": price_drop_date,
+                    "discount_percentage": discount_percentage,
                     "first_published_date": "2026-03-01",
                     "publications": [
                         {
@@ -522,9 +536,15 @@ class HabitacliaMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
-                # Contexto posterior para precio
+                # Contexto previo y posterior
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
+                prev_text = markdown_content[start_prev:match.end()]
                 end_post = min(len(markdown_content), match.end() + 800)
                 post_text = markdown_content[match.end():end_post]
+
+                # Descartar naves
+                if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
+                    continue
 
                 price_match = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', post_text)
                 if not price_match:
@@ -536,6 +556,13 @@ class HabitacliaMarkdownParser:
 
                 # Localización
                 loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+
+                # Extraer imágenes si las hay
+                images = []
+                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text)
+                for img_url in img_matches:
+                    if img_url not in images:
+                        images.append(img_url)
 
                 opportunity = {
                     "id": f"MKT-HABITACLIA-{item_id}",
@@ -556,6 +583,10 @@ class HabitacliaMarkdownParser:
                     "energy_certificate": "E",
                     "original_listing_price": listing_price,
                     "listing_price": listing_price,
+                    "price_drop_percentage": 0.0,
+                    "price_drop_amount": 0.0,
+                    "price_drop_date": None,
+                    "discount_percentage": 0.0,
                     "first_published_date": "2026-03-01",
                     "publications": [
                         {

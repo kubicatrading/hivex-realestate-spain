@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.db.models import PipelineSyncState
 from app.connectors.market_scraper import MarketScraper
 from app.connectors.pgou_scraper import PGOUScraper
+from app.connectors.boe_scraper import BOESubastasScraper
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,16 @@ class RealEstateAlertEngine:
                         already_alerted_ids.update(sdata.get("alerted_telegram_opp_ids", []))
             except Exception as e_hist:
                 logger.warning(f"Aviso consultando historial de alertas: {e_hist}")
+
+        # Excluir cualquier oportunidad de naves (solo inmuebles residenciales y solares)
+        market_items = [
+            it for it in market_items
+            if not BOESubastasScraper.is_nave(
+                title=it.get("title", ""),
+                desc=it.get("description", ""),
+                property_type=it.get("property_type", "")
+            )
+        ]
 
         results: Dict[str, Dict[str, Any]] = {}
 

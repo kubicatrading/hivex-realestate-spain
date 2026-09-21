@@ -494,6 +494,16 @@ class MarketScraper:
         - Calcula el indicador xPublicación.
         - Calcula el descuento respecto al precio original de salida.
         """
+        from app.connectors.boe_scraper import BOESubastasScraper
+
+        # Descartar naves para cualquier mercado
+        if BOESubastasScraper.is_nave(
+            title=item.get("title", ""),
+            desc=item.get("description", ""),
+            property_type=item.get("property_type", "")
+        ):
+            return None
+
         publications = item.get("publications") or []
         if not publications and item.get("listing_price"):
             publications = [{
@@ -527,6 +537,10 @@ class MarketScraper:
             original_price = min_price
             price_drop = 0.0
             discount_pct = 0.0
+
+        price_drop_date = item.get("price_drop_date")
+        if not price_drop_date and price_drop > 0:
+            price_drop_date = item.get("first_published_date") or "2026-03-01"
 
         surface = float(item.get("surface_m2") or 1.0)
         property_m2_price = round(min_price / surface, 2) if surface > 0 else 0.0
@@ -603,10 +617,12 @@ class MarketScraper:
             
             "listing_price": min_price,
             "original_listing_price": original_price,
-            "discount_percentage": max(discount_pct, discount_vs_market),
+            "discount_percentage": discount_pct,
             "price_drop_percentage": discount_pct,
             "price_drop_amount": price_drop,
+            "price_drop_date": price_drop_date,
             "discount_vs_market": discount_vs_market,
+            "discount_vs_market_amount": potential_profit,
             
             "x_publicacion": x_publicacion,
             "distinct_prices_count": num_distinct_prices,
