@@ -605,6 +605,7 @@ class MarketScraper:
             "original_listing_price": original_price,
             "discount_percentage": max(discount_pct, discount_vs_market),
             "price_drop_percentage": discount_pct,
+            "price_drop_amount": price_drop,
             "discount_vs_market": discount_vs_market,
             
             "x_publicacion": x_publicacion,

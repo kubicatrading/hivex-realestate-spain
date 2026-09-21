@@ -78,6 +78,7 @@ def test_zero_false_positives_without_active_sync(auth_headers):
     LATEST_SYNC_STATE["new_auction_ids"] = set()
     LATEST_SYNC_STATE["new_pgou_ids"] = set()
     LATEST_SYNC_STATE["new_edicto_ids"] = set()
+    LATEST_SYNC_STATE["new_market_ids"] = set()
 
     client = TestClient(app)
     response = client.get("/api/v1/opportunities", headers=auth_headers)
@@ -95,6 +96,7 @@ def test_real_sync_novelties_prioritized_at_top(auth_headers):
     LATEST_SYNC_STATE["new_auction_ids"] = {10}
     LATEST_SYNC_STATE["new_pgou_ids"] = {"PGOU-MAD-2026-003"}
     LATEST_SYNC_STATE["new_edicto_ids"] = set()
+    LATEST_SYNC_STATE["new_market_ids"] = set()
 
     client = TestClient(app)
     response = client.get("/api/v1/opportunities", headers=auth_headers)
@@ -117,3 +119,4 @@ def test_real_sync_novelties_prioritized_at_top(auth_headers):
     LATEST_SYNC_STATE["new_auction_ids"] = set()
     LATEST_SYNC_STATE["new_pgou_ids"] = set()
     LATEST_SYNC_STATE["new_edicto_ids"] = set()
+    LATEST_SYNC_STATE["new_market_ids"] = set()
