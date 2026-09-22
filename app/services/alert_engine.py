@@ -261,6 +261,21 @@ class RealEstateAlertEngine:
             )
             if all_solares:
                 chosen_solar_pgou = all_solares[0]
+            else:
+                alt_pgou = [
+                    it for it in clean_market
+                    if it["id"] not in assigned_ids
+                ]
+                alt_pgou.sort(
+                    key=lambda x: (
+                        1 if x.get("has_pgou_synergy") else 0,
+                        x.get("surface_m2") or 0.0,
+                        x.get("overall_score") or 0.0
+                    ),
+                    reverse=True
+                )
+                if alt_pgou:
+                    chosen_solar_pgou = alt_pgou[0]
 
         if chosen_solar_pgou:
             assigned_ids.add(chosen_solar_pgou["id"])

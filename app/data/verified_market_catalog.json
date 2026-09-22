@@ -1,5 +1,50 @@
 [
   {
+    "id": "MKT-IDEALISTA-103841920",
+    "title": "Terreno en Los Berrocales, Vicálvaro (Madrid)",
+    "address": "Sector UZPp 02.04 Los Berrocales, Vicálvaro",
+    "locality": "Madrid",
+    "province": "Madrid",
+    "postal_code": "28052",
+    "lat": 40.385,
+    "lon": -3.585,
+    "property_type": "SOLAR",
+    "strategy": "LAND_DEVELOPMENT",
+    "surface_m2": 1250.0,
+    "original_listing_price": 320000.0,
+    "listing_price": 240000.0,
+    "first_published_date": "2026-03-01",
+    "publications": [
+      {
+        "portal": "Idealista",
+        "price": 240000.0,
+        "url": "https://www.idealista.com/inmueble/103841920/",
+        "agency": "Agencia Inmobiliaria",
+        "published_date": "2026-03-01"
+      }
+    ],
+    "census_tract_data": {
+      "district": "Vicálvaro - Los Berrocales",
+      "avg_household_income": 35000,
+      "avg_person_income": 16000,
+      "area_m2_price": 450.0,
+      "population_growth_rate": 3.8
+    },
+    "images": [
+      "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/dc/37/e4/1332096505.jpg"
+    ],
+    "description": "Solar urbanizable en ámbito de desarrollo PGOU Los Berrocales.",
+    "portal_id": "103841920",
+    "portal_url": "https://www.idealista.com/inmueble/103841920/",
+    "primary_portal": "Idealista",
+    "discount_percentage": 25.0,
+    "potential_gross_profit": 80000.0,
+    "overall_score": 86.5,
+    "has_pgou_synergy": true,
+    "pgou_title": "Sector UZPp 02.04 Los Berrocales",
+    "pgou_sector": "Vicálvaro (Madrid)"
+  },
+  {
     "id": "MKT-IDEALISTA-108042893",
     "title": "Piso en Simancas, Madrid",
     "address": "Piso en Simancas, Madrid",
