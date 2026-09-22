@@ -563,11 +563,19 @@ class MarketScraper:
         locality = item.get("locality", province)
         address = item.get("address", item.get("title", ""))
 
+        strategy = item.get("strategy", "HOUSE_FLIPPING")
+        prop_type = (item.get("property_type") or "").lower()
+        desc_text = (item.get("description") or "").lower()
+        is_solar = (strategy == "LAND_DEVELOPMENT" or any(k in prop_type for k in ["solar", "terreno", "suelo", "parcela"]) or any(k in address.lower() for k in ["solar", "terreno", "suelo", "parcela"]))
+        land_type = "RÚSTICO" if any(k in prop_type or k in desc_text for k in ["rústico", "rustico", "agrario"]) else item.get("land_type", "URBANO")
+
         meso_m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
             province_str=province,
             locality_str=locality,
             full_address_str=address,
             desc_text=item.get("description", ""),
+            land_type=land_type,
+            is_solar=is_solar,
             postal_code=postal_code
         )
         area_m2_price = meso_m2_price or float(census.get("area_m2_price") or 3400.0)
@@ -582,10 +590,6 @@ class MarketScraper:
         scores = item.get("score_components", {})
 
         from app.engine.rental_reference import RentalReferenceEngine
-
-        strategy = item.get("strategy", "HOUSE_FLIPPING")
-        prop_type = (item.get("property_type") or "").lower()
-        is_solar = (strategy == "LAND_DEVELOPMENT" or "solar" in prop_type or "terreno" in prop_type or "parcela" in prop_type or "suelo" in prop_type)
 
         if is_solar:
             monthly_rent = 0.0

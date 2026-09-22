@@ -733,15 +733,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper function to return verified photo list or Street View static facade photo
     function getOpportunityImagesList(opp) {
+        let list = [];
         if (opp.images && Array.isArray(opp.images) && opp.images.length > 0) {
             const valid = opp.images.filter(img => img && typeof img === 'string' && !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
             if (valid.length > 0) {
-                return valid;
+                list = [...valid];
             }
         }
         const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
         const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
-        return [`https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`];
+        const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`;
+        
+        if (list.length === 0) {
+            return [streetViewUrl];
+        } else if (list.length === 1 && !list[0].includes('maps.googleapis.com')) {
+            list.push(streetViewUrl);
+        }
+        return list;
     }
 
     // Helper function to return Street View or main facade photo
@@ -809,6 +817,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (numEl) {
             numEl.textContent = targetIdx + 1;
+        }
+        const srcEl = document.getElementById('modal-gallery-source-name');
+        if (srcEl) {
+            const isGmaps = images[targetIdx] && images[targetIdx].includes('maps.googleapis.com');
+            srcEl.textContent = isGmaps ? '• Google Street View' : `• Fuente: ${window.modalGalleryState.portal || 'Idealista'}`;
         }
 
         // Highlight active thumbnail and scroll into view
@@ -1277,8 +1290,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '-';
+        let districtName = '';
+        if (opp.census_tract_data && opp.census_tract_data.district) {
+            districtName = opp.census_tract_data.district;
+        } else if (opp.area_m2_price_label && opp.area_m2_price_label.includes('[')) {
+            const m = opp.area_m2_price_label.match(/\[(.*?)\]/);
+            districtName = m ? m[1] : opp.area_m2_price_label;
+        } else if (opp.district) {
+            districtName = opp.district;
+        } else if (opp.neighborhood) {
+            districtName = opp.neighborhood;
+        } else {
+            districtName = opp.locality ? `${opp.locality}${opp.province && opp.province !== opp.locality ? ' (' + opp.province + ')' : ''}` : (opp.province || 'Zona');
+        }
+
+        if (opp.postal_code && !districtName.includes(opp.postal_code)) {
+            districtName = `${districtName} (CP ${opp.postal_code})`;
+        }
         const areaM2Display = `${formatCurrency(opp.area_m2_price)}/m²`;
-        const districtName = opp.locality || opp.province || 'Zona';
         const discountScoreVal = (opp.property_m2_price && opp.property_m2_price > 0) ? (opp.discount_score || 0) : 0;
         const landType = opp.land_type || 'URBANO';
 
@@ -1895,7 +1924,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="modal-gallery-counter-badge" id="modal-gallery-counter">
                             <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
                             <span>Foto <strong id="modal-gallery-cur-num">1</strong> de ${modalImages.length}</span>
-                            <span style="opacity: 0.6; margin-left: 6px;">• Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                            <span id="modal-gallery-source-name" style="opacity: 0.8; margin-left: 6px;">• Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
                         </div>
                     ` : `
                         <div class="modal-gallery-counter-badge">
@@ -1997,7 +2026,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div style="margin-top: 8px; font-size: 0.78rem; color: #cbd5e1; padding-left: 2px;">
-                    <strong>(*):</strong> <span style="color: #38bdf8; font-weight: 600;">valor sección censal (ref. barrio [${escapeHtml(districtName)}])</span>
+                    <strong>(*):</strong> <span style="color: #38bdf8; font-weight: 600;">valor sección censal (ref. barrio: ${escapeHtml(districtName)})</span>
                 </div>
 
                 <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin-top: 14px; text-align: left;">${escapeHtml(opp.description || '')}</p>

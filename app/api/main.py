@@ -753,6 +753,51 @@ async def trigger_daily_alerts(
         "alert_result": result
     }
 
+@app.api_route("/api/v1/health/cockpit-telegram", methods=["GET", "POST"])
+async def trigger_cockpit_health_alert(
+    authorization: Optional[str] = Header(None),
+    cron_header: Optional[str] = Header(None, alias="x-vercel-cron"),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para ejecución programada (Vercel Cron 10:00 AM España / 08:00 UTC) o manual
+    de la alerta de salud de cabina (Cockpit Health Alert) para Telegram.
+    """
+    cron_secret = os.environ.get("CRON_SECRET", "").strip()
+    is_cron = bool(cron_header)
+    is_authorized = False
+
+    if cron_secret and authorization:
+        token_candidate = authorization.replace("Bearer ", "").strip()
+        if token_candidate == cron_secret:
+            is_authorized = True
+
+    if not is_cron and not is_authorized:
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+            try:
+                from app.api.main import decode_access_token
+                payload = decode_access_token(token)
+                if payload:
+                    is_authorized = True
+            except Exception:
+                pass
+
+    if not is_cron and not is_authorized and os.environ.get("VERCEL_ENV") == "production":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida para disparar alerta de salud de cabina."
+        )
+
+    from app.services.alert_engine import RealEstateAlertEngine
+    alert_engine = RealEstateAlertEngine()
+    result = alert_engine.send_cockpit_health_alert(db=db)
+
+    return {
+        "status": "success" if result.get("status") == "sent" else "error",
+        "health_result": result
+    }
+
 @app.get("/api/v1/opportunities")
 def get_opportunities(
     background_tasks: BackgroundTasks,

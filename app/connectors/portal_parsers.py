@@ -423,12 +423,16 @@ class IdealistaMarkdownParser:
             avg_income = coord_data.get("income", 38000)
             growth_rate = coord_data.get("growth", 1.5)
 
-        # 5. Obtener precio meso exacto con resolve_meso_market_price_2x2
+        # 5. Obtener precio meso exacto con resolve_meso_market_price_2x2 (Matriz 2x2)
+        is_solar = any(k in t_lower for k in ["solar", "terreno", "suelo", "parcela", "finca rústica", "finca rustica"])
+        land_type = "RÚSTICO" if any(k in t_lower for k in ["rústico", "rustico", "agrario", "campo"]) else "URBANO"
         m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
             province_str=province,
             locality_str=locality,
             full_address_str=title,
             desc_text="",
+            land_type=land_type,
+            is_solar=is_solar,
             postal_code=postal_code
         )
 
