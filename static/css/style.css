@@ -1953,7 +1953,7 @@ table.two-cols-table td {
     white-space: normal !important;
 }
 
-/* Grids de datos en 2 columnas: 50% exacto para cada celda sin expandirse por el texto */
+/* Grids de datos en 2 columnas: 50% exacto para cada celda y altura uniforme */
 .two-cols-equal-grid,
 #modal-property-detail .two-cols-equal-grid {
     display: grid !important;
@@ -1961,18 +1961,65 @@ table.two-cols-table td {
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
-    gap: 10px !important;
+    gap: 8px !important;
 }
 
 .two-cols-equal-grid > div,
-#modal-property-detail .two-cols-equal-grid > div {
+#modal-property-detail .two-cols-equal-grid > div,
+.kpi-metric-box {
     min-width: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
+    min-height: 74px !important;
+    height: 100% !important;
     box-sizing: border-box !important;
-    word-break: break-word !important;
-    overflow-wrap: break-word !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 8px 10px !important;
+    border-radius: 6px !important;
     overflow: hidden !important;
+}
+
+.kpi-metric-label {
+    display: flex !important;
+    align-items: flex-start !important;
+    min-height: 2.3em !important;
+    font-size: 0.74rem !important;
+    line-height: 1.2 !important;
+    color: #94a3b8 !important;
+    margin-bottom: 4px !important;
+    word-break: normal !important;
+}
+
+.kpi-metric-val {
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: normal !important;
+}
+
+.kpi-btl-box {
+    grid-column: span 2 !important;
+    min-height: 58px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    word-break: normal !important;
+}
+
+/* Multicanal: Vistas Desktop vs Mobile */
+.multicanal-desktop-view {
+    display: block;
+    width: 100%;
+}
+
+.multicanal-mobile-view {
+    display: none;
+    width: 100%;
 }
 
 /* IPAD Y TABLETS (<= 1024px) */
@@ -2097,11 +2144,25 @@ table.two-cols-table td {
     }
 
     #modal-property-detail .fin-item {
-        padding: 4px 0 !important;
+        padding: 6px 4px !important;
+        min-height: 54px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+        box-sizing: border-box !important;
+    }
+
+    #modal-property-detail .fin-item .fin-label {
+        font-size: 0.74rem !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        word-break: normal !important;
     }
 
     #modal-property-detail .fin-item .fin-val {
         font-size: 1.05rem !important;
+        white-space: nowrap !important;
+        word-break: normal !important;
     }
 
     #modal-property-detail img {
@@ -2112,16 +2173,95 @@ table.two-cols-table td {
         border-radius: 8px !important;
     }
 
-    /* Grids de 2 columnas en móvil permanecen estrictamente fijas al 50/50 */
+    /* Grids de 2 columnas en móvil permanecen estrictamente fijas al 50/50 con altura uniforme */
     .two-cols-equal-grid,
     #modal-property-detail .two-cols-equal-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
 
     .two-cols-equal-grid > div,
-    #modal-property-detail .two-cols-equal-grid > div {
-        padding: 6px 8px !important;
+    #modal-property-detail .two-cols-equal-grid > div,
+    .kpi-metric-box {
+        padding: 8px 10px !important;
+        min-height: 74px !important;
+        height: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
+
+    .kpi-metric-label {
+        min-height: 2.3em !important;
+        font-size: 0.72rem !important;
+        line-height: 1.2 !important;
+        color: #94a3b8 !important;
+        word-break: normal !important;
+        margin-bottom: 4px !important;
+    }
+
+    .kpi-metric-val {
+        font-size: 0.92rem !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        word-break: normal !important;
+    }
+
+    /* KPIs Header en móvil: literal completo a la izquierda y badges alineados a la derecha */
+    .kpis-header {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .kpis-title {
+        white-space: nowrap !important;
+        word-break: normal !important;
+        flex-shrink: 0 !important;
+        font-size: 0.92rem !important;
+    }
+
+    .kpis-header-badges {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-end !important;
+        justify-content: center !important;
+        margin-left: auto !important;
+        flex-shrink: 0 !important;
+        gap: 4px !important;
+    }
+
+    .kpis-header-badges .score-chip {
+        white-space: nowrap !important;
+        word-break: normal !important;
+        text-align: right !important;
+        font-size: 0.74rem !important;
+        padding: 2px 7px !important;
+    }
+
+    /* Multicanal en móvil: Ocultar tabla apretada y mostrar celdas por filas legibles */
+    .multicanal-desktop-view {
+        display: none !important;
+    }
+
+    .multicanal-mobile-view {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+
+    .multicanal-card-row {
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
 
     /* Columnas de 3 y 4 elementos en móvil pasan a 1fr o 2fr según espacio */
@@ -2149,13 +2289,15 @@ table.two-cols-table td {
         box-sizing: border-box !important;
     }
 
-    /* Badges ajustados para no romper el layout */
+    /* Badges ajustados para no romper el layout ni cortar palabras */
     #modal-property-detail .badge-new-pill,
     #modal-property-detail .badge-xpublicacion,
     #modal-property-detail .badge-synergy,
     #modal-property-detail .badge-lote {
         font-size: 0.72rem !important;
         padding: 3px 8px !important;
+        white-space: nowrap !important;
+        word-break: normal !important;
     }
 }
 

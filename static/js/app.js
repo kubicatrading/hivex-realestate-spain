@@ -1500,41 +1500,89 @@ document.addEventListener('DOMContentLoaded', () => {
             // Publications multichannel table (Matiz 2)
             const pubs = opp.publications || [];
             let pubsRowsHtml = '';
+            let pubsCardsHtml = '';
             if (pubs.length > 0) {
                 pubsRowsHtml = pubs.map(p => {
                     const isMin = p.is_minimum || p.price === opp.listing_price;
                     const diffPrice = p.price - opp.listing_price;
                     return `
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
-                            <td style="padding: 8px 10px; font-weight: 700; color: #f8fafc;">
+                            <td style="padding: 8px 10px; font-weight: 700; color: #f8fafc; white-space: nowrap;">
                                 ${escapeHtml(p.portal || 'Portal')}
                             </td>
-                            <td style="padding: 8px 10px; font-weight: 800; color: ${isMin ? '#34d399' : '#cbd5e1'};">
+                            <td style="padding: 8px 10px; font-weight: 800; color: ${isMin ? '#34d399' : '#cbd5e1'}; white-space: nowrap;">
                                 ${formatCurrency(p.price)}
                             </td>
-                            <td style="padding: 8px 10px;">
+                            <td style="padding: 8px 10px; white-space: nowrap;">
                                 ${isMin 
-                                    ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 0.72rem; border: 1px solid rgba(16, 185, 129, 0.3);">🏆 MENOR PRECIO</span>' 
-                                    : `<span style="color: #f87171; font-size: 0.76rem; font-weight: 600;">+${formatCurrency(diffPrice)}</span>`}
+                                    ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 0.72rem; border: 1px solid rgba(16, 185, 129, 0.3); white-space: nowrap;">🏆 MENOR PRECIO</span>' 
+                                    : `<span style="color: #f87171; font-size: 0.76rem; font-weight: 600; white-space: nowrap;">+${formatCurrency(diffPrice)}</span>`}
                             </td>
-                            <td style="padding: 8px 10px; color: #94a3b8; font-size: 0.78rem;">
+                            <td style="padding: 8px 10px; color: #94a3b8; font-size: 0.78rem; white-space: nowrap;">
                                 ${escapeHtml(p.agency || 'Agencia')}
                             </td>
-                            <td style="padding: 8px 10px; text-align: right;">
-                                <a href="${p.url || '#'}" target="_blank" rel="noopener noreferrer" class="btn-boe-xs" style="padding: 3px 8px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
+                            <td style="padding: 8px 10px; text-align: right; white-space: nowrap;">
+                                <a href="${p.url || '#'}" target="_blank" rel="noopener noreferrer" class="btn-boe-xs" style="padding: 3px 8px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;">
                                     Ver en ${escapeHtml(p.portal || 'Portal')} <i data-lucide="external-link" style="width: 10px; height: 10px;"></i>
                                 </a>
                             </td>
                         </tr>
                     `;
                 }).join('');
+
+                pubsCardsHtml = pubs.map(p => {
+                    const isMin = p.is_minimum || p.price === opp.listing_price;
+                    const diffPrice = p.price - opp.listing_price;
+                    return `
+                        <div class="multicanal-card-row" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; box-sizing: border-box;">
+                            <!-- Fila 1: Portal y Estado -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 6px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; font-size: 0.92rem; color: #f8fafc; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                                    <i data-lucide="store" style="width: 15px; height: 15px; color: #38bdf8;"></i>
+                                    <span>${escapeHtml(p.portal || 'Portal')}</span>
+                                </div>
+                                <div>
+                                    ${isMin 
+                                        ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 0.72rem; border: 1px solid rgba(16, 185, 129, 0.3); white-space: nowrap;">🏆 MENOR PRECIO</span>' 
+                                        : `<span style="color: #f87171; font-size: 0.76rem; font-weight: 600; white-space: nowrap;">+${formatCurrency(diffPrice)} vs mín.</span>`}
+                                </div>
+                            </div>
+                            <!-- Fila 2: Celdas uniformes en fila (50% / 50%) -->
+                            <div class="two-cols-equal-grid" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px;">
+                                <div style="background: rgba(0, 0, 0, 0.2); padding: 6px 8px; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; min-height: 48px; box-sizing: border-box;">
+                                    <span style="font-size: 0.70rem; color: #94a3b8; text-transform: uppercase; font-weight: 600; white-space: nowrap; margin-bottom: 2px;">Precio Anunciado</span>
+                                    <strong style="font-size: 0.98rem; font-weight: 800; color: ${isMin ? '#34d399' : '#cbd5e1'}; white-space: nowrap;">
+                                        ${formatCurrency(p.price)}
+                                    </strong>
+                                </div>
+                                <div style="background: rgba(0, 0, 0, 0.2); padding: 6px 8px; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; min-height: 48px; box-sizing: border-box;">
+                                    <span style="font-size: 0.70rem; color: #94a3b8; text-transform: uppercase; font-weight: 600; white-space: nowrap; margin-bottom: 2px;">Comercializadora</span>
+                                    <span style="font-size: 0.82rem; color: #e2e8f0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(p.agency || 'Agencia')}">
+                                        ${escapeHtml(p.agency || 'Agencia')}
+                                    </span>
+                                </div>
+                            </div>
+                            <!-- Fila 3: Botón Enlace directo completo sin cortes -->
+                            <div>
+                                <a href="${p.url || '#'}" target="_blank" rel="noopener noreferrer" class="btn-boe-xs" style="width: 100%; box-sizing: border-box; justify-content: center; padding: 7px 12px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; border-radius: 6px; text-decoration: none;">
+                                    <span>Ver publicación en ${escapeHtml(p.portal || 'Portal')}</span> <i data-lucide="external-link" style="width: 13px; height: 13px;"></i>
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
             } else {
                 pubsRowsHtml = `
                     <tr>
-                        <td colspan="5" style="padding: 10px; text-align: center; color: #94a3b8; font-size: 0.8rem;">
+                        <td colspan="5" style="padding: 10px; text-align: center; color: #94a3b8; font-size: 0.8rem; white-space: nowrap;">
                             Publicación única detectada en ${escapeHtml(opp.primary_portal || 'Portal')} por ${formatCurrency(opp.listing_price)}
                         </td>
                     </tr>
+                `;
+                pubsCardsHtml = `
+                    <div style="padding: 12px; text-align: center; color: #94a3b8; font-size: 0.82rem; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                        Publicación única detectada en ${escapeHtml(opp.primary_portal || 'Portal')} por ${formatCurrency(opp.listing_price)}
+                    </div>
                 `;
             }
 
@@ -1542,12 +1590,12 @@ document.addEventListener('DOMContentLoaded', () => {
             let synergySectionHtml = '';
             if (opp.has_pgou_synergy) {
                 synergySectionHtml = `
-                    <div style="margin-top: 14px; padding: 14px 16px; background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 10px; width: 100%;">
+                    <div style="margin-top: 14px; padding: 14px 16px; background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 10px; width: 100%; box-sizing: border-box;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid rgba(168, 85, 247, 0.25); padding-bottom: 8px;">
                             <span style="font-size: 0.95rem; font-weight: 800; color: #f3e8ff; display: flex; align-items: center; gap: 8px;">
                                 <i data-lucide="crosshair" style="width: 18px; height: 18px; color: #c084fc;"></i> 🎯 SINERGIA URBANÍSTICA DETECTADA: ${escapeHtml(opp.pgou_title || 'Sector PGOU')}
                             </span>
-                            <span style="background: rgba(168, 85, 247, 0.25); color: #c084fc; font-weight: 800; font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.4);">
+                            <span style="background: rgba(168, 85, 247, 0.25); color: #c084fc; font-weight: 800; font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.4); white-space: nowrap;">
                                 ${escapeHtml(opp.pgou_status || 'En Desarrollo')}
                             </span>
                         </div>
@@ -1559,7 +1607,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span style="font-size: 0.75rem; color: #94a3b8; display: block;">Revalorización prevista por transformación urbanística:</span>
                                 <strong style="color: #34d399; font-size: 0.95rem;">${escapeHtml(opp.pgou_uplift || '+25-40% Plusvalía')}</strong>
                             </div>
-                            <button class="btn" onclick="jumpToPgouSector('${opp.pgou_id || ''}')" style="background: linear-gradient(135deg, #9333ea 0%, #6366f1 100%); color: #fff; border: none; font-weight: 700; font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);">
+                            <button class="btn" onclick="jumpToPgouSector('${opp.pgou_id || ''}')" style="background: linear-gradient(135deg, #9333ea 0%, #6366f1 100%); color: #fff; border: none; font-weight: 700; font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4); white-space: nowrap;">
                                 <i data-lucide="map" style="width: 14px; height: 14px;"></i> Abrir Ficha en Visor PGOU
                             </button>
                         </div>
@@ -1569,24 +1617,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
             urbanismDetail = `
                 ${synergySectionHtml}
-                <div style="margin-top: 14px; padding: 14px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; width: 100%;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <span style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-                            <i data-lucide="layers" style="width: 16px; height: 16px; color: #38bdf8;"></i> Análisis Multicanal de Publicaciones (${escapeHtml(opp.x_publicacion || 'x1')})
+                <div style="margin-top: 14px; padding: 14px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; width: 100%; box-sizing: border-box;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap;">
+                        <span style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                            <i data-lucide="layers" style="width: 16px; height: 16px; color: #38bdf8; flex-shrink: 0;"></i> <span>Análisis Multicanal (${escapeHtml(opp.x_publicacion || 'x1')})</span>
                         </span>
-                        <span class="badge-xpublicacion" style="font-size: 0.76rem;">
-                            ${opp.distinct_prices_count || 1} precios distintos detectados
+                        <span class="badge-xpublicacion" style="font-size: 0.76rem; white-space: nowrap; margin-left: auto;">
+                            ${opp.distinct_prices_count || 1} precios detectados
                         </span>
                     </div>
-                    <div class="multicanal-table-container" style="overflow-x: auto; width: 100%; max-width: 100%; -webkit-overflow-scrolling: touch;">
+
+                    <!-- Vista de Escritorio: Tabla tradicional con protección nowrap -->
+                    <div class="multicanal-desktop-view multicanal-table-container" style="overflow-x: auto; width: 100%; max-width: 100%; -webkit-overflow-scrolling: touch;">
                         <table class="multicanal-table" style="width: 100%; border-collapse: collapse; text-align: left;">
                             <thead>
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color: #94a3b8; font-size: 0.74rem;">
-                                    <th style="padding: 6px 10px;">Portal</th>
-                                    <th style="padding: 6px 10px;">Precio Anunciado</th>
-                                    <th style="padding: 6px 10px;">Estado</th>
-                                    <th style="padding: 6px 10px;">Comercializadora</th>
-                                    <th style="padding: 6px 10px; text-align: right;">Enlace</th>
+                                    <th style="padding: 6px 10px; white-space: nowrap;">Portal</th>
+                                    <th style="padding: 6px 10px; white-space: nowrap;">Precio Anunciado</th>
+                                    <th style="padding: 6px 10px; white-space: nowrap;">Estado</th>
+                                    <th style="padding: 6px 10px; white-space: nowrap;">Comercializadora</th>
+                                    <th style="padding: 6px 10px; text-align: right; white-space: nowrap;">Enlace</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1594,6 +1644,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- Vista Móvil / Dispositivos: Celdas por filas para evitar cortes de literales -->
+                    <div class="multicanal-mobile-view">
+                        ${pubsCardsHtml}
+                    </div>
+
                     <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 8px; line-height: 1.4; font-style: italic;">
                         ℹ️ <strong>Regla de Conteo xPublicación</strong>: Si el inmueble se anuncia en diferentes portales al mismo precio, no incrementa el contador. Solo computan importes numéricamente diferentes. HIVEX muestra siempre el precio mínimo garantizado.
                     </div>
@@ -1683,75 +1739,81 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const discountScoreBoxHtml = opp.source_type === 'pgou'
-            ? `<div style="background: rgba(168, 85, 247, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.25);">
-                    <span style="color: #c084fc; display: block; font-size: 0.75rem; font-weight: 600;">Enfoque Inversor PGOU</span>
-                    <strong style="color: #c084fc; font-size: 0.9rem;">📍 Entorno Revalorizable</strong>
+            ? `<div class="kpi-metric-box" style="background: rgba(168, 85, 247, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.25); display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                    <span class="kpi-metric-label" style="color: #c084fc; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; font-weight: 600; line-height: 1.2; margin-bottom: 4px;">Enfoque Inversor PGOU</span>
+                    <strong class="kpi-metric-val" style="color: #c084fc; font-size: 0.90rem; white-space: nowrap;">📍 Entorno Revalorizable</strong>
                </div>`
             : (opp.source_type === 'edictos'
-                ? `<div style="background: rgba(251, 191, 36, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(251, 191, 36, 0.25);">
-                        <span style="color: #fbbf24; display: block; font-size: 0.75rem; font-weight: 600;">Estrategia Legal & Descuento</span>
-                        <strong style="color: #4ade80; font-size: 0.95rem;">-${formatNumber(opp.discount_percentage, 0)}% vs Mercado</strong>
+                ? `<div class="kpi-metric-box" style="background: rgba(251, 191, 36, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(251, 191, 36, 0.25); display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #fbbf24; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; font-weight: 600; line-height: 1.2; margin-bottom: 4px;">Estrategia Legal & Descuento</span>
+                        <strong class="kpi-metric-val" style="color: #4ade80; font-size: 0.95rem; white-space: nowrap;">-${formatNumber(opp.discount_percentage, 0)}% vs Mercado</strong>
                    </div>`
                 : (opp.source_type === 'market'
-                    ? `<div style="background: rgba(16, 185, 129, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25); min-width: 0; word-break: break-word;">
-                            <span style="color: #34d399; display: block; font-size: 0.75rem; font-weight: 600;">Bajada Anuncio en Portal</span>
-                            <strong style="color: #34d399; font-size: 0.95rem;">${opp.price_drop_amount > 0 ? `-${formatNumber(opp.price_drop_percentage, 1)}% (-${formatCurrency(opp.price_drop_amount)})` : '0% (Precio Salida)'}</strong>
-                            ${opp.price_drop_date ? `<span style="font-size: 0.70rem; color: #94a3b8; display: block; margin-top: 2px;">Fecha rebaja: ${escapeHtml(opp.price_drop_date)}</span>` : ''}
+                    ? `<div class="kpi-metric-box" style="background: rgba(16, 185, 129, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                            <div class="kpi-metric-label" style="display: flex; justify-content: space-between; align-items: flex-start; min-height: 2.3em; width: 100%; margin-bottom: 4px;">
+                                <span style="color: #34d399; font-weight: 600; font-size: 0.74rem; line-height: 1.2;">Bajada en Portal</span>
+                                ${opp.price_drop_date ? `<span style="font-size: 0.65rem; color: #94a3b8; white-space: nowrap; margin-left: 4px;">${escapeHtml(opp.price_drop_date)}</span>` : ''}
+                            </div>
+                            <strong class="kpi-metric-val" style="color: #34d399; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                ${opp.price_drop_amount > 0 ? `-${formatNumber(opp.price_drop_percentage, 1)}% (-${formatCurrency(opp.price_drop_amount)})` : '0% (Salida)'}
+                            </strong>
                        </div>`
-                    : `<div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                            <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Descuento vs Mercado</span>
-                            <strong style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
+                    : `<div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                            <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Score Descuento vs Mercado</span>
+                            <strong class="kpi-metric-val" style="color: ${getScoreColor(discountScoreVal)}; font-size: 0.95rem; white-space: nowrap;">${formatNumber(opp.discount_percentage, 2)}% (${formatScore(discountScoreVal)}/100 pts)</strong>
                        </div>`));
 
         const detailedScoresHtml = `
-            <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
-                    <span style="font-weight: 700; font-size: 0.98rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-                        <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8;"></i> KPIs ${opp.source_type === 'pgou' ? '(Entorno Urbano)' : ''}
-                    </span>
-                    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                        <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
+            <div class="detailed-scores-panel" style="margin-top: 16px; background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); box-sizing: border-box;">
+                <div class="kpis-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; gap: 8px; width: 100%;">
+                    <div class="kpis-title" style="font-weight: 700; font-size: 0.98rem; color: #f8fafc; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0;">
+                        <i data-lucide="bar-chart-3" style="width: 17px; height: 17px; color: #38bdf8; flex-shrink: 0;"></i> <span>KPIs ${opp.source_type === 'pgou' ? '(Entorno Urbano)' : ''}</span>
+                    </div>
+                    <div class="kpis-header-badges" style="display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 4px; margin-left: auto; flex-shrink: 0;">
+                        <span class="score-chip" style="${getScoreBgStyle(opp.overall_score)}; padding: 3px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 700; white-space: nowrap; text-align: right; display: inline-block;">
                             Score General: <strong>${formatScore(opp.overall_score)} / 100 pts</strong>
                         </span>
                         ${renderBtlBadge(opp, 'modal')}
                     </div>
                 </div>
-                <div class="two-cols-equal-grid" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; font-size: 0.82rem; width: 100%;">
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Hogar</span>
-                        <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_household_income || 32000)}/año</strong>
+                <div class="two-cols-equal-grid" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; font-size: 0.82rem; width: 100%; box-sizing: border-box;">
+                    <div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Renta Media por Hogar</span>
+                        <strong class="kpi-metric-val" style="color: #f8fafc; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${formatCurrency(opp.avg_household_income || 32000)}/año</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Renta Media por Persona</span>
-                        <strong style="color: #f8fafc; font-size: 0.95rem;">${formatCurrency(opp.avg_person_income || 14500)}/año</strong>
+                    <div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Renta Media por Persona</span>
+                        <strong class="kpi-metric-val" style="color: #f8fafc; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${formatCurrency(opp.avg_person_income || 14500)}/año</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score Renta INE</span>
-                        <strong style="color: ${getScoreColor(opp.income_score)}; font-size: 0.95rem;">${formatScore(opp.income_score)} / 100 pts</strong>
+                    <div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Score Renta INE</span>
+                        <strong class="kpi-metric-val" style="color: ${getScoreColor(opp.income_score)}; font-size: 0.95rem; white-space: nowrap;">${formatScore(opp.income_score)} / 100 pts</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Crecimiento Demográfico INE</span>
-                        <strong style="color: ${getScoreColor(opp.demographic_score)}; font-size: 0.95rem;">+${formatNumber(opp.population_growth_rate, 1)}% (${formatScore(opp.demographic_score)} pts)</strong>
+                    <div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Crecimiento Demográfico INE</span>
+                        <strong class="kpi-metric-val" style="color: ${getScoreColor(opp.demographic_score)}; font-size: 0.95rem; white-space: nowrap;">+${formatNumber(opp.population_growth_rate, 1)}% (${formatScore(opp.demographic_score)} pts)</strong>
                     </div>
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; word-break: break-word;">
-                        <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Score POIs / Entorno (OSM)</span>
-                        <strong style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem;">${formatScore(opp.poi_score)} / 100 pts</strong>
+                    <div class="kpi-metric-box" style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); min-width: 0; display: flex; flex-direction: column; justify-content: space-between; min-height: 74px; height: 100%; box-sizing: border-box; width: 100%;">
+                        <span class="kpi-metric-label" style="color: #94a3b8; display: flex; align-items: flex-start; min-height: 2.3em; font-size: 0.74rem; line-height: 1.2; margin-bottom: 4px;">Score POIs / Entorno (OSM)</span>
+                        <strong class="kpi-metric-val" style="color: ${getScoreColor(opp.poi_score)}; font-size: 0.95rem; white-space: nowrap;">${formatScore(opp.poi_score)} / 100 pts</strong>
                     </div>
                     ${discountScoreBoxHtml}
                     ${(!isSolarOpportunity(opp) && opp.rental_yield !== undefined && opp.rental_yield !== null) ? `
-                    <div style="background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2; min-width: 0; word-break: break-word;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="kpi-btl-box" style="background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04); grid-column: span 2; min-width: 0; box-sizing: border-box; min-height: 58px; display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <div>
-                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Rentabilidad Bruta Alquiler (BTL / Buy to Let)</span>
-                                <strong style="color: ${getBtlStyle(opp.rental_yield).color}; font-size: 1.05rem;">
-                                    ${Number(opp.rental_yield).toFixed(2).replace('.', ',')}% anual
-                                </strong>
-                                <span style="font-size: 0.75rem; color: #94a3b8; margin-left: 6px;">(${Math.round(opp.btl_score !== undefined && opp.btl_score !== null ? opp.btl_score : (opp.yield_score || 0))} pts)</span>
+                                <span style="color: #94a3b8; display: block; font-size: 0.74rem; line-height: 1.2; margin-bottom: 2px;">Rentabilidad Bruta Alquiler (BTL)</span>
+                                <div style="display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;">
+                                    <strong style="color: ${getBtlStyle(opp.rental_yield).color}; font-size: 1.05rem; white-space: nowrap;">
+                                        ${Number(opp.rental_yield).toFixed(2).replace('.', ',')}% anual
+                                    </strong>
+                                    <span style="font-size: 0.74rem; color: #94a3b8; white-space: nowrap;">(${Math.round(opp.btl_score !== undefined && opp.btl_score !== null ? opp.btl_score : (opp.yield_score || 0))} pts)</span>
+                                </div>
                             </div>
                             ${opp.estimated_monthly_rent ? `
-                            <div style="text-align: right;">
-                                <span style="color: #94a3b8; display: block; font-size: 0.75rem;">Alquiler Est. Mercado</span>
-                                <strong style="color: #38bdf8; font-size: 0.95rem;">${formatCurrency(opp.estimated_monthly_rent)}/mes</strong>
+                            <div style="text-align: right; flex-shrink: 0;">
+                                <span style="color: #94a3b8; display: block; font-size: 0.74rem; line-height: 1.2; margin-bottom: 2px;">Alquiler Est. Mercado</span>
+                                <strong style="color: #38bdf8; font-size: 0.98rem; white-space: nowrap;">${formatCurrency(opp.estimated_monthly_rent)}/mes</strong>
                             </div>
                             ` : ''}
                         </div>
@@ -2745,7 +2807,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const label = `${yieldFormatted}% BTL (${pts} pts)`;
 
         if (context === 'modal') {
-            return `<span class="score-chip" title="Estrategia Buy to Let (Rentabilidad Bruta Alquiler)" style="background: ${style.bg}; border: 1px solid ${style.border}; color: ${style.color}; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700;">
+            return `<span class="score-chip" title="Estrategia Buy to Let (Rentabilidad Bruta Alquiler)" style="background: ${style.bg}; border: 1px solid ${style.border}; color: ${style.color}; padding: 3px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 700; white-space: nowrap; text-align: right; display: inline-block;">
                 <strong>${label}</strong>
             </span>`;
         }
