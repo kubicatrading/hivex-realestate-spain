@@ -1929,7 +1929,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ` : `
                         <div class="modal-gallery-counter-badge">
                             <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
-                            <span>Foto 1 de 1 • Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                            <span>Foto 1 de 1 • Fuente: ${modalImages[0] && modalImages[0].includes('maps.googleapis.com') ? 'Google Street View (Fachada)' : escapeHtml(opp.primary_portal || 'Idealista')}</span>
                         </div>
                     `}
                 </div>
