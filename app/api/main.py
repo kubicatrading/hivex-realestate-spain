@@ -666,6 +666,41 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
             "duration_seconds": round(time.time() - t_start, 2)
         }
 
+def is_authorized_cron_or_admin(request: Request, authorization: Optional[str] = None) -> bool:
+    """
+    Valida si la petición proviene de Vercel Cron (User-Agent: vercel-cron/1.0 o x-vercel-cron),
+    de un Bearer CRON_SECRET, parámetro ?secret=, o de un token JWT válido de usuario/administrador.
+    """
+    # 1. Comprobar encabezados de Vercel Cron
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "vercel-cron" in ua or request.headers.get("x-vercel-cron"):
+        return True
+
+    cron_secret = os.environ.get("CRON_SECRET", "").strip()
+
+    # 2. Comprobar parámetro query ?secret=
+    query_secret = request.query_params.get("secret", "").strip()
+    if cron_secret and query_secret and query_secret == cron_secret:
+        return True
+
+    # 3. Comprobar autorización Bearer (CRON_SECRET o JWT)
+    auth = authorization or request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if auth:
+        token = auth.replace("Bearer ", "").strip()
+        if cron_secret and token == cron_secret:
+            return True
+        try:
+            import jwt
+            from app.core.auth import SECRET_KEY, ALGORITHM
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload and payload.get("sub"):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
 @app.api_route("/api/v1/pipeline/run", methods=["GET", "POST"])
 async def trigger_ingestion_pipeline(
     background_tasks: BackgroundTasks,
@@ -673,31 +708,22 @@ async def trigger_ingestion_pipeline(
     sync: bool = Query(False, description="Forzar ejecución síncrona completa")
 ):
     """Ejecuta la captura de subastas reales y planeamientos PGOU."""
-    cron_header = request.headers.get("x-vercel-cron", "")
-    auth_header = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
-    
-    if not cron_header:
-        if not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Autenticación requerida para ejecutar el escáner."
-            )
-        token = auth_header.split(" ", 1)[1]
-        try:
-            jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token de autenticación no válido."
-            )
+    if not is_authorized_cron_or_admin(request):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida para ejecutar el escáner."
+        )
 
-    # Si la petición procede de Vercel Cron (x-vercel-cron) o se solicita síncrona (?sync=true),
+    ua = (request.headers.get("user-agent") or "").lower()
+    is_cron = "vercel-cron" in ua or bool(request.headers.get("x-vercel-cron"))
+
+    # Si la petición procede de Vercel Cron o se solicita síncrona (?sync=true),
     # se ejecuta de forma síncrona dentro del límite de 300s de Vercel Pro para asegurar que no se corta.
-    if cron_header or sync:
+    if is_cron or sync:
         result = await _run_background_pipeline()
         return {
             "status": "completed",
-            "source": "cron" if cron_header else "sync_trigger",
+            "source": "cron" if is_cron else "sync_trigger",
             "result": result
         }
 
@@ -709,36 +735,16 @@ async def trigger_ingestion_pipeline(
 
 @app.api_route("/api/v1/alerts/daily-run", methods=["GET", "POST"])
 async def trigger_daily_alerts(
+    request: Request,
     force: bool = Query(False, description="Forzar envío de alertas aunque se hayan emitido previamente"),
     authorization: Optional[str] = Header(None),
-    cron_header: Optional[str] = Header(None, alias="x-vercel-cron"),
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint para ejecución programada (Vercel Cron 8:00 AM) o manual
+    Endpoint para ejecución programada (Vercel Cron 9:00 AM España / 07:00 UTC) o manual
     del bot de alertas de Real Estate para Telegram (24h).
     """
-    cron_secret = os.environ.get("CRON_SECRET", "").strip()
-    is_cron = bool(cron_header)
-    is_authorized = False
-
-    if cron_secret and authorization:
-        token_candidate = authorization.replace("Bearer ", "").strip()
-        if token_candidate == cron_secret:
-            is_authorized = True
-
-    if not is_cron and not is_authorized:
-        if authorization and authorization.startswith("Bearer "):
-            token = authorization.split(" ")[1]
-            try:
-                from app.api.main import decode_access_token
-                payload = decode_access_token(token)
-                if payload:
-                    is_authorized = True
-            except Exception:
-                pass
-
-    if not is_cron and not is_authorized:
+    if not is_authorized_cron_or_admin(request, authorization):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Autenticación requerida para disparar alertas de Telegram."
@@ -755,35 +761,15 @@ async def trigger_daily_alerts(
 
 @app.api_route("/api/v1/health/cockpit-telegram", methods=["GET", "POST"])
 async def trigger_cockpit_health_alert(
+    request: Request,
     authorization: Optional[str] = Header(None),
-    cron_header: Optional[str] = Header(None, alias="x-vercel-cron"),
     db: Session = Depends(get_db)
 ):
     """
     Endpoint para ejecución programada (Vercel Cron 10:00 AM España / 08:00 UTC) o manual
     de la alerta de salud de cabina (Cockpit Health Alert) para Telegram.
     """
-    cron_secret = os.environ.get("CRON_SECRET", "").strip()
-    is_cron = bool(cron_header)
-    is_authorized = False
-
-    if cron_secret and authorization:
-        token_candidate = authorization.replace("Bearer ", "").strip()
-        if token_candidate == cron_secret:
-            is_authorized = True
-
-    if not is_cron and not is_authorized:
-        if authorization and authorization.startswith("Bearer "):
-            token = authorization.split(" ")[1]
-            try:
-                from app.api.main import decode_access_token
-                payload = decode_access_token(token)
-                if payload:
-                    is_authorized = True
-            except Exception:
-                pass
-
-    if not is_cron and not is_authorized and os.environ.get("VERCEL_ENV") == "production":
+    if not is_authorized_cron_or_admin(request, authorization):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Autenticación requerida para disparar alerta de salud de cabina."

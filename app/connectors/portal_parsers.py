@@ -227,6 +227,9 @@ class IdealistaMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
+                if len(title) < 5 or re.match(r'^\d+/\d+$', title):
+                    continue
+
                 # Contexto previo (para fotos y comercializadora)
                 start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1500)
                 prev_text = markdown_content[start_prev:match.start()]
@@ -594,30 +597,33 @@ class HabitacliaMarkdownParser:
             return listings
 
         # Habitaclia: [Ático con ascensor en venta en...](https://www.habitaclia.com/comprar-...)
-        # o enlaces con /inmueble/ o /viviendas/
+        # o enlaces con /inmueble/, /viviendas/ o /i<id>.htm
         link_pattern = re.compile(
-            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?habitaclia\.com/(?:comprar|viviendas)[^\)]*-(?:i(?P<id>\d+)|(?P<alt_id>\d{6,}))\.htm[^\)]*)\)',
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?habitaclia\.com/(?:[^\)]*-)?i?(?P<id>\d{6,})\.htm[^\s\)]*)(?:\s+"[^"]*")?\)',
             re.IGNORECASE
         )
 
         matches = list(link_pattern.finditer(markdown_content))
         for i, match in enumerate(matches):
             try:
-                item_id = match.group("id") or match.group("alt_id") or str(100000 + i)
+                item_id = match.group("id") or str(100000 + i)
                 title = match.group("title").strip()
                 url = match.group("url")
 
-                # Contexto previo y posterior
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
-                prev_text = markdown_content[start_prev:match.end()]
-                end_post = min(len(markdown_content), match.end() + 800)
+                if len(title) < 5 or re.match(r'^\d+/\d+$', title):
+                    continue
+
+                # Contexto previo y posterior (amplio para abarcar carrusel de fotos previo)
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 8000)
+                prev_text = markdown_content[start_prev:match.start()]
+                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 2000)
                 post_text = markdown_content[match.end():end_post]
 
                 # Descartar naves
                 if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
                     continue
 
-                price_match = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', post_text)
+                price_match = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', prev_text) or re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', post_text)
                 if not price_match:
                     continue
 
@@ -628,12 +634,25 @@ class HabitacliaMarkdownParser:
                 # Localización
                 loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
 
-                # Extraer imágenes si las hay
+                # Superficie y habitaciones
+                surf_match = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', post_text) or re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', prev_text)
+                surface_m2 = float(surf_match.group(1).replace(".", "")) if surf_match else 85.0
+
+                rooms_match = re.search(r'(\d+)\s*hab', post_text) or re.search(r'(\d+)\s*hab', prev_text)
+                rooms = int(rooms_match.group(1)) if rooms_match else 3
+
+                # Extraer hasta 20 imágenes del carrusel
                 images = []
-                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text)
-                for img_url in img_matches:
-                    if img_url not in images:
-                        images.append(img_url)
+                raw_img_matches = (
+                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text + "\n" + post_text)
+                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text)
+                )
+                for img_url in raw_img_matches:
+                    clean_img = img_url.split("?")[0] + "?rule=web_listing_440x330" if "static.fotocasa.es" in img_url else img_url
+                    if clean_img not in images:
+                        images.append(clean_img)
+                    if len(images) >= 20:
+                        break
 
                 opportunity = {
                     "id": f"MKT-HABITACLIA-{item_id}",
@@ -781,6 +800,9 @@ class FotocasaMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
+                if len(title) < 5 or re.match(r'^\d+/\d+$', title):
+                    continue
+
                 start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
                 prev_text = markdown_content[start_prev:match.start()]
                 end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
@@ -822,12 +844,18 @@ class FotocasaMarkdownParser:
 
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
-                # Imágenes
+                # Imágenes: capturar hasta 20 fotos del inmueble
                 images = []
-                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text[:1200])
-                for img_url in img_matches:
-                    if img_url not in images:
-                        images.append(img_url)
+                raw_img_matches = (
+                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text + "\n" + post_text[:4000])
+                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text[:4000])
+                )
+                for img_url in raw_img_matches:
+                    clean_img = img_url.split("?")[0] + "?rule=web_listing_440x330" if "static.fotocasa.es" in img_url else img_url
+                    if clean_img not in images:
+                        images.append(clean_img)
+                    if len(images) >= 20:
+                        break
 
                 # Ubicación y KPIs meso
                 loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)

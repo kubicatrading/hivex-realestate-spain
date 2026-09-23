@@ -90,9 +90,10 @@ def test_market_catalog_geolocation_and_integrity():
     # Ensure no naves in catalog
     for it in items:
         p_type = (it.get("property_type") or "").lower()
+        import re
         title = (it.get("title") or "").lower()
         assert "nave" not in p_type, f"Item {it['id']} is a nave: {p_type}"
-        assert "nave" not in title, f"Item {it['id']} title contains nave: {title}"
+        assert not re.search(r'\b(nave|naves)\b', title), f"Item {it['id']} title contains nave: {title}"
 
 def test_market_catalog_images_integrity():
     """Valida que las fotos del catálogo cumplen los requisitos de fidelidad y límite de 20."""

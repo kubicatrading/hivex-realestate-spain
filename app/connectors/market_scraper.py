@@ -395,7 +395,7 @@ class MarketScraper:
                 ("https://www.pisos.com/comprar/pisos-valencia/", "Valencia", "pisoscom"),
             ],
             "alicante": [
-                ("https://www.idealista.com/venta-viviendas/alicante-alacant/con-precio-rebajado/", "Alicante", "idealista"),
+                ("https://www.habitaclia.com/viviendas-alicante.htm", "Alicante", "habitaclia"),
                 ("https://www.pisos.com/comprar/pisos-alicante/", "Alicante", "pisoscom"),
             ],
             "tarragona": [
@@ -403,37 +403,37 @@ class MarketScraper:
                 ("https://www.habitaclia.com/comprar-vivienda-en-tarragona/buscador.htm", "Tarragona", "habitaclia"),
             ],
             "malaga": [
-                ("https://www.idealista.com/venta-viviendas/malaga-costa-del-sol/con-precio-rebajado/", "Málaga", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/malaga-malaga/con-precio-rebajado/", "Málaga", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l", "Málaga", "fotocasa"),
             ],
         }
 
         # 3. Resto de Mercados Estratégicos: 1 página cada uno (24 páginas)
         tier_3 = {
-            "toledo": [("https://www.idealista.com/venta-viviendas/talavera-de-la-reina-toledo/con-precio-rebajado/", "Toledo", "idealista")],
-            "guipuzcoa": [("https://www.idealista.com/venta-viviendas/guipuzcoa/con-precio-rebajado/", "Guipúzcoa", "idealista")],
-            "vizcaya": [("https://www.idealista.com/venta-viviendas/vizcaya/con-precio-rebajado/", "Vizcaya", "idealista")],
-            "alava": [("https://www.idealista.com/venta-viviendas/alava/con-precio-rebajado/", "Álava", "idealista")],
-            "navarra": [("https://www.idealista.com/venta-viviendas/navarra/con-precio-rebajado/", "Navarra", "idealista")],
-            "cantabria": [("https://www.idealista.com/venta-viviendas/cantabria/con-precio-rebajado/", "Cantabria", "idealista")],
-            "baleares": [("https://www.idealista.com/venta-viviendas/baleares/con-precio-rebajado/", "Baleares", "idealista")],
-            "las palmas": [("https://www.idealista.com/venta-viviendas/las-palmas/con-precio-rebajado/", "Las Palmas", "idealista")],
-            "tenerife": [("https://www.idealista.com/venta-viviendas/santa-cruz-de-tenerife-provincia/con-precio-rebajado/", "Santa Cruz de Tenerife", "idealista")],
             "sevilla": [("https://www.idealista.com/venta-viviendas/sevilla-sevilla/con-precio-rebajado/", "Sevilla", "idealista")],
-            "zaragoza": [("https://www.idealista.com/venta-viviendas/zaragoza-provincia/con-precio-rebajado/", "Zaragoza", "idealista")],
-            "cadiz": [("https://www.idealista.com/venta-viviendas/cadiz-provincia/con-precio-rebajado/", "Cádiz", "idealista")],
-            "coruña": [("https://www.idealista.com/venta-viviendas/a-coruna-provincia/con-precio-rebajado/", "A Coruña", "idealista")],
-            "asturias": [("https://www.idealista.com/venta-viviendas/asturias/con-precio-rebajado/", "Asturias", "idealista")],
-            "murcia": [("https://www.idealista.com/venta-viviendas/murcia-provincia/con-precio-rebajado/", "Murcia", "idealista")],
-            "valladolid": [("https://www.idealista.com/venta-viviendas/valladolid-provincia/con-precio-rebajado/", "Valladolid", "idealista")],
-            "granada": [("https://www.idealista.com/venta-viviendas/granada-provincia/con-precio-rebajado/", "Granada", "idealista")],
-            "cordoba": [("https://www.idealista.com/venta-viviendas/cordoba-provincia/con-precio-rebajado/", "Córdoba", "idealista")],
-            "girona": [("https://www.idealista.com/venta-viviendas/girona-provincia/con-precio-rebajado/", "Girona", "idealista")],
-            "pontevedra": [("https://www.idealista.com/venta-viviendas/pontevedra-provincia/con-precio-rebajado/", "Pontevedra", "idealista")],
-            "almeria": [("https://www.idealista.com/venta-viviendas/almeria-provincia/con-precio-rebajado/", "Almería", "idealista")],
-            "castellon": [("https://www.idealista.com/venta-viviendas/castellon-provincia/con-precio-rebajado/", "Castellón", "idealista")],
-            "salamanca": [("https://www.idealista.com/venta-viviendas/salamanca-provincia/con-precio-rebajado/", "Salamanca", "idealista")],
-            "burgos": [("https://www.idealista.com/venta-viviendas/burgos-provincia/con-precio-rebajado/", "Burgos", "idealista")],
+            "zaragoza": [("https://www.idealista.com/venta-viviendas/zaragoza-zaragoza/con-precio-rebajado/", "Zaragoza", "idealista")],
+            "murcia": [("https://www.idealista.com/venta-viviendas/murcia-murcia/con-precio-rebajado/", "Murcia", "idealista")],
+            "valladolid": [("https://www.idealista.com/venta-viviendas/valladolid-valladolid/con-precio-rebajado/", "Valladolid", "idealista")],
+            "baleares": [("https://www.idealista.com/venta-viviendas/palma-de-mallorca-baleares/con-precio-rebajado/", "Baleares", "idealista")],
+            "toledo": [("https://www.idealista.com/venta-viviendas/talavera-de-la-reina-toledo/con-precio-rebajado/", "Toledo", "idealista")],
+            "guipuzcoa": [("https://www.idealista.com/venta-viviendas/donostia-san-sebastian-guipuzcoa/con-precio-rebajado/", "Guipúzcoa", "idealista")],
+            "vizcaya": [("https://www.idealista.com/venta-viviendas/bilbao-vizcaya/con-precio-rebajado/", "Vizcaya", "idealista")],
+            "alava": [("https://www.idealista.com/venta-viviendas/vitoria-gasteiz-alava/con-precio-rebajado/", "Álava", "idealista")],
+            "navarra": [("https://www.idealista.com/venta-viviendas/pamplona-iruna-navarra/con-precio-rebajado/", "Navarra", "idealista")],
+            "cantabria": [("https://www.idealista.com/venta-viviendas/santander-cantabria/con-precio-rebajado/", "Cantabria", "idealista")],
+            "las palmas": [("https://www.idealista.com/venta-viviendas/las-palmas-de-gran-canaria-las-palmas/con-precio-rebajado/", "Las Palmas", "idealista")],
+            "tenerife": [("https://www.idealista.com/venta-viviendas/santa-cruz-de-tenerife-tenerife/con-precio-rebajado/", "Santa Cruz de Tenerife", "idealista")],
+            "cadiz": [("https://www.idealista.com/venta-viviendas/cadiz-cadiz/con-precio-rebajado/", "Cádiz", "idealista")],
+            "coruña": [("https://www.idealista.com/venta-viviendas/a-coruna-coruna/con-precio-rebajado/", "A Coruña", "idealista")],
+            "asturias": [("https://www.idealista.com/venta-viviendas/gijon-asturias/con-precio-rebajado/", "Asturias", "idealista")],
+            "granada": [("https://www.idealista.com/venta-viviendas/granada-granada/con-precio-rebajado/", "Granada", "idealista")],
+            "cordoba": [("https://www.idealista.com/venta-viviendas/cordoba-cordoba/con-precio-rebajado/", "Córdoba", "idealista")],
+            "girona": [("https://www.idealista.com/venta-viviendas/girona-girona/con-precio-rebajado/", "Girona", "idealista")],
+            "pontevedra": [("https://www.idealista.com/venta-viviendas/vigo-pontevedra/con-precio-rebajado/", "Pontevedra", "idealista")],
+            "almeria": [("https://www.idealista.com/venta-viviendas/almeria-almeria/con-precio-rebajado/", "Almería", "idealista")],
+            "castellon": [("https://www.idealista.com/venta-viviendas/castellon-de-la-plana-castello-de-la-plana-castellon/con-precio-rebajado/", "Castellón", "idealista")],
+            "salamanca": [("https://www.idealista.com/venta-viviendas/salamanca-salamanca/con-precio-rebajado/", "Salamanca", "idealista")],
+            "burgos": [("https://www.idealista.com/venta-viviendas/burgos-burgos/con-precio-rebajado/", "Burgos", "idealista")],
         }
 
         targets = []
@@ -550,10 +550,10 @@ class MarketScraper:
         import json
         from pathlib import Path
         candidate_paths = [
-            Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
             Path.cwd() / "app" / "data" / "verified_market_catalog.json",
             Path("/var/task/app/data/verified_market_catalog.json"),
+            Path("/tmp/verified_market_catalog.json"),
         ]
         for catalog_path in candidate_paths:
             if catalog_path.exists():
