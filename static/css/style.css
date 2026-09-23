@@ -1200,6 +1200,15 @@ body {
     display: none;
 }
 
+#modal-google-maps {
+    z-index: 10005 !important;
+}
+
+#modal-google-maps .modal-content {
+    z-index: 10006 !important;
+    max-width: 850px;
+}
+
 .modal-content {
     width: 100%;
     max-width: 650px;

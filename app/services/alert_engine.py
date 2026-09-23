@@ -109,7 +109,8 @@ class RealEstateAlertEngine:
             if not BOESubastasScraper.is_nave(
                 title=it.get("title", ""),
                 desc=it.get("description", ""),
-                property_type=it.get("property_type", "")
+                property_type=it.get("property_type", ""),
+                surface_m2=it.get("surface_m2")
             )
         ]
 

@@ -3,7 +3,7 @@ import certifi
 import httpx
 import xml.etree.ElementTree as ET
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -207,3 +207,46 @@ class CatastroClient:
         except Exception as e:
             logger.warning(f"Error resolviendo Catastro por dirección para {locality}: {e}")
         return None
+
+    def get_coordinates_from_refcat(self, refcat: str) -> Optional[Tuple[float, float]]:
+        """
+        Consulta las coordenadas geográficas oficiales (ETRS89 / WGS84 EPSG:4326) de la parcela
+        en la Sede Electrónica del Catastro (DGC) mediante el servicio Consulta_CPMRC.
+        Devuelve (latitud, longitud) con precisión milimétrica sobre la propia parcela.
+        """
+        if not refcat:
+            return None
+        clean_ref = self.normalize_cadastral_reference(refcat)
+        if len(clean_ref) < 14 or clean_ref.upper().startswith("NO"):
+            return None
+        
+        # El servicio oficial Consulta_CPMRC requiere exactamente las 14 primeras posiciones (código de parcela)
+        parcel_ref = clean_ref[:14]
+        url = "http://ovc.catastro.meh.es/ovcservweb/ovcswlocalizacionrc/ovccoordenadas.asmx/Consulta_CPMRC"
+        params = {
+            "Provincia": "",
+            "Municipio": "",
+            "SRS": "EPSG:4326",
+            "RC": parcel_ref
+        }
+        try:
+            if not self.client:
+                return None
+            resp = self.client.get(url, params=params, timeout=5.0)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                xcen, ycen = None, None
+                for elem in root.iter():
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag.lower() == "xcen" and elem.text:
+                        xcen = float(elem.text.strip())
+                    elif tag.lower() == "ycen" and elem.text:
+                        ycen = float(elem.text.strip())
+                if xcen is not None and ycen is not None:
+                    # Validar coordenadas en rango geográfico de España peninsular, Baleares o Canarias
+                    if 27.0 <= ycen <= 44.5 and -19.0 <= xcen <= 5.0:
+                        return (round(ycen, 6), round(xcen, 6))
+        except Exception as e:
+            logger.debug(f"No se pudieron obtener coordenadas de Catastro para {refcat}: {e}")
+        return None
+

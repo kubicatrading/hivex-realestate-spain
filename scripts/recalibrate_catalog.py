@@ -29,6 +29,7 @@ def recalibrate():
     recalibrated_count = 0
     cp_counts = {}
 
+    valid_items = []
     for item in items:
         # Descartar naves industriales según regla de usuario
         prop_type = (item.get("property_type") or "").lower()
@@ -37,9 +38,19 @@ def recalibrate():
             continue
 
         title = item.get("title") or item.get("address", "")
-        prov = item.get("province", "Madrid")
-        cp = item.get("postal_code")
+        t_check = (title + " " + (item.get("address") or "")).lower()
 
+        prov = item.get("province") or item.get("locality") or "Madrid"
+        if "valencia" in t_check or "valència" in t_check:
+            prov = "Valencia"
+        elif "barcelona" in t_check:
+            prov = "Barcelona"
+        elif "málaga" in t_check or "malaga" in t_check:
+            prov = "Málaga"
+        elif "madrid" in t_check:
+            prov = "Madrid"
+
+        cp = item.get("postal_code")
         loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, prov, cp)
 
         item["postal_code"] = loc_data["postal_code"]
@@ -110,11 +121,12 @@ def recalibrate():
         item["overall_score"] = overall_score
         item["final_score"] = overall_score
 
+        valid_items.append(item)
         recalibrated_count += 1
         cp_counts[item["postal_code"]] = cp_counts.get(item["postal_code"], 0) + 1
 
     # Ordenar por oportunidad relevante
-    items.sort(
+    valid_items.sort(
         key=lambda x: (
             1 if x.get("is_new") else 0,
             max(x.get("overall_score") or 0.0, x.get("btl_score") or 0.0),
@@ -124,7 +136,7 @@ def recalibrate():
     )
 
     with open(CATALOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+        json.dump(valid_items, f, ensure_ascii=False, indent=2)
 
     logger.info(f"Recalibración completada con éxito. {recalibrated_count} oportunidades actualizadas.")
     logger.info(f"Distribución de principales CPs: {dict(list(sorted(cp_counts.items(), key=lambda x: x[1], reverse=True))[:15])}")

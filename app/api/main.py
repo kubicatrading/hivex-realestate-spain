@@ -882,7 +882,8 @@ def get_opportunities(
         for opp in opportunities:
             try:
                 auc = opp.auction
-                if auc and (BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or "") or BOESubastasScraper.is_nave(auc.title or "", auc.description or "", auc.property_type or "")):
+                auc_surf = getattr(auc, "surface_m2", None) or (auc.parcel.area_m2 if getattr(auc, "parcel", None) else None)
+                if auc and (BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or "") or BOESubastasScraper.is_nave(auc.title or "", auc.description or "", auc.property_type or "", surface_m2=auc_surf)):
                     continue
 
                 # Auto-sync description for Calle Tejedores 21 in DB if description is abbreviated in PostgreSQL
@@ -897,30 +898,50 @@ def get_opportunities(
 
                 strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
                 
-                # Extract coordinates from lat/lon fields, geometry, or fallback by province/locality
+                # Extract coordinates from lat/lon fields, geometry, or fallback by Catastro/province/locality
                 lat, lon = None, None
                 if auc and auc.lat is not None and auc.lon is not None:
-                    lat, lon = auc.lat, auc.lon
+                    # Validar rango peninsular/insular y descartar coordenadas erróneas previas en el mar de Alicante
+                    is_in_alicante_sea = (38.20 <= auc.lat <= 38.338 and -0.52 <= auc.lon <= -0.45)
+                    if 27.0 <= auc.lat <= 44.5 and -19.0 <= auc.lon <= 5.0 and not is_in_alicante_sea:
+                        lat, lon = auc.lat, auc.lon
                 elif auc and auc.location:
                     try:
                         point = to_shape(auc.location)
-                        lat, lon = point.y, point.x
+                        if 27.0 <= point.y <= 44.5 and -19.0 <= point.x <= 5.0:
+                            lat, lon = point.y, point.x
                     except Exception:
                         pass
-                
-                base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
-                
-                # Check if lat/lon is missing or is significantly mismatched from the actual province center (> 40km away)
-                mismatch = False
-                if lat is not None and lon is not None:
-                    if abs(lat - base_lat) > 0.4 or abs(lon - base_lon) > 0.4:
-                        mismatch = True
 
-                if (not lat or not lon) or mismatch:
-                    # Deterministic micro-jitter based on auction ID to prevent overlapping pins
-                    seed_val = (hash(auc.id_subasta if auc else "") % 1000) / 10000.0
-                    lat = round(base_lat + (seed_val - 0.05), 6)
-                    lon = round(base_lon + (seed_val - 0.05), 6)
+                # Si no tiene coordenadas válidas o estaban en el mar, resolver con máxima precisión por Catastro
+                if (lat is None or lon is None) and auc and auc.refcat:
+                    try:
+                        cat_c = CatastroClient()
+                        cat_coords = cat_c.get_coordinates_from_refcat(auc.refcat)
+                        if cat_coords:
+                            lat, lon = cat_coords
+                            auc.lat, auc.lon = lat, lon
+                            try:
+                                db.commit()
+                            except Exception:
+                                db.rollback()
+                    except Exception:
+                        pass
+
+                # Si aún no tiene coordenadas, geolocalizar por municipio/localidad sobre tierra firme
+                if lat is None or lon is None:
+                    base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
+                    # Micro-offset determinista milimétrico (~30m) para evitar que dos chinchetas en el mismo municipio se tapen al 100%
+                    hash_val = abs(hash(auc.id_subasta if auc else "")) % 100
+                    j_lat = ((hash_val % 10) - 5) * 0.00008
+                    j_lon = (((hash_val // 10) % 10) - 5) * 0.00008
+                    lat = round(base_lat + j_lat, 6)
+                    lon = round(base_lon + j_lon, 6)
+
+                    # Garantizar tierra firme estricta si es Alicante ciudad
+                    if auc and auc.locality and ("alicante" in auc.locality.lower() or "alacant" in auc.locality.lower()):
+                        lat = max(38.3420, lat)
+                        lon = min(-0.4810, lon)
 
                 # Parse stored JSON images list (excluding legacy Catastro Ortofoto URLs)
                 images_list = []
@@ -1309,7 +1330,7 @@ def get_opportunities(
             pgou_items = pgou_scraper.fetch_pgou_opportunities(province=province)
 
             for p_item in pgou_items:
-                if BOESubastasScraper.is_nave(p_item.get("title", ""), p_item.get("description", ""), p_item.get("property_type", "")):
+                if BOESubastasScraper.is_nave(p_item.get("title", ""), p_item.get("description", ""), p_item.get("property_type", ""), surface_m2=p_item.get("surface_m2")):
                     continue
                 listing_p = p_item.get("listing_price", 0.0)
                 surf = p_item.get("surface_m2", 1.0)
@@ -1382,7 +1403,7 @@ def get_opportunities(
             edictos_items = edictos_scraper.fetch_edictos_opportunities(province=province)
 
             for e_item in edictos_items:
-                if BOESubastasScraper.is_nave(e_item.get("title", ""), e_item.get("description", ""), e_item.get("property_type", "")):
+                if BOESubastasScraper.is_nave(e_item.get("title", ""), e_item.get("description", ""), e_item.get("property_type", ""), surface_m2=e_item.get("surface_m2")):
                     continue
                 listing_p = e_item.get("listing_price", 0.0)
                 surf = e_item.get("surface_m2", 1.0)
@@ -1449,7 +1470,7 @@ def get_opportunities(
             )
 
             for m_item in market_items:
-                if BOESubastasScraper.is_nave(m_item.get("title", ""), m_item.get("description", ""), m_item.get("property_type", "")):
+                if BOESubastasScraper.is_nave(m_item.get("title", ""), m_item.get("description", ""), m_item.get("property_type", ""), surface_m2=m_item.get("surface_m2")):
                     continue
                 is_market_new = bool(m_item.get("id") in active_new_market_ids)
                 m_item["is_new"] = is_market_new

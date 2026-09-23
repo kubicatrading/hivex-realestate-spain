@@ -156,4 +156,81 @@ def test_market_scraper_independent_discounts():
     assert "discount_vs_market_amount" in processed
     assert processed["discount_vs_market_amount"] == processed["potential_gross_profit"]
 
+def test_market_scraper_twenty_images_gallery():
+    """Verifica máxima precisión: solo fotos reales aportadas por la inmobiliaria, sin relleno simulado y con tope de 20."""
+    scraper = MarketScraper()
+    # 1. Caso con 1 sola foto auténtica aportada por la inmobiliaria -> Debe mantenerse exactamente en 1 (sin inventar fotos)
+    one_img_sample = {
+        "id": "MKT-IMG-001",
+        "title": "Piso moderno",
+        "address": "Calle Serrano 10",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "listing_price": 300000.0,
+        "surface_m2": 80.0,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/custom/img.jpg"],
+        "publications": [{"portal": "Idealista", "price": 300000.0}]
+    }
+    processed = scraper._process_market_listing(one_img_sample)
+    assert processed is not None
+    assert len(processed["images"]) == 1
+    assert processed["images"][0] == "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/custom/img.jpg"
+
+    # 2. Caso con 5 fotos (con un duplicado) -> Debe limpiar el duplicado y devolver exactamente 4 fotos reales
+    multi_img_sample = {
+        "id": "MKT-IMG-002",
+        "title": "Piso en Chamberí",
+        "address": "Calle Almagro",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "listing_price": 450000.0,
+        "surface_m2": 95.0,
+        "images": [
+            "https://img4.idealista.com/img1.jpg",
+            "https://img4.idealista.com/img2.jpg",
+            "https://img4.idealista.com/img3.jpg",
+            "https://img4.idealista.com/img2.jpg",  # duplicado
+            "https://img4.idealista.com/img4.jpg",
+        ],
+        "publications": [{"portal": "Idealista", "price": 450000.0}]
+    }
+    proc_multi = scraper._process_market_listing(multi_img_sample)
+    assert proc_multi is not None
+    assert len(proc_multi["images"]) == 4
+
+    # 3. Caso con más de 20 fotos reales -> Debe aplicar el tope máximo de 20
+    large_gallery = [f"https://img4.idealista.com/img_{i}.jpg" for i in range(25)]
+    large_sample = {
+        "id": "MKT-IMG-003",
+        "title": "Chalet de lujo",
+        "address": "La Moraleja",
+        "locality": "Alcobendas",
+        "province": "Madrid",
+        "listing_price": 1200000.0,
+        "surface_m2": 400.0,
+        "images": large_gallery,
+        "publications": [{"portal": "Idealista", "price": 1200000.0}]
+    }
+    proc_large = scraper._process_market_listing(large_sample)
+    assert proc_large is not None
+    assert len(proc_large["images"]) == 20
+
+    # 4. Caso sin fotos aportadas -> Debe ser lista vacía, sin inventar imágenes
+    zero_sample = {
+        "id": "MKT-IMG-004",
+        "title": "Terreno rústico",
+        "address": "Camino Viejo",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "strategy": "LAND_DEVELOPMENT",
+        "listing_price": 100000.0,
+        "surface_m2": 1500.0,
+        "images": [],
+        "publications": [{"portal": "Idealista", "price": 100000.0}]
+    }
+    proc_zero = scraper._process_market_listing(zero_sample)
+    assert proc_zero is not None
+    assert len(proc_zero["images"]) == 0
+
+
 

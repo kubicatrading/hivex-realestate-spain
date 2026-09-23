@@ -47,6 +47,73 @@ class MarketScraper:
         self.timeout = float(os.environ.get("MARKET_SCRAPER_TIMEOUT", "10.0"))
         self.supadata_client = SupadataClient()
 
+    TARGET_GALLERY_SIZE = 20
+
+    RESIDENTIAL_CDN_GALLERY = [
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/0a/08/72/1347770919.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/1a/89/e5/1446923522.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/a2/07/c2/1446923546.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/95/b2/48/1446923549.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/56/f5/0f/1446923552.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ee/de/11/1446923565.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ce/5a/64/1474033788.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/10/f8/73/1474033790.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/7e/6d/0f/1460944140.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ac/40/60/1474033792.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/98/f6/e6/1474033797.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/2b/8a/68/1474033794.jpg",
+        "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/89/16/3c/1405310886.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/de/64/53/1474033815.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/3c/77/22/1474033798.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/e2/5b/1d/1474033799.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/3a/b3/94/1474033819.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/07/1e/18/1474033820.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/06/24/e9/1474033821.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/5f/b3/19/1459107087.jpg",
+    ]
+
+    SOLAR_CDN_GALLERY = [
+        "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/dc/37/e4/1332096505.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/dc/37/e4/1332096505.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/f1/2a/3b/1332096506.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/e3/4c/5d/1332096507.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/a4/5e/6f/1332096508.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/b5/6f/7a/1332096509.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/c6/7a/8b/1332096510.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/d7/8b/9c/1332096511.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/e8/9c/0d/1332096512.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/f9/0d/1e/1332096513.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/0a/1e/2f/1332096514.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/1b/2f/3a/1332096515.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/2c/3a/4b/1332096516.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/3d/4b/5c/1332096517.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/4e/5c/6d/1332096518.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/5f/6d/7e/1332096519.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/6a/7e/8f/1332096520.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/7b/8f/9a/1332096521.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/8c/9a/0b/1332096522.jpg",
+        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/9d/0b/1c/1332096523.jpg",
+    ]
+
+    @classmethod
+    def ensure_twenty_images(cls, images: Optional[List[str]], is_solar: bool = False, item_id: str = "") -> List[str]:
+        """
+        Garantiza máxima fidelidad y precisión: conserva única y exclusivamente las fotografías
+        reales aportadas por el portal inmobiliario / anunciante para este inmueble concreto.
+        No se añaden fotos simuladas ni de relleno artificial si el anuncio tiene menos imágenes.
+        Elimina duplicados, descarta URLs vacías o inválidas y aplica un tope máximo de 20 fotos reales.
+        """
+        valid_imgs = []
+        for img in (images or []):
+            if img and isinstance(img, str):
+                cleaned = img.strip()
+                if cleaned and cleaned not in valid_imgs:
+                    valid_imgs.append(cleaned)
+        return valid_imgs[:cls.TARGET_GALLERY_SIZE]
+
+    # Alias de compatibilidad
+    ensure_twelve_images = ensure_twenty_images
+
     def fetch_market_opportunities(
         self,
         province: Optional[str] = None,
@@ -512,7 +579,8 @@ class MarketScraper:
         if BOESubastasScraper.is_nave(
             title=item.get("title", ""),
             desc=item.get("description", ""),
-            property_type=item.get("property_type", "")
+            property_type=item.get("property_type", ""),
+            surface_m2=item.get("surface_m2")
         ):
             return None
 
@@ -691,7 +759,7 @@ class MarketScraper:
             
             "refcat": item.get("refcat"),
             "portal_id": item.get("portal_id"),
-            "images": item.get("images") or [],
+            "images": self.ensure_twenty_images(item.get("images"), is_solar=is_solar, item_id=str(item.get("id") or "")),
             "description": item.get("description", ""),
             "created_at": item.get("first_published_date", ""),
             

@@ -31,6 +31,21 @@ class EdictosScraper:
         """
         items = self._all_opportunities
 
+        # Filtrar naves, almacenes y edificios industriales
+        try:
+            from app.connectors.boe_scraper import BOESubastasScraper
+            items = [
+                it for it in items
+                if not BOESubastasScraper.is_nave(
+                    title=it.get("title", ""),
+                    desc=it.get("description", ""),
+                    property_type=it.get("property_type", ""),
+                    surface_m2=it.get("surface_m2")
+                )
+            ]
+        except Exception:
+            pass
+
         if province:
             p_clean = province.strip().lower()
             items = [item for item in items if p_clean in item.get("province", "").lower()]

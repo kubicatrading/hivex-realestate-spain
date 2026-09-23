@@ -563,11 +563,21 @@ class BOESubastasScraper:
         """
         return []
 
-    def geocode_address(self, address: str, locality: str, province: str) -> tuple:
+    def geocode_address(self, address: str, locality: str, province: str, refcat: str = "") -> tuple:
         """
-        Geolocaliza de forma precisa el inmueble usando la provincia y localidad en España.
-        Aplica micro-desplazamiento para visualización clara de chinchetas múltiples en la misma zona.
+        Geolocaliza de forma precisa el inmueble usando Catastro (máxima precisión milimétrica)
+        si se dispone de referencia catastral, o mediante el callejero municipal en tierra firme.
         """
+        if refcat:
+            try:
+                from app.connectors.catastro_client import CatastroClient
+                cat = CatastroClient()
+                coords = cat.get_coordinates_from_refcat(refcat)
+                if coords:
+                    return coords
+            except Exception:
+                pass
+
         from app.core.geo_utils import get_spanish_province_coords
         return get_spanish_province_coords(province_str=province, locality_str=locality, apply_jitter=True)
 
@@ -604,10 +614,11 @@ class BOESubastasScraper:
         return False
 
     @staticmethod
-    def is_nave(title: str = "", desc: str = "", property_type: str = "") -> bool:
+    def is_nave(title: str = "", desc: str = "", property_type: str = "", surface_m2: Optional[float] = None) -> bool:
         """
-        Clasificador estricto para descartar oportunidades de NAVES (industriales, comerciales,
-        almacenes, logísticas o agrícolas) en favor exclusivo de inmuebles residenciales o solares.
+        Clasificador estricto para descartar oportunidades de NAVES y ALMACENES
+        (industriales, comerciales, almacenes, logísticas, agrícolas o talleres)
+        en favor exclusivo de inmuebles residenciales o solares.
         """
         t_low = (title or '').lower()
         d_low = (desc or '').lower()
@@ -615,11 +626,11 @@ class BOESubastasScraper:
         combined = f"{t_low} {d_low} {pt_low}"
 
         # 1. Tipo de propiedad declarado
-        if any(w in pt_low for w in ['nave', 'industrial']):
+        if any(w in pt_low for w in ['nave', 'industrial', 'almacen', 'almacén', 'logistico', 'logístico', 'taller']):
             return True
 
-        # 2. Título o encabezado menciona expresamente nave
-        if re.search(r'\bnaves?\b', t_low):
+        # 2. Título o encabezado menciona expresamente nave o almacén
+        if re.search(r'\b(naves?|almac[eé]n(es)?|talleres?)\b', t_low):
             return True
 
         # 3. Patrones directos en descripción
@@ -633,16 +644,26 @@ class BOESubastasScraper:
             r'\bm[oó]dulo\s+o\s+nave\b',
             r'\bse\s+alza\s+una\s+nave\b',
             r'\bconjunto\s+industrial\b',
-            r'\bpol[ií]gono\s+industrial.*?\bnaves?\b',
-            r'\bnave\s+sita\b'
+            r'\bedificio\s+industrial\b',
+            r'\bedificio\s+terciario\b',
+            r'\bparque\s+empresarial\b',
+            r'\bpol[ií]gono\s+industrial\b',
+            r'\bnave\s+sita\b',
+            r'\balmac[eé]n\b',
+            r'\bplataforma\s+log[ií]stica\b'
         ]
         if any(re.search(pat, combined) for pat in nave_patterns):
             return True
 
         # 4. Comienzo de descripción que especifica tipo de finca
         clean_desc = re.sub(r'^(urbana|rústica|rustica|finca|elemento|entidad|1/\d+|100%|pleno dominio)?\s*[\d\w\.-]*\s*[\.:,-]?\s*', '', d_low.strip())
-        if clean_desc.startswith('nave ') or clean_desc.startswith('naves ') or clean_desc.startswith('modulo o nave'):
+        if clean_desc.startswith('nave ') or clean_desc.startswith('naves ') or clean_desc.startswith('modulo o nave') or clean_desc.startswith('almacen ') or clean_desc.startswith('almacén '):
             return True
+
+        # 5. Sanity check: un "piso" residencial nunca tiene >= 600 m2 útiles a menos que sea una planta industrial/nave camuflada
+        if surface_m2 and surface_m2 >= 600.0:
+            if any(pt in pt_low for pt in ['piso', 'apartamento', 'estudio', 'ático', 'atico']) or 'piso' in t_low:
+                return True
 
         return False
 
@@ -803,7 +824,7 @@ class BOESubastasScraper:
                     lotes_info = self.extract_lotes_info(html_ver1 + " " + html_ver3, desc)
 
                     # Geolocalización y ortofoto
-                    lat, lon = self.geocode_address(address, locality, province)
+                    lat, lon = self.geocode_address(address, locality, province, refcat=refcat)
                     images = []
                     if lat and lon:
                         d = 0.0015

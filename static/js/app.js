@@ -1178,7 +1178,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <h3 class="card-title" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h3>
                         
                         <div class="card-location">
-                            <a href="javascript:void(0)" class="address-maps-link" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)" title="Ver en Google Maps Satélite">
+                            <a href="javascript:void(0)" class="address-maps-link" onclick="openGoogleMapsForCard(${idx}, event)" title="Ver en Google Maps Satélite">
                                 <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> <span>${escapeHtml(fullAddress)}</span>
                                 <span class="maps-badge">Google Maps</span>
                             </a>
@@ -1264,6 +1264,8 @@ document.addEventListener('DOMContentLoaded', () => {
             opp = window._lastOpportunities[index];
         }
         if (!opp) return;
+
+        window._activeModalOpp = opp;
 
         const modal = document.getElementById('modal-property-detail');
         const body = document.getElementById('modal-prop-body');
@@ -1978,7 +1980,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <h2>${escapeHtml(opp.title)}</h2>
                     <div class="modal-prop-address" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
-                        <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsModal('${escapeHtml(fullAddress)}', ${opp.lat || 'null'}, ${opp.lon || 'null'}, event)">
+                        <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsFromModal(event)">
                             <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
                             <span class="maps-badge"><i data-lucide="map"></i> Abrir Google Maps Satélite</span>
                         </a>
@@ -2157,6 +2159,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    window.openGoogleMapsForCard = function(idx, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const opps = window._lastOpportunities || (state && state.filteredOpportunities) || [];
+        const opp = opps[idx];
+        if (!opp) return;
+        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
+        window.openGoogleMapsModal(fullAddress, opp.lat, opp.lon, event);
+    };
+
+    window.openGoogleMapsFromModal = function(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const opp = window._activeModalOpp;
+        if (!opp) return;
+        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
+        window.openGoogleMapsModal(fullAddress, opp.lat, opp.lon, event);
+    };
+
     window.openGoogleMapsModal = function(address, lat, lon, event) {
         if (event) {
             event.preventDefault();
@@ -2164,11 +2189,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const modal = document.getElementById('modal-google-maps');
+        if (!modal) return;
         const addrSpan = document.getElementById('modal-gmaps-address');
         const linkExt = document.getElementById('link-gmaps-external');
         const iframe = document.getElementById('iframe-gmaps');
 
-        let fullSearch = (address && address.trim() !== '') ? address.trim() : '';
+        let fullSearch = (address && typeof address === 'string' && address.trim() !== '') ? address.trim() : '';
         if (fullSearch && !fullSearch.toLowerCase().includes('españa') && !fullSearch.toLowerCase().includes('spain')) {
             fullSearch += ', España';
         }
@@ -2176,15 +2202,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const query = fullSearch || (lat && lon ? `${lat},${lon}` : 'España');
         const encQuery = encodeURIComponent(query);
 
-        addrSpan.textContent = address || query;
+        if (addrSpan) addrSpan.textContent = address || query;
 
-        // Embed Satellite Map URL
-        window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=18&ie=UTF8&iwloc=&output=embed`;
+        const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
+
+        // Official Google Maps Embed API with Satellite view
+        if (gmapsKey) {
+            window._gmapsMapUrl = `https://www.google.com/maps/embed/v1/search?key=${gmapsKey}&q=${encQuery}&maptype=satellite`;
+        } else {
+            window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=18&ie=UTF8&iwloc=&output=embed`;
+        }
 
         if (iframe) iframe.src = window._gmapsMapUrl;
-        if (linkExt) linkExt.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}`;
 
         modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        modal.style.zIndex = '10005';
+
         if (window.lucide) lucide.createIcons();
     };
 
@@ -2208,7 +2242,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modal-google-maps');
         const iframe = document.getElementById('iframe-gmaps');
         if (iframe) iframe.src = '';
-        if (modal) modal.classList.add('hidden');
+        if (modal) {
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+        }
     };
 
     window.changeModalMainImg = function(url, el) {
@@ -2430,12 +2467,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 childColor = opp.strategy === 'HOUSE_FLIPPING' ? '#ef4444' : '#f59e0b';
             }
 
-            const lotNum = opp.lot_number || (i + 1);
+            const isActualLot = !!opp.is_lotes;
+            const badgeText = isActualLot ? `L${opp.lot_number || (i + 1)}` : `${i + 1}`;
             const childIcon = L.divIcon({
                 className: 'custom-map-pin spider-pin-wrapper',
                 html: `
-                    <div class="spider-pin-circle" style="background-color: ${childColor}; box-shadow: 0 0 14px ${childColor};">
-                        L${lotNum}
+                    <div class="spider-pin-circle" style="background-color: ${childColor}; box-shadow: 0 0 14px ${childColor}; font-size: ${isActualLot ? '10px' : '11px'}; font-weight: 800;">
+                        ${badgeText}
                     </div>
                 `,
                 iconSize: [28, 28],
@@ -2547,15 +2585,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Agrupar oportunidades en clusters geográficos o por id_subasta si es por lotes
         const clusters = {};
+        const coordOccurrences = {};
         (opps || []).forEach((opp, idx) => {
             const rawLat = parseFloat(opp.lat);
             const rawLon = parseFloat(opp.lon);
             if (!isNaN(rawLat) && !isNaN(rawLon) && rawLat !== 0 && rawLon !== 0) {
-                const lat = rawLat;
-                const lon = rawLon;
-                const geoKey = (opp.is_lotes && opp.id_subasta)
-                    ? `sub_${opp.id_subasta}`
-                    : `${lat.toFixed(4)},${lon.toFixed(4)}`;
+                const isMarket = (opp.source_type === 'market');
+                let lat = rawLat;
+                let lon = rawLon;
+
+                // Para oportunidades de mercado, NUNCA agrupar en clusters de fincas.
+                // Cada inmueble de mercado tiene su propia chincheta individual.
+                // Si varios inmuebles comparten coordenadas base, aplicamos micro-dispersión imperceptible (~20m)
+                // para que ambas chinchetas sean visibles individualmente.
+                if (isMarket) {
+                    const coordKey = `${rawLat.toFixed(4)},${rawLon.toFixed(4)}`;
+                    const seen = coordOccurrences[coordKey] || 0;
+                    coordOccurrences[coordKey] = seen + 1;
+                    if (seen > 0) {
+                        const angle = seen * 2.39996; // Golden angle spiral
+                        const r = 0.00025 * Math.sqrt(seen);
+                        lat = rawLat + r * Math.cos(angle);
+                        lon = rawLon + (r * Math.sin(angle) / Math.cos(rawLat * Math.PI / 180));
+                    }
+                }
+
+                const geoKey = isMarket
+                    ? `market_${opp.id || idx}`
+                    : ((opp.is_lotes && opp.id_subasta)
+                        ? `sub_${opp.id_subasta}`
+                        : `${lat.toFixed(4)},${lon.toFixed(4)}`);
 
                 if (!clusters[geoKey]) {
                     clusters[geoKey] = {

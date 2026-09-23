@@ -115,16 +115,49 @@ DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
 
     # BARCELONA
     "eixample": {"lat": 41.3880, "lon": 2.1620, "income": 49800, "m2_price": 5100.0, "growth": 0.6, "cp": "08007"},
+    "dreta de l'eixample": {"lat": 41.3930, "lon": 2.1670, "income": 52000, "m2_price": 5300.0, "growth": 0.7, "cp": "08009"},
+    "dreta de leixample": {"lat": 41.3930, "lon": 2.1670, "income": 52000, "m2_price": 5300.0, "growth": 0.7, "cp": "08009"},
+    "esquerra de l'eixample": {"lat": 41.3840, "lon": 2.1550, "income": 49000, "m2_price": 4950.0, "growth": 0.6, "cp": "08011"},
+    "esquerra de leixample": {"lat": 41.3840, "lon": 2.1550, "income": 49000, "m2_price": 4950.0, "growth": 0.6, "cp": "08011"},
+    "nova esquerra": {"lat": 41.3810, "lon": 2.1480, "income": 47500, "m2_price": 4850.0, "growth": 0.6, "cp": "08015"},
+    "sant antoni": {"lat": 41.3795, "lon": 2.1595, "income": 43000, "m2_price": 4650.0, "growth": 0.8, "cp": "08015"},
+    "sagrada familia": {"lat": 41.4035, "lon": 2.1745, "income": 45000, "m2_price": 4700.0, "growth": 1.0, "cp": "08013"},
+    "fort pienc": {"lat": 41.3960, "lon": 2.1830, "income": 44000, "m2_price": 4600.0, "growth": 0.9, "cp": "08013"},
     "gracia": {"lat": 41.4030, "lon": 2.1580, "income": 44100, "m2_price": 4900.0, "growth": 1.1, "cp": "08012"},
+    "vila de gracia": {"lat": 41.4030, "lon": 2.1570, "income": 44100, "m2_price": 4900.0, "growth": 1.1, "cp": "08012"},
+    "camp d'en grassot": {"lat": 41.4060, "lon": 2.1660, "income": 42000, "m2_price": 4500.0, "growth": 1.0, "cp": "08025"},
     "poblenou": {"lat": 41.4020, "lon": 2.2020, "income": 48200, "m2_price": 4600.0, "growth": 2.9, "cp": "08005"},
     "sant marti": {"lat": 41.4150, "lon": 2.2000, "income": 42000, "m2_price": 4100.0, "growth": 2.4, "cp": "08020"},
     "sarria": {"lat": 41.4010, "lon": 2.1220, "income": 68000, "m2_price": 6200.0, "growth": 0.5, "cp": "08017"},
+    "les tres torres": {"lat": 41.3990, "lon": 2.1290, "income": 71000, "m2_price": 6400.0, "growth": 0.4, "cp": "08017"},
+    "sant gervasi": {"lat": 41.4050, "lon": 2.1380, "income": 64000, "m2_price": 5900.0, "growth": 0.5, "cp": "08022"},
+    "vallvidrera": {"lat": 41.4160, "lon": 2.1020, "income": 58000, "m2_price": 5100.0, "growth": 0.6, "cp": "08017"},
     "ciutat vella": {"lat": 41.3820, "lon": 2.1750, "income": 33000, "m2_price": 4400.0, "growth": 1.2, "cp": "08001"},
+    "raval": {"lat": 41.3790, "lon": 2.1685, "income": 31000, "m2_price": 4100.0, "growth": 1.3, "cp": "08001"},
+    "gotic": {"lat": 41.3825, "lon": 2.1765, "income": 35000, "m2_price": 4600.0, "growth": 1.1, "cp": "08002"},
+    "gòtic": {"lat": 41.3825, "lon": 2.1765, "income": 35000, "m2_price": 4600.0, "growth": 1.1, "cp": "08002"},
+    "sant pere": {"lat": 41.3870, "lon": 2.1795, "income": 36000, "m2_price": 4500.0, "growth": 1.2, "cp": "08003"},
+    "barceloneta": {"lat": 41.3800, "lon": 2.1900, "income": 34000, "m2_price": 4800.0, "growth": 1.0, "cp": "08003"},
     "sants": {"lat": 41.3750, "lon": 2.1380, "income": 38500, "m2_price": 3800.0, "growth": 1.4, "cp": "08014"},
+    "sants-badal": {"lat": 41.3740, "lon": 2.1280, "income": 37000, "m2_price": 3700.0, "growth": 1.3, "cp": "08028"},
+    "la bordeta": {"lat": 41.3690, "lon": 2.1360, "income": 36000, "m2_price": 3600.0, "growth": 1.4, "cp": "08014"},
+    "hostafrancs": {"lat": 41.3750, "lon": 2.1430, "income": 38000, "m2_price": 3850.0, "growth": 1.3, "cp": "08014"},
+    "poble sec": {"lat": 41.3730, "lon": 2.1620, "income": 35000, "m2_price": 3900.0, "growth": 1.2, "cp": "08004"},
     "les corts": {"lat": 41.3850, "lon": 2.1280, "income": 56000, "m2_price": 5300.0, "growth": 0.8, "cp": "08028"},
     "sant andreu": {"lat": 41.4350, "lon": 2.1900, "income": 35000, "m2_price": 3300.0, "growth": 1.5, "cp": "08030"},
     "nou barris": {"lat": 41.4420, "lon": 2.1750, "income": 27000, "m2_price": 2700.0, "growth": 1.8, "cp": "08031"},
     "horta": {"lat": 41.4310, "lon": 2.1550, "income": 36000, "m2_price": 3400.0, "growth": 1.3, "cp": "08032"},
+    "guinardo": {"lat": 41.4190, "lon": 2.1760, "income": 37000, "m2_price": 3500.0, "growth": 1.4, "cp": "08041"},
+    "guinardó": {"lat": 41.4190, "lon": 2.1760, "income": 37000, "m2_price": 3500.0, "growth": 1.4, "cp": "08041"},
+    "can baro": {"lat": 41.4170, "lon": 2.1610, "income": 36500, "m2_price": 3450.0, "growth": 1.3, "cp": "08024"},
+    "can baró": {"lat": 41.4170, "lon": 2.1610, "income": 36500, "m2_price": 3450.0, "growth": 1.3, "cp": "08024"},
+    "carmel": {"lat": 41.4230, "lon": 2.1550, "income": 29000, "m2_price": 2800.0, "growth": 1.5, "cp": "08032"},
+    "el carmel": {"lat": 41.4230, "lon": 2.1550, "income": 29000, "m2_price": 2800.0, "growth": 1.5, "cp": "08032"},
+    "besos": {"lat": 41.4190, "lon": 2.2140, "income": 28000, "m2_price": 2750.0, "growth": 1.6, "cp": "08019"},
+    "besòs": {"lat": 41.4190, "lon": 2.2140, "income": 28000, "m2_price": 2750.0, "growth": 1.6, "cp": "08019"},
+    "verneda": {"lat": 41.4240, "lon": 2.2030, "income": 30000, "m2_price": 2900.0, "growth": 1.5, "cp": "08020"},
+    "plaza de catalunya": {"lat": 41.3870, "lon": 2.1700, "income": 50000, "m2_price": 5200.0, "growth": 0.7, "cp": "08002"},
+    "rambla de catalunya": {"lat": 41.3910, "lon": 2.1620, "income": 53000, "m2_price": 5400.0, "growth": 0.6, "cp": "08007"},
 
     # VALENCIA
     "ruzafa": {"lat": 39.4625, "lon": -0.3735, "income": 38900, "m2_price": 3600.0, "growth": 1.7, "cp": "46006"},
@@ -133,6 +166,27 @@ DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
     "campanar": {"lat": 39.4830, "lon": -0.3950, "income": 36000, "m2_price": 2800.0, "growth": 2.2, "cp": "46015"},
     "benimaclet": {"lat": 39.4870, "lon": -0.3580, "income": 35000, "m2_price": 2850.0, "growth": 2.0, "cp": "46020"},
     "patraix": {"lat": 39.4610, "lon": -0.3950, "income": 31000, "m2_price": 2300.0, "growth": 2.1, "cp": "46018"},
+    "sant marcelli": {"lat": 39.4480, "lon": -0.3920, "income": 29000, "m2_price": 2150.0, "growth": 2.3, "cp": "46017"},
+    "sant marcellí": {"lat": 39.4480, "lon": -0.3920, "income": 29000, "m2_price": 2150.0, "growth": 2.3, "cp": "46017"},
+    "sant marcel·lí": {"lat": 39.4480, "lon": -0.3920, "income": 29000, "m2_price": 2150.0, "growth": 2.3, "cp": "46017"},
+    "mont-olivet": {"lat": 39.4580, "lon": -0.3620, "income": 33000, "m2_price": 2650.0, "growth": 2.2, "cp": "46006"},
+    "cabanyal": {"lat": 39.4670, "lon": -0.3280, "income": 32000, "m2_price": 2750.0, "growth": 3.5, "cp": "46011"},
+    "canyamelar": {"lat": 39.4640, "lon": -0.3270, "income": 32000, "m2_price": 2750.0, "growth": 3.5, "cp": "46011"},
+    "torrefiel": {"lat": 39.4930, "lon": -0.3720, "income": 28000, "m2_price": 2050.0, "growth": 2.4, "cp": "46019"},
+    "orriols": {"lat": 39.4920, "lon": -0.3640, "income": 26500, "m2_price": 1950.0, "growth": 2.5, "cp": "46019"},
+    "sant francesc": {"lat": 39.4700, "lon": -0.3770, "income": 42000, "m2_price": 3850.0, "growth": 1.2, "cp": "46002"},
+    "petxina": {"lat": 39.4730, "lon": -0.3880, "income": 36000, "m2_price": 2900.0, "growth": 1.9, "cp": "46008"},
+    "pla del remei": {"lat": 39.4680, "lon": -0.3680, "income": 47000, "m2_price": 4200.0, "growth": 1.0, "cp": "46004"},
+    "aiora": {"lat": 39.4680, "lon": -0.3470, "income": 31000, "m2_price": 2450.0, "growth": 2.6, "cp": "46022"},
+    "betero": {"lat": 39.4720, "lon": -0.3390, "income": 30000, "m2_price": 2350.0, "growth": 2.7, "cp": "46022"},
+    "beteró": {"lat": 39.4720, "lon": -0.3390, "income": 30000, "m2_price": 2350.0, "growth": 2.7, "cp": "46022"},
+    "na rovella": {"lat": 39.4530, "lon": -0.3640, "income": 31500, "m2_price": 2400.0, "growth": 2.3, "cp": "46013"},
+    "la seu": {"lat": 39.4760, "lon": -0.3750, "income": 41500, "m2_price": 3800.0, "growth": 1.1, "cp": "46003"},
+    "la xerea": {"lat": 39.4740, "lon": -0.3710, "income": 43000, "m2_price": 3900.0, "growth": 1.1, "cp": "46003"},
+    "el mercat": {"lat": 39.4730, "lon": -0.3790, "income": 39000, "m2_price": 3550.0, "growth": 1.3, "cp": "46001"},
+    "benimamet": {"lat": 39.5010, "lon": -0.4240, "income": 28500, "m2_price": 1950.0, "growth": 2.2, "cp": "46035"},
+    "benimàmet": {"lat": 39.5010, "lon": -0.4240, "income": 28500, "m2_price": 1950.0, "growth": 2.2, "cp": "46035"},
+    "gayano lluch": {"lat": 39.4950, "lon": -0.3730, "income": 29500, "m2_price": 2100.0, "growth": 2.3, "cp": "46025"},
 
     # MALAGA
     "soho": {"lat": 36.7170, "lon": -4.4230, "income": 41800, "m2_price": 4200.0, "growth": 2.5, "cp": "29001"},
@@ -241,6 +295,10 @@ class IdealistaMarkdownParser:
                 surf_match = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', post_text[:400])
                 if surf_match:
                     surface_m2 = float(surf_match.group(1).replace(".", ""))
+
+                # Descartar naves camufladas con superficie >= 600 m2
+                if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type="", surface_m2=surface_m2):
+                    continue
 
                 floor = "Exterior"
                 floor_match = re.search(r'(\d+[ªº]?\s*planta\s*(?:exterior|interior)?|bajo|ático|entreplanta)', post_text[:400], re.IGNORECASE)
@@ -436,14 +494,33 @@ class IdealistaMarkdownParser:
             postal_code=postal_code
         )
 
+        PROV_CP_PREFIX = {
+            "madrid": "28",
+            "barcelona": "08",
+            "valencia": "46",
+            "valència": "46",
+            "malaga": "29",
+            "málaga": "29",
+            "sevilla": "41",
+            "alicante": "03",
+        }
+        target_cp_prefix = None
+        for prov_name, pref in PROV_CP_PREFIX.items():
+            if prov_name in prov_lower or prov_name in locality.lower():
+                target_cp_prefix = pref
+                break
+
         # 6. Coordenadas geográficas
         lat, lon = None, None
         for d_key, coords in DISTRICT_COORDINATES.items():
+            coord_cp = coords.get("cp", "")
+            if target_cp_prefix and coord_cp and not coord_cp.startswith(target_cp_prefix):
+                continue
             if d_key in t_lower or (matched_neighborhood and d_key == matched_neighborhood):
                 lat = coords.get("lat")
                 lon = coords.get("lon")
-                if not postal_code and coords.get("cp"):
-                    postal_code = coords.get("cp")
+                if not postal_code and coord_cp:
+                    postal_code = coord_cp
                 break
 
         # Fallback de coordenadas por provincia o capital
@@ -452,7 +529,20 @@ class IdealistaMarkdownParser:
             if coords_prov:
                 lat, lon = coords_prov.get("lat"), coords_prov.get("lon")
             else:
-                lat, lon = (40.4168, -3.7038) if "madrid" in prov_lower else (41.3879, 2.1699)
+                if "valencia" in prov_lower or "valència" in prov_lower or "valencia" in locality.lower():
+                    lat, lon = (39.4699, -0.3763)
+                elif "madrid" in prov_lower:
+                    lat, lon = (40.4168, -3.7038)
+                elif "barcelona" in prov_lower:
+                    lat, lon = (41.3879, 2.1699)
+                elif "malaga" in prov_lower or "málaga" in prov_lower:
+                    lat, lon = (36.7213, -4.4214)
+                elif "sevilla" in prov_lower:
+                    lat, lon = (37.3891, -5.9845)
+                elif "alicante" in prov_lower:
+                    lat, lon = (38.3452, -0.4810)
+                else:
+                    lat, lon = (40.4168, -3.7038)
 
         # Fallback de postal_code si aún es None
         if not postal_code:
