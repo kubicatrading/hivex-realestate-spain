@@ -41,10 +41,13 @@ class RealEstateAlertEngine:
         chat_id: Optional[str] = None,
         base_url: Optional[str] = None
     ):
-        self.bot_token = bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", None) or os.environ.get("TELEGRAM_BOT_TOKEN", "8889706886:AAGu97kanMwK9L3d5_7yGXQR-d5ojfYRUHs")
-        raw_chat_id = chat_id or getattr(settings, "TELEGRAM_CHAT_ID", None) or os.environ.get("TELEGRAM_CHAT_ID", "-1003904392737")
+        token = (bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", None) or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+        self.bot_token = token if token else "8889706886:AAGu97kanMwK9L3d5_7yGXQR-d5ojfYRUHs"
+        cid = (chat_id or getattr(settings, "TELEGRAM_CHAT_ID", None) or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+        raw_chat_id = cid if cid else "-1003904392737"
         self.chat_id = self._normalize_chat_id(str(raw_chat_id))
         self.base_url = (base_url or getattr(settings, "PLATFORM_BASE_URL", None) or os.environ.get("PLATFORM_BASE_URL", "https://hivex-realestate-spain.vercel.app")).rstrip("/")
+        self.last_error: Optional[str] = None
 
     @staticmethod
     def _normalize_chat_id(chat_id: str) -> str:
@@ -380,7 +383,7 @@ class RealEstateAlertEngine:
 
         if not self.bot_token or not self.chat_id:
             logger.warning("TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Alerta mostrada en logs.")
-            logger.info(f"\n--- MENSAJE TELEGRAM (SIMULADO) ---\n{message}\n-----------------------------------")
+            self.last_error = "Credenciales Telegram no configuradas"
             return False
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
@@ -392,15 +395,29 @@ class RealEstateAlertEngine:
         }
 
         try:
-            resp = httpx.post(url, json=payload, timeout=12.0)
+            resp = httpx.post(url, json=payload, timeout=15.0)
             if resp.status_code == 200:
                 logger.info(f"Mensaje enviado exitosamente a Telegram ({self.chat_id}).")
+                self.last_error = None
                 return True
             else:
-                logger.error(f"Error enviando mensaje Telegram: {resp.status_code} - {resp.text}")
+                err = f"HTTP {resp.status_code}: {resp.text}"
+                logger.error(f"Error enviando mensaje Telegram: {err}")
+                self.last_error = err
+                # Fallback sin parse_mode si Markdown tiene entidades complejas
+                try:
+                    payload.pop("parse_mode", None)
+                    r2 = httpx.post(url, json=payload, timeout=15.0)
+                    if r2.status_code == 200:
+                        logger.info(f"Mensaje enviado en texto plano a Telegram ({self.chat_id}).")
+                        self.last_error = None
+                        return True
+                except Exception as e_fb:
+                    logger.error(f"Error en fallback Telegram: {e_fb}")
                 return False
         except Exception as e:
-            logger.error(f"Excepción al enviar alerta a Telegram: {e}")
+            self.last_error = f"Exception: {type(e).__name__} - {e}"
+            logger.error(f"Excepción al enviar alerta a Telegram: {self.last_error}")
             return False
 
     def run_daily_alert_check(
@@ -558,6 +575,7 @@ class RealEstateAlertEngine:
 
         return {
             "status": "sent" if sent else "failed",
+            "error": self.last_error if not sent else None,
             "message": msg,
             "diag_ms": total_diag_ms,
             "db_ms": db_duration_ms
