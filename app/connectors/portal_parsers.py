@@ -247,10 +247,18 @@ class IdealistaMarkdownParser:
 
                 # 2. Imágenes del inmueble: capturar todas las fotos disponibles sin límite
                 images = []
-                full_img_block = prev_text + "\n" + post_text[:1500]
-                img_matches = re.findall(r'!\[[^\]]*\]\((https?://img\d*\.idealista\.com/[^\)]+)\)', full_img_block)
+                full_img_block = prev_text + "\n" + post_text[:2500]
+                img_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+', full_img_block)
                 for img_url in img_matches:
-                    clean_img = img_url.replace("/blur/189_120_mq/", "/blur/591_420_mq/").replace("/blur/300_225_mq/", "/blur/591_420_mq/")
+                    if img_url.endswith('.gif'):
+                        continue
+                    clean_img = (
+                        img_url.replace("/blur/189_120_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/300_225_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/480_360_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/WEB_DETAIL_TOP-L-L/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/591_420_mq/", "/blur/WEB_DETAIL-XL-L/")
+                    )
                     if clean_img not in images:
                         images.append(clean_img)
 

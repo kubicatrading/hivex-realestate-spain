@@ -94,3 +94,28 @@ def test_market_catalog_geolocation_and_integrity():
         assert "nave" not in p_type, f"Item {it['id']} is a nave: {p_type}"
         assert "nave" not in title, f"Item {it['id']} title contains nave: {title}"
 
+def test_market_catalog_images_integrity():
+    """Valida que las fotos del catálogo cumplen los requisitos de fidelidad y límite de 20."""
+    import json
+    catalog_path = "app/data/verified_market_catalog.json"
+    with open(catalog_path, "r", encoding="utf-8") as f:
+        items = json.load(f)
+
+    max_imgs = 0
+    twenty_count = 0
+    for it in items:
+        imgs = it.get("images", [])
+        assert len(imgs) <= 20, f"Item {it['id']} has more than 20 images: {len(imgs)}"
+        assert len(imgs) == len(set(imgs)), f"Item {it['id']} has duplicate images"
+        for img in imgs:
+            assert isinstance(img, str) and img.startswith("http"), f"Invalid image in {it['id']}: {img}"
+            assert "catastro" not in img.lower(), f"Catastro image found in real estate gallery: {img}"
+        if len(imgs) > max_imgs:
+            max_imgs = len(imgs)
+        if len(imgs) == 20:
+            twenty_count += 1
+
+    assert max_imgs == 20, f"Expected maximum of 20 images, found {max_imgs}"
+    assert twenty_count >= 5, f"Expected at least 5 listings with 20 real photos, found {twenty_count}"
+
+

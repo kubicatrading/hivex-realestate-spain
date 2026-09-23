@@ -746,8 +746,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (list.length === 0) {
             return [streetViewUrl];
-        } else if (list.length === 1 && !list[0].includes('maps.googleapis.com')) {
-            list.push(streetViewUrl);
         }
         return list;
     }
