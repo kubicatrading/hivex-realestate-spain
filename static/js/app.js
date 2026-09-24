@@ -737,24 +737,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (opp.images && Array.isArray(opp.images) && opp.images.length > 0) {
             const valid = opp.images
                 .filter(img => img && typeof img === 'string')
-                .map(img => img.replace('?rule=web_listing_440x330', ''));
+                .map(img => img.replace('?rule=web_listing_440x330', ''))
+                .filter(img => !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
 
-            // Portales con fotos reales (Idealista, Fotocasa, Habitaclia)
-            const portalPhotos = valid.filter(img => !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
-            // Cartografía u ortofoto satelital del Catastro
-            const catastroMaps = valid.filter(img => img.toLowerCase().includes('catastro') || img.toLowerCase().includes('cartografia/wms'));
-
-            if (portalPhotos.length > 0) {
-                list = [...portalPhotos];
-            } else if (catastroMaps.length > 0) {
-                // Subastas/BOE con ortofoto catastral: Fachada Street View + Ortofoto satélite
-                const locParam = (opp.lat && opp.lon) ? `${opp.lat},${opp.lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
-                const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
-                const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${locParam}&key=${gmapsKey}`;
-                list = [streetViewUrl, ...catastroMaps];
+            if (valid.length > 0) {
+                list = [...valid];
             }
         }
         
+        // Para subastas y oportunidades sin reportaje de portal comercial: Exclusivamente foto de fachada Street View
         if (list.length === 0) {
             const locParam = (opp.lat && opp.lon) ? `${opp.lat},${opp.lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
             const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
@@ -837,11 +828,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const srcEl = document.getElementById('modal-gallery-source-name');
         if (srcEl) {
             const isGmaps = images[targetIdx] && images[targetIdx].includes('maps.googleapis.com');
-            const isCatastro = images[targetIdx] && (images[targetIdx].includes('catastro') || images[targetIdx].includes('cartografia/wms'));
             if (isGmaps) {
                 srcEl.textContent = '• Google Street View (Fachada)';
-            } else if (isCatastro) {
-                srcEl.textContent = '• Sede del Catastro (Ortofoto Satélite)';
             } else {
                 srcEl.textContent = `• Fuente: ${window.modalGalleryState.portal || 'Idealista'}`;
             }
