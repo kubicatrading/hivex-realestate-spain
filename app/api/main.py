@@ -868,7 +868,7 @@ def get_opportunities(
         for opp in opportunities:
             try:
                 auc = opp.auction
-                auc_surf = getattr(auc, "surface_m2", None) or (auc.parcel.area_m2 if getattr(auc, "parcel", None) else None)
+                auc_surf = getattr(auc, "surface_m2", None) or (getattr(auc.parcel, "surface_m2", None) if getattr(auc, "parcel", None) else None)
                 if auc and (BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or "") or BOESubastasScraper.is_nave(auc.title or "", auc.description or "", auc.property_type or "", surface_m2=auc_surf)):
                     continue
 

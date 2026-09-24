@@ -542,13 +542,13 @@ class RealEstateAlertEngine:
             logger.warning(f"Aviso contando oportunidades para salud de cabina: {e_cnt}")
 
         # 3. Conteo dinámico de oportunidades en Market, PGOU y Edictos
-        total_market = 388
+        total_market = 366
         try:
             from app.connectors.market_scraper import MarketScraper
             ms = MarketScraper()
-            cat = ms._build_verified_market_catalog()
-            if cat:
-                total_market = len(cat)
+            market_opps = ms.fetch_market_opportunities(live_scrape=False)
+            if market_opps:
+                total_market = len(market_opps)
         except Exception as e_m:
             logger.warning(f"Aviso contando market para cabina: {e_m}")
 
