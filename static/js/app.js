@@ -735,17 +735,31 @@ document.addEventListener('DOMContentLoaded', () => {
     function getOpportunityImagesList(opp) {
         let list = [];
         if (opp.images && Array.isArray(opp.images) && opp.images.length > 0) {
-            const valid = opp.images.filter(img => img && typeof img === 'string' && !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
-            if (valid.length > 0) {
-                list = [...valid];
+            const valid = opp.images
+                .filter(img => img && typeof img === 'string')
+                .map(img => img.replace('?rule=web_listing_440x330', ''));
+
+            // Portales con fotos reales (Idealista, Fotocasa, Habitaclia)
+            const portalPhotos = valid.filter(img => !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
+            // Cartografía u ortofoto satelital del Catastro
+            const catastroMaps = valid.filter(img => img.toLowerCase().includes('catastro') || img.toLowerCase().includes('cartografia/wms'));
+
+            if (portalPhotos.length > 0) {
+                list = [...portalPhotos];
+            } else if (catastroMaps.length > 0) {
+                // Subastas/BOE con ortofoto catastral: Fachada Street View + Ortofoto satélite
+                const locParam = (opp.lat && opp.lon) ? `${opp.lat},${opp.lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
+                const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
+                const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${locParam}&key=${gmapsKey}`;
+                list = [streetViewUrl, ...catastroMaps];
             }
         }
-        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
-        const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
-        const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${encodeURIComponent(fullAddress)}&key=${gmapsKey}`;
         
         if (list.length === 0) {
-            return [streetViewUrl];
+            const locParam = (opp.lat && opp.lon) ? `${opp.lat},${opp.lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
+            const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
+            const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${locParam}&key=${gmapsKey}`;
+            list = [streetViewUrl];
         }
         return list;
     }
@@ -777,7 +791,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgEl = document.getElementById(`card-carousel-img-${idx}`);
         const numEl = document.getElementById(`card-carousel-num-${idx}`);
         if (imgEl) {
-            imgEl.style.backgroundImage = `url('${imgs[cur]}')`;
+            if (imgEl.tagName === 'IMG') {
+                imgEl.src = imgs[cur];
+            } else {
+                imgEl.style.backgroundImage = `url('${imgs[cur]}')`;
+            }
         }
         if (numEl) {
             numEl.textContent = cur + 1;
@@ -819,7 +837,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const srcEl = document.getElementById('modal-gallery-source-name');
         if (srcEl) {
             const isGmaps = images[targetIdx] && images[targetIdx].includes('maps.googleapis.com');
-            srcEl.textContent = isGmaps ? '• Google Street View' : `• Fuente: ${window.modalGalleryState.portal || 'Idealista'}`;
+            const isCatastro = images[targetIdx] && (images[targetIdx].includes('catastro') || images[targetIdx].includes('cartografia/wms'));
+            if (isGmaps) {
+                srcEl.textContent = '• Google Street View (Fachada)';
+            } else if (isCatastro) {
+                srcEl.textContent = '• Sede del Catastro (Ortofoto Satélite)';
+            } else {
+                srcEl.textContent = `• Fuente: ${window.modalGalleryState.portal || 'Idealista'}`;
+            }
         }
 
         // Highlight active thumbnail and scroll into view
@@ -1110,7 +1135,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
                 <div class="deal-card ${opp.is_new ? 'deal-card-new' : ''}" data-opp-id="${opp.id}" data-opp-index="${idx}" onclick="highlightOpportunityPin(${opp.id}, ${opp.lat || 'null'}, ${opp.lon || 'null'})">
                     <div class="card-image-banner" id="card-carousel-${idx}" style="position: relative; height: 160px; overflow: hidden; border-radius: var(--radius-sm); background: #020617;" onclick="openPropertyDetailModal(${idx}); event.stopPropagation();">
-                        <div class="card-carousel-img" id="card-carousel-img-${idx}" style="position: absolute; inset: 0; background-image: url('${mainImg}'); background-size: cover; background-position: center; transition: background-image 0.25s ease;"></div>
+                        <img class="card-carousel-img" id="card-carousel-img-${idx}" src="${mainImg}" alt="${escapeHtml(opp.title)}" loading="lazy" onerror="this.onerror=null; this.src='/api/v1/streetview_photo?lat=${opp.lat || ''}&lon=${opp.lon || ''}&address=${encodeURIComponent(fullAddress)}';" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity 0.25s ease;">
                         ${imgCount > 1 ? `
                             <button type="button" class="card-carousel-btn card-carousel-prev" onclick="window.cardCarouselNav(event, ${idx}, -1)" title="Foto anterior" aria-label="Foto anterior">
                                 <i data-lucide="chevron-left"></i>
@@ -1912,7 +1937,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const modalGalleryHtml = `
             <div class="modal-media-wrapper modal-gallery-box" style="margin-bottom: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(56, 189, 248, 0.3); padding: 12px; position: relative;">
                 <div class="modal-gallery-main" id="modal-gallery-main-view">
-                    <img id="modal-gallery-active-img" src="${modalImages[0]}" alt="${escapeHtml(opp.title)}">
+                    <img id="modal-gallery-active-img" src="${modalImages[0]}" alt="${escapeHtml(opp.title)}" onerror="this.onerror=null; this.src='/api/v1/streetview_photo?lat=${opp.lat || ''}&lon=${opp.lon || ''}&address=${encodeURIComponent(opp.full_address || '')}';">
                     
                     ${modalImages.length > 1 ? `
                         <button type="button" class="modal-gallery-btn modal-gallery-prev" onclick="window.modalGalleryNav(-1)" title="Foto anterior (←)" aria-label="Foto anterior">
@@ -1938,7 +1963,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="modal-gallery-thumbnails" id="modal-gallery-thumbs">
                         ${modalImages.map((imgUrl, thumbIdx) => `
                             <div class="gallery-thumb-item ${thumbIdx === 0 ? 'active' : ''}" id="gallery-thumb-${thumbIdx}" onclick="window.modalGalleryGoTo(${thumbIdx})" title="Ver foto ${thumbIdx + 1}">
-                                <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" alt="Miniatura ${thumbIdx + 1}">
+                                <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" alt="Miniatura ${thumbIdx + 1}" onerror="this.onerror=null; this.src='/api/v1/streetview_photo';">
                             </div>
                         `).join('')}
                     </div>

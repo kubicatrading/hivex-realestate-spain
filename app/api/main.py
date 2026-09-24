@@ -923,12 +923,13 @@ def get_opportunities(
                         lat = max(38.3420, lat)
                         lon = min(-0.4810, lon)
 
-                # Parse stored JSON images list (excluding legacy Catastro Ortofoto URLs)
+                # Parse stored JSON images list
                 images_list = []
                 if auc and auc.images_json:
                     try:
                         raw_images = json.loads(auc.images_json)
-                        images_list = [img for img in raw_images if isinstance(img, str) and "catastro" not in img.lower() and "cartografia/wms" not in img.lower()]
+                        if isinstance(raw_images, list):
+                            images_list = [img for img in raw_images if isinstance(img, str) and img.strip()]
                     except Exception:
                         images_list = []
 

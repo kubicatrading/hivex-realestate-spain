@@ -765,7 +765,7 @@ class HabitacliaMarkdownParser:
                     + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text)
                 )
                 for img_url in raw_img_matches:
-                    clean_img = img_url.split("?")[0] + "?rule=web_listing_440x330" if "static.fotocasa.es" in img_url else img_url
+                    clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
                     if clean_img not in images:
                         images.append(clean_img)
                     if len(images) >= 20:
@@ -968,7 +968,7 @@ class FotocasaMarkdownParser:
                     + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text[:4000])
                 )
                 for img_url in raw_img_matches:
-                    clean_img = img_url.split("?")[0] + "?rule=web_listing_440x330" if "static.fotocasa.es" in img_url else img_url
+                    clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
                     if clean_img not in images:
                         images.append(clean_img)
                     if len(images) >= 20:
