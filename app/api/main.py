@@ -899,21 +899,6 @@ def get_opportunities(
                     except Exception:
                         pass
 
-                # Si no tiene coordenadas válidas o estaban en el mar, resolver con máxima precisión por Catastro
-                if (lat is None or lon is None) and auc and auc.refcat:
-                    try:
-                        cat_c = CatastroClient()
-                        cat_coords = cat_c.get_coordinates_from_refcat(auc.refcat)
-                        if cat_coords:
-                            lat, lon = cat_coords
-                            auc.lat, auc.lon = lat, lon
-                            try:
-                                db.commit()
-                            except Exception:
-                                db.rollback()
-                    except Exception:
-                        pass
-
                 # Si aún no tiene coordenadas, geolocalizar por municipio/localidad sobre tierra firme
                 if lat is None or lon is None:
                     base_lat, base_lon = get_spanish_province_coords(auc.province if auc else None, auc.locality if auc else None)
@@ -970,16 +955,6 @@ def get_opportunities(
                 if not refcat:
                     refcat = scraper.extract_cadastral_reference(desc_text)
 
-                # Module 2: CRU / Finca Registral / Address resolution to Cadastral Reference
-                if not refcat and full_address and locality_str:
-                    try:
-                        resolved_rc = CatastroClient().resolve_refcat_from_address_or_cru(full_address, locality_str, province_str)
-                        if resolved_rc:
-                            refcat = resolved_rc
-                            if auc:
-                                auc.refcat = resolved_rc
-                    except Exception:
-                        pass
 
                 # Extraction of Lotes structure
                 lotes_info = scraper.extract_lotes_info(desc_text, auc.title if auc else "")
@@ -1106,14 +1081,6 @@ def get_opportunities(
                 # Priority 2: DB Persisted parcel surface fallback
                 elif auc and auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 > 0:
                     surface_m2 = round(float(auc.parcel.surface_m2), 2)
-                # Priority 3: Catastro WFS INSPIRE / SEC resolution if refcat is present
-                elif refcat:
-                    try:
-                        cat_details = CatastroClient().get_parcel_details(refcat)
-                        if cat_details and cat_details.get("surface_m2") and cat_details["surface_m2"] > 0:
-                            surface_m2 = round(float(cat_details["surface_m2"]), 2)
-                    except Exception:
-                        pass
 
                 # --- STRICT CATASTRO LAND CLASSIFICATION (URBANO vs RÚSTICO) ---
                 if auc and auc.parcel and auc.parcel.land_use:
