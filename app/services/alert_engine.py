@@ -520,10 +520,19 @@ class RealEstateAlertEngine:
         sync_8am_status = "OPERATIVO 🟢"
         sync_9am_status = "OPERATIVO 🟢"
 
+        total_historical = 0
         try:
             if db:
-                total_auctions = db.query(Auction).count()
-                total_opps = db.query(Opportunity).count()
+                from datetime import datetime
+                now_utc = datetime.utcnow()
+                total_auctions = db.query(Auction).filter(
+                    Auction.status == "EJECUCION",
+                    (Auction.auction_end_date == None) | (Auction.auction_end_date > now_utc)
+                ).count()
+                total_historical = db.query(Auction).filter(
+                    (Auction.status == "FINALIZADA") | (Auction.auction_end_date <= now_utc)
+                ).count()
+                total_opps = total_auctions
                 
                 last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
                 if last_sync and last_sync.sync_time:
@@ -542,7 +551,7 @@ class RealEstateAlertEngine:
             logger.warning(f"Aviso contando oportunidades para salud de cabina: {e_cnt}")
 
         # 3. Conteo dinámico de oportunidades en Market, PGOU y Edictos
-        total_market = 366
+        total_market = 388
         try:
             from app.connectors.market_scraper import MarketScraper
             ms = MarketScraper()
@@ -584,7 +593,7 @@ class RealEstateAlertEngine:
             f"· Tiempo de Respuesta DB: *{db_duration_ms:.0f} ms*",
             "",
             "🏢 *ESTADO DE LA PLATAFORMA / OPORTUNIDADES*",
-            f"· Subastas BOE Activas: *{total_auctions}*",
+            f"· Subastas BOE Vigentes en Ejecución: *{total_auctions}* ({total_historical} concluidas en histórico archivadas) 🟢",
             f"· Oportunidades Market: *{total_market}*",
             f"· Desarrollos PGOU: *{total_pgou}*",
             f"· Edictos Judiciales: *{total_edictos}*",

@@ -92,8 +92,12 @@ def test_zero_false_positives_without_active_sync(auth_headers):
 
 def test_real_sync_novelties_prioritized_at_top(auth_headers):
     """Verificar que cuando una sincronización real introduce oportunidades nuevas, éstas aparecen exactamente al frente."""
-    # Simular una sincronización que detectó 2 oportunidades concretas
-    LATEST_SYNC_STATE["new_auction_ids"] = {10}
+    # Simular una sincronización que detectó 2 oportunidades concretas (usar subasta activa vigente)
+    from app.db.session import SessionLocal
+    from app.db.models import Auction
+    active_auc = SessionLocal().query(Auction).filter(Auction.status == "EJECUCION").first()
+    auc_id = active_auc.id if active_auc else 980
+    LATEST_SYNC_STATE["new_auction_ids"] = {auc_id}
     LATEST_SYNC_STATE["new_pgou_ids"] = {"PGOU-MAD-2026-003"}
     LATEST_SYNC_STATE["new_edicto_ids"] = set()
     LATEST_SYNC_STATE["new_market_ids"] = set()

@@ -47,7 +47,10 @@ def test_opportunity_api_coordinates_not_in_sea():
     from app.db.session import SessionLocal
     from app.db.models import Opportunity, Auction
     db = SessionLocal()
-    opps = db.query(Opportunity).join(Auction).filter(Auction.province.ilike("%alicante%")).all()
+    opps = db.query(Opportunity).join(Auction).filter(
+        Auction.province.ilike("%alicante%"),
+        Auction.status == "EJECUCION"
+    ).all()
     for o in opps:
         auc = o.auction
         # Ensure none of the Alicante opportunities in DB are in the sea
@@ -73,12 +76,12 @@ def test_market_catalog_geolocation_and_integrity():
     assert len(valencia_items) >= 25
     assert len(barcelona_items) >= 50
 
-    # Ensure Valencia items are NOT geocoded to Barcelona
+    # Ensure Valencia items are NOT geocoded to Barcelona and belong to Valencia province
     for it in valencia_items:
         lat = float(it["lat"])
         lon = float(it["lon"])
-        assert 39.35 <= lat <= 39.60, f"Valencia item {it['id']} has invalid lat {lat}"
-        assert -0.55 <= lon <= -0.25, f"Valencia item {it['id']} has invalid lon {lon}"
+        assert 38.80 <= lat <= 40.00, f"Valencia item {it['id']} has invalid lat {lat}"
+        assert -1.50 <= lon <= 0.10, f"Valencia item {it['id']} has invalid lon {lon}"
 
     # Ensure Barcelona items are in Barcelona
     for it in barcelona_items:

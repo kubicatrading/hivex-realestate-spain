@@ -868,6 +868,15 @@ def get_opportunities(
         for opp in opportunities:
             try:
                 auc = opp.auction
+                if not auc:
+                    continue
+
+                # REGLA ESTRICTA: Descartar subastas terminadas por fecha o concluidas/canceladas
+                if auc.status in ("FINALIZADA", "CONCLUIDA", "CANCELADA", "SUSPENDIDA"):
+                    continue
+                if auc.auction_end_date and auc.auction_end_date <= datetime.utcnow():
+                    continue
+
                 auc_surf = getattr(auc, "surface_m2", None) or (getattr(auc.parcel, "surface_m2", None) if getattr(auc, "parcel", None) else None)
                 if auc and (BOESubastasScraper.is_garage_or_storage(auc.description or "", auc.title or "") or BOESubastasScraper.is_nave(auc.title or "", auc.description or "", auc.property_type or "", surface_m2=auc_surf)):
                     continue
@@ -1252,7 +1261,11 @@ def get_opportunities(
                     
                     "lat": lat,
                     "lon": lon,
-                    "auction_end_date": (auc.auction_end_date if (auc and auc.auction_end_date) else "15/09/2026 18:00h"),
+                    "auction_end_date": (
+                        auc.auction_end_date.strftime("%d/%m/%Y %H:%Mh")
+                        if (auc and hasattr(auc.auction_end_date, "strftime"))
+                        else (str(auc.auction_end_date) if (auc and auc.auction_end_date) else "")
+                    ),
                     "images": images_list,
                     "liens": scraper.extract_liens_info(desc_text, auc.id_subasta if auc else ""),
                     "urbanism": {

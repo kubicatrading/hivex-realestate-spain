@@ -88,7 +88,9 @@ class OpportunityScoringEngine:
                         buildability_ratio=item.get("buildability_ratio"),
                         permitted_uses=item.get("permitted_uses"),
                         images_json=images_json_str,
-                        status=item.get("status", "EJECUCION")
+                        status=item.get("status", "EJECUCION"),
+                        auction_start_date=item.get("auction_start_date"),
+                        auction_end_date=item.get("auction_end_date")
                     )
                     self.db.add(existing)
                     self.db.commit()
@@ -96,6 +98,12 @@ class OpportunityScoringEngine:
                 else:
                     # Actualizar datos enriquecidos si ya existía
                     existing.address = item.get("address") or existing.address
+                    if item.get("status"):
+                        existing.status = item["status"]
+                    if item.get("auction_end_date"):
+                        existing.auction_end_date = item["auction_end_date"]
+                    if item.get("auction_start_date"):
+                        existing.auction_start_date = item["auction_start_date"]
                     existing.zoning_classification = item.get("zoning_classification") or existing.zoning_classification
                     existing.urbanization_status = item.get("urbanization_status") or existing.urbanization_status
                     existing.buildability_ratio = item.get("buildability_ratio") or existing.buildability_ratio

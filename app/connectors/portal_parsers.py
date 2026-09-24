@@ -194,6 +194,85 @@ DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
     "cortijo merino": {"lat": 36.7020, "lon": -4.4810, "income": 31200, "m2_price": 2650.0, "growth": 3.9, "cp": "29004"},
     "cruz de humilladero": {"lat": 36.7120, "lon": -4.4450, "income": 30500, "m2_price": 2550.0, "growth": 2.8, "cp": "29006"},
     "carretera de cadiz": {"lat": 36.6980, "lon": -4.4420, "income": 29000, "m2_price": 2600.0, "growth": 3.2, "cp": "29003"},
+
+    # ALICANTE PROVINCIA (LOCALIDADES CLAVE)
+    "denia": {"lat": 38.8407, "lon": 0.1057, "income": 34000, "m2_price": 2850.0, "growth": 2.8, "cp": "03700"},
+    "dénia": {"lat": 38.8407, "lon": 0.1057, "income": 34000, "m2_price": 2850.0, "growth": 2.8, "cp": "03700"},
+    "benidorm": {"lat": 38.5411, "lon": -0.1225, "income": 32000, "m2_price": 2900.0, "growth": 2.5, "cp": "03501"},
+    "altea": {"lat": 38.5989, "lon": -0.0514, "income": 36000, "m2_price": 3100.0, "growth": 2.1, "cp": "03590"},
+    "calpe": {"lat": 38.6447, "lon": 0.0457, "income": 33000, "m2_price": 2950.0, "growth": 2.2, "cp": "03710"},
+    "calp": {"lat": 38.6447, "lon": 0.0457, "income": 33000, "m2_price": 2950.0, "growth": 2.2, "cp": "03710"},
+    "torrevieja": {"lat": 37.9787, "lon": -0.6822, "income": 28000, "m2_price": 2100.0, "growth": 3.1, "cp": "03181"},
+    "elche": {"lat": 38.2669, "lon": -0.6983, "income": 31000, "m2_price": 1650.0, "growth": 2.0, "cp": "03201"},
+    "javea": {"lat": 38.7894, "lon": 0.1661, "income": 37000, "m2_price": 3400.0, "growth": 2.4, "cp": "03730"},
+    "jávea": {"lat": 38.7894, "lon": 0.1661, "income": 37000, "m2_price": 3400.0, "growth": 2.4, "cp": "03730"},
+
+    # VALENCIA PROVINCIA (LOCALIDADES CLAVE)
+    "gandia": {"lat": 38.9676, "lon": -0.1804, "income": 31000, "m2_price": 1850.0, "growth": 2.3, "cp": "46701"},
+    "gandía": {"lat": 38.9676, "lon": -0.1804, "income": 31000, "m2_price": 1850.0, "growth": 2.3, "cp": "46701"},
+    "cullera": {"lat": 39.1633, "lon": -0.2541, "income": 32000, "m2_price": 2150.0, "growth": 2.6, "cp": "46400"},
+    "oliva": {"lat": 38.9197, "lon": -0.1211, "income": 29000, "m2_price": 1650.0, "growth": 2.1, "cp": "46780"},
+    "sagunto": {"lat": 39.6796, "lon": -0.2785, "income": 33000, "m2_price": 1750.0, "growth": 3.0, "cp": "46520"},
+    "sagunt": {"lat": 39.6796, "lon": -0.2785, "income": 33000, "m2_price": 1750.0, "growth": 3.0, "cp": "46520"},
+    "torrent": {"lat": 39.4367, "lon": -0.4658, "income": 34000, "m2_price": 1800.0, "growth": 2.2, "cp": "46900"},
+
+    # MALAGA PROVINCIA
+    "marbella": {"lat": 36.5101, "lon": -4.8824, "income": 45000, "m2_price": 4500.0, "growth": 3.2, "cp": "29601"},
+    "estepona": {"lat": 36.4256, "lon": -5.1459, "income": 38000, "m2_price": 3300.0, "growth": 3.8, "cp": "29680"},
+    "fuengirola": {"lat": 36.5399, "lon": -4.6247, "income": 34000, "m2_price": 3100.0, "growth": 2.9, "cp": "29640"},
+
+    # BARCELONA PROVINCIA
+    "sitges": {"lat": 41.2372, "lon": 1.8059, "income": 52000, "m2_price": 4800.0, "growth": 1.8, "cp": "08870"},
+    "badalona": {"lat": 41.4469, "lon": 2.2450, "income": 35000, "m2_price": 2700.0, "growth": 2.5, "cp": "08911"},
+    "sant cugat del valles": {"lat": 41.4722, "lon": 2.0863, "income": 65000, "m2_price": 4600.0, "growth": 1.2, "cp": "08172"},
+
+    # MADRID PROVINCIA
+    "pozuelo de alarcon": {"lat": 40.4354, "lon": -3.8138, "income": 78000, "m2_price": 4400.0, "growth": 0.9, "cp": "28223"},
+    "las rozas de madrid": {"lat": 40.4925, "lon": -3.8744, "income": 62000, "m2_price": 3800.0, "growth": 1.4, "cp": "28231"},
+    "alcobendas": {"lat": 40.5475, "lon": -3.6421, "income": 59000, "m2_price": 3900.0, "growth": 1.3, "cp": "28100"},
+}
+
+LOCALITY_TO_PROVINCE: Dict[str, str] = {
+    "denia": "Alicante",
+    "dénia": "Alicante",
+    "benidorm": "Alicante",
+    "altea": "Alicante",
+    "calpe": "Alicante",
+    "calp": "Alicante",
+    "torrevieja": "Alicante",
+    "elche": "Alicante",
+    "elx": "Alicante",
+    "javea": "Alicante",
+    "jávea": "Alicante",
+    "xabia": "Alicante",
+    "xàbia": "Alicante",
+    "gandia": "Valencia",
+    "gandía": "Valencia",
+    "cullera": "Valencia",
+    "oliva": "Valencia",
+    "sagunto": "Valencia",
+    "sagunt": "Valencia",
+    "torrent": "Valencia",
+    "marbella": "Málaga",
+    "estepona": "Málaga",
+    "fuengirola": "Málaga",
+    "sitges": "Barcelona",
+    "badalona": "Barcelona",
+    "sant cugat del valles": "Barcelona",
+    "sant cugat del vallès": "Barcelona",
+    "pozuelo de alarcon": "Madrid",
+    "pozuelo de alarcón": "Madrid",
+    "las rozas": "Madrid",
+    "las rozas de madrid": "Madrid",
+    "alcobendas": "Madrid",
+    "madrid": "Madrid",
+    "barcelona": "Barcelona",
+    "valencia": "Valencia",
+    "alicante": "Alicante",
+    "malaga": "Málaga",
+    "málaga": "Málaga",
+    "sevilla": "Sevilla",
+    "zaragoza": "Zaragoza",
 }
 
 
@@ -484,11 +563,49 @@ class IdealistaMarkdownParser:
         avg_income = 38000
         growth_rate = 1.5
 
+        # Detección inteligente de localidad y provincia
+        detected_loc_key = None
+        if default_province and default_province.lower().strip() in LOCALITY_TO_PROVINCE:
+            detected_loc_key = default_province.lower().strip()
+        elif matched_neighborhood and matched_neighborhood in LOCALITY_TO_PROVINCE:
+            detected_loc_key = matched_neighborhood
+        else:
+            for l_key in LOCALITY_TO_PROVINCE:
+                if re.search(rf'\b{re.escape(l_key)}\b', t_lower):
+                    detected_loc_key = l_key
+                    break
+
+        if detected_loc_key:
+            province = LOCALITY_TO_PROVINCE[detected_loc_key]
+            # Normalizar nombre formal de la localidad
+            loc_names = {
+                "denia": "Dénia", "dénia": "Dénia",
+                "benidorm": "Benidorm", "altea": "Altea",
+                "calpe": "Calpe", "calp": "Calpe",
+                "torrevieja": "Torrevieja", "elche": "Elche", "elx": "Elche",
+                "javea": "Jávea", "jávea": "Jávea", "xabia": "Jávea", "xàbia": "Jávea",
+                "gandia": "Gandía", "gandía": "Gandía",
+                "cullera": "Cullera", "oliva": "Oliva",
+                "sagunto": "Sagunto", "sagunt": "Sagunto", "torrent": "Torrent",
+                "marbella": "Marbella", "estepona": "Estepona", "fuengirola": "Fuengirola",
+                "sitges": "Sitges", "badalona": "Badalona",
+                "sant cugat del valles": "Sant Cugat del Vallès", "sant cugat del vallès": "Sant Cugat del Vallès",
+                "pozuelo de alarcon": "Pozuelo de Alarcón", "pozuelo de alarcón": "Pozuelo de Alarcón",
+                "las rozas": "Las Rozas de Madrid", "las rozas de madrid": "Las Rozas de Madrid",
+                "alcobendas": "Alcobendas"
+            }
+            locality = loc_names.get(detected_loc_key, detected_loc_key.capitalize())
+            district_label = f"{locality} Centro"
+
         if cp_meta:
             _, district_label = cp_meta
 
         if matched_neighborhood and matched_neighborhood in DISTRICT_COORDINATES:
             coord_data = DISTRICT_COORDINATES[matched_neighborhood]
+            avg_income = coord_data.get("income", 38000)
+            growth_rate = coord_data.get("growth", 1.5)
+        elif detected_loc_key and detected_loc_key in DISTRICT_COORDINATES:
+            coord_data = DISTRICT_COORDINATES[detected_loc_key]
             avg_income = coord_data.get("income", 38000)
             growth_rate = coord_data.get("growth", 1.5)
 

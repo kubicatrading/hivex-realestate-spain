@@ -133,17 +133,21 @@ class MarketScraper:
         if not raw_items:
             return []
 
-        # Deduplicar por referencia catastral o dirección normalizada
+        # Deduplicar por ID único de anuncio o referencia catastral
         dedup_map: Dict[str, Dict[str, Any]] = {}
         for raw in raw_items:
-            refcat = (raw.get("refcat") or "").strip().upper()
-            if refcat and len(refcat) >= 14:
-                dedup_key = f"REFCAT_{refcat}"
+            raw_id = (raw.get("id") or raw.get("portal_id") or "").strip()
+            if raw_id:
+                dedup_key = f"ID_{raw_id}"
             else:
-                addr = re.sub(r'\s+', ' ', (raw.get("address") or "").lower().strip())
-                loc = (raw.get("locality") or "").lower().strip()
-                surf = round(float(raw.get("surface_m2") or 0.0) / 5.0) * 5
-                dedup_key = f"GEO_{loc}_{addr}_{surf}"
+                refcat = (raw.get("refcat") or "").strip().upper()
+                if refcat and len(refcat) >= 14:
+                    dedup_key = f"REFCAT_{refcat}"
+                else:
+                    addr = re.sub(r'\s+', ' ', (raw.get("address") or "").lower().strip())
+                    loc = (raw.get("locality") or "").lower().strip()
+                    surf = round(float(raw.get("surface_m2") or 0.0) / 5.0) * 5
+                    dedup_key = f"GEO_{loc}_{addr}_{surf}"
 
             if dedup_key not in dedup_map:
                 dedup_map[dedup_key] = dict(raw)
@@ -238,10 +242,13 @@ class MarketScraper:
                 logger.warning(f"Consulta de portales en vivo finalizada: {e_live}")
 
         if province:
-            norm_prov = province.strip().lower()
+            import unicodedata
+            def _clean_str(s: str) -> str:
+                return unicodedata.normalize('NFKD', s or '').encode('ASCII', 'ignore').decode('utf-8').lower()
+            norm_prov = _clean_str(province.strip())
             raw_items = [
                 it for it in raw_items
-                if norm_prov in (it.get("province") or "").lower() or norm_prov in (it.get("locality") or "").lower()
+                if norm_prov in _clean_str(it.get("province") or "") or norm_prov in _clean_str(it.get("locality") or "")
             ]
 
         return raw_items
@@ -387,14 +394,24 @@ class MarketScraper:
             ],
         }
 
-        # 2. Mercados de Segundo Nivel
+        # 2. Mercados de Segundo Nivel (Capitales y Municipios Clave de Provincia)
         tier_2 = {
             "valencia": [
                 ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/", "Valencia", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/gandia-valencia/con-precio-rebajado/", "Gandía", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/cullera-valencia/con-precio-rebajado/", "Cullera", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/oliva-valencia/con-precio-rebajado/", "Oliva", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/sagunto-sagunt-valencia/con-precio-rebajado/", "Sagunto", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l", "Valencia", "fotocasa"),
                 ("https://www.pisos.com/comprar/pisos-valencia/", "Valencia", "pisoscom"),
             ],
             "alicante": [
+                ("https://www.idealista.com/venta-viviendas/alicante-alacant-alicante/con-precio-rebajado/", "Alicante", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/denia-alicante/con-precio-rebajado/", "Dénia", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/benidorm-alicante/con-precio-rebajado/", "Benidorm", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/altea-alicante/con-precio-rebajado/", "Altea", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/calpe-calp-alicante/con-precio-rebajado/", "Calpe", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/torrevieja-alicante/con-precio-rebajado/", "Torrevieja", "idealista"),
                 ("https://www.habitaclia.com/viviendas-alicante.htm", "Alicante", "habitaclia"),
                 ("https://www.pisos.com/comprar/pisos-alicante/", "Alicante", "pisoscom"),
             ],
@@ -404,6 +421,8 @@ class MarketScraper:
             ],
             "malaga": [
                 ("https://www.idealista.com/venta-viviendas/malaga-malaga/con-precio-rebajado/", "Málaga", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/marbella-malaga/con-precio-rebajado/", "Marbella", "idealista"),
+                ("https://www.idealista.com/venta-viviendas/estepona-malaga/con-precio-rebajado/", "Estepona", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l", "Málaga", "fotocasa"),
             ],
         }
@@ -439,9 +458,19 @@ class MarketScraper:
         targets = []
         if province:
             p_clean = province.lower().strip()
+            from app.connectors.portal_parsers import LOCALITY_TO_PROVINCE
+            parent_prov = LOCALITY_TO_PROVINCE.get(p_clean, p_clean).lower()
+            
             for t_dict in [tier_1, tier_2, tier_3]:
-                if p_clean in t_dict:
-                    targets.extend(t_dict[p_clean])
+                if parent_prov in t_dict:
+                    if p_clean in LOCALITY_TO_PROVINCE and p_clean != parent_prov:
+                        loc_targets = [t for t in t_dict[parent_prov] if p_clean in t[0].lower() or p_clean in t[1].lower()]
+                        if loc_targets:
+                            targets.extend(loc_targets)
+                        else:
+                            targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{parent_prov}/con-precio-rebajado/", p_clean.capitalize(), "idealista"))
+                    else:
+                        targets.extend(t_dict[parent_prov])
             if not targets:
                 targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
         else:

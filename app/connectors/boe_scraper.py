@@ -483,6 +483,34 @@ class BOESubastasScraper:
 
         return None
 
+    @staticmethod
+    def parse_boe_datetime(date_str: str) -> Optional[datetime]:
+        """
+        Parsea fechas del BOE en formatos habituales:
+        - "13-10-2026 18:00:00 CET(ISO: 2026-10-13T18:00:00+02:00)"
+        - "13-10-2026 18:00:00 CET"
+        - "13-10-2026 18:00:00"
+        - "13/10/2026 18:00"
+        - "13/10/2026"
+        """
+        if not date_str:
+            return None
+        iso_match = re.search(r'\(ISO:\s*([^\)]+)\)', date_str)
+        if iso_match:
+            try:
+                dt = datetime.fromisoformat(iso_match.group(1))
+                return dt.replace(tzinfo=None)
+            except Exception:
+                pass
+        m = re.search(r'(\d{2})[-/](\d{2})[-/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?', date_str)
+        if m:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            hour = int(m.group(4)) if m.group(4) else 18
+            minute = int(m.group(5)) if m.group(5) else 0
+            second = int(m.group(6)) if m.group(6) else 0
+            return datetime(year, month, day, hour, minute, second)
+        return None
+
     def parse_auction_detail(self, auction_id: str, html_content: str) -> Dict[str, Any]:
         """
         Parsea el HTML de la página de detalles de un lote/subasta del BOE.
@@ -543,6 +571,12 @@ class BOESubastasScraper:
                             data["property_type"] = "Solar"
                         else:
                             data["property_type"] = "Vivienda"
+                    elif "conclusión" in key or "conclusion" in key or "finalización" in key or "finalizacion" in key or "fecha fin" in key:
+                        data["auction_end_date"] = self.parse_boe_datetime(val)
+                    elif "inicio" in key and "fecha" in key:
+                        data["auction_start_date"] = self.parse_boe_datetime(val)
+                    elif "estado" in key:
+                        data["status"] = val
 
         # Buscar RefCat en el texto completo
         data["description"] = full_text.strip()
@@ -794,9 +828,12 @@ class BOESubastasScraper:
                         logger.info(f"Subasta {aid} descartada por ser garaje/trastero/no inmueble: {desc[:60]}...")
                         continue
 
-                    # 2. Datos financieros (ver=1)
+                    # 2. Datos financieros y fechas (ver=1)
                     s1 = BeautifulSoup(html_ver1, "html.parser")
                     appraisal, starting_bid, min_bid = 0.0, 0.0, 0.0
+                    auction_end_date = None
+                    auction_start_date = None
+                    status_val = "EJECUCION"
                     for tr in s1.find_all("tr"):
                         tds = tr.find_all(["th", "td"])
                         if len(tds) >= 2:
@@ -807,6 +844,21 @@ class BOESubastasScraper:
                                 appraisal = self._parse_amount(v)
                             elif "puja mínima" in k or "puja minima" in k:
                                 min_bid = self._parse_amount(v)
+                            elif "conclusión" in k or "conclusion" in k or "finalización" in k or "finalizacion" in k or "fecha fin" in k:
+                                auction_end_date = self.parse_boe_datetime(v)
+                            elif "inicio" in k and "fecha" in k:
+                                auction_start_date = self.parse_boe_datetime(v)
+                            elif "estado" in k:
+                                status_val = v
+
+                    # REGLA ESTRICTA: Descartar subastas concluidas o cuya fecha de fin ya expiró
+                    now = datetime.utcnow()
+                    if auction_end_date and auction_end_date <= now:
+                        logger.info(f"Subasta {aid} descartada por haber concluido el {auction_end_date}")
+                        continue
+                    if any(w in status_val.lower() for w in ["concluida", "finalizada", "cancelada", "suspendida"]):
+                        logger.info(f"Subasta {aid} descartada por estado inactivo ({status_val})")
+                        continue
 
                     # Si la subasta es por lotes, los valores financieros se rescatan de ver=3
                     if starting_bid == 0.0 and lote_starting_bid > 0.0:
@@ -847,7 +899,9 @@ class BOESubastasScraper:
                         "starting_bid": starting_bid if starting_bid > 0 else (appraisal * 0.5),
                         "deposit_amount": starting_bid * 0.05 if starting_bid > 0 else (appraisal * 0.05),
                         "refcat": refcat if refcat else None,
-                        "status": "EJECUCION",
+                        "status": status_val,
+                        "auction_start_date": auction_start_date,
+                        "auction_end_date": auction_end_date,
                         "lat": lat,
                         "lon": lon,
                         "images": images,
