@@ -2173,6 +2173,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(data => {
                     const loader = document.getElementById('gallery-enrich-loader');
                     if (loader) loader.remove();
+
+                    if (data && data.delisted) {
+                        // Anuncio dado de baja en origen: avisar al usuario, cerrar modal y purgar de la lista
+                        window.closePropertyDetailModal();
+                        showToast('Inmueble retirado: El anuncio ha sido dado de baja en el portal original y se ha eliminado automáticamente del catálogo de HIVEX.', 'warning');
+                        if (window._lastOpportunities && Array.isArray(window._lastOpportunities)) {
+                            window._lastOpportunities = window._lastOpportunities.filter(o => o.id !== opp.id);
+                        }
+                        if (typeof renderOpportunities === 'function' && window._lastOpportunities) {
+                            renderOpportunities(window._lastOpportunities);
+                        }
+                        return;
+                    }
+
                     if (data && data.success && data.images && data.images.length > 1) {
                         opp.images = data.images;
                         if (window._lastOpportunities && typeof index === 'number' && window._lastOpportunities[index]) {

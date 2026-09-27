@@ -1659,8 +1659,17 @@ def enrich_opportunity_gallery(
         except Exception as e_c:
             print(f"Error leyendo catálogo para enriquecimiento: {e_c}")
 
-    # Si ya tiene una galería completa de 20 fotos, retornarla de inmediato
-    if target_item and len(target_item.get("images", [])) >= 20:
+    # Si el inmueble no existe en catálogo o fue retirado
+    if not target_item:
+        return {
+            "success": False,
+            "delisted": True,
+            "message": "Este inmueble ya no se encuentra en el catálogo de HIVEX o ha sido retirado.",
+            "id": clean_id
+        }
+
+    # Si ya tiene una galería completa de 15 o más fotos propias, retornarla de inmediato
+    if target_item and len(target_item.get("images", [])) >= 15:
         return {
             "success": True,
             "images": target_item.get("images", []),
@@ -1682,22 +1691,37 @@ def enrich_opportunity_gallery(
             if scrape_res and scrape_res.get("content"):
                 content = scrape_res.get("content", "")
 
-                # Extraer según portal
+                # GUARDIÁN DE CATÁLOGO: Detección estricta de anuncios dados de baja o caducados
+                from app.services.catalog_guardian import CatalogGuardian
+                guardian = CatalogGuardian(catalog_path=catalog_path)
+                is_delisted, reason = guardian.is_delisted_content(content)
+                if is_delisted:
+                    print(f"[CatalogGuardian] Inmueble {clean_id} dado de baja en origen ({reason}). Eliminando automáticamente...")
+                    guardian.purge_opportunity(clean_id)
+                    return {
+                        "success": False,
+                        "delisted": True,
+                        "message": "Este inmueble ya no está publicado en el portal de origen y ha sido eliminado automáticamente del catálogo de HIVEX.",
+                        "id": clean_id
+                    }
+
+                # Extraer ÚNICA Y EXCLUSIVAMENTE fotos reales que pertenezcan a este anuncio
+                own_imgs = []
                 if "idealista.com" in portal_url.lower():
                     raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+\.jpg', content)
                     for img in raw_imgs:
                         if "loading" in img or "avatar" in img or "common" in img:
                             continue
                         cleaned = re.sub(r'/blur/[^/]+/', '/blur/WEB_DETAIL-XL-L/', img)
-                        if cleaned not in enriched_images:
-                            enriched_images.append(cleaned)
+                        if cleaned not in own_imgs:
+                            own_imgs.append(cleaned)
 
                 elif "fotocasa.es" in portal_url.lower():
                     raw_imgs = re.findall(r'https?://static\.fotocasa\.es/images/ads/[a-f0-9\-]+', content)
                     for img in raw_imgs:
                         clean_url = img.split("?")[0]
-                        if clean_url not in enriched_images:
-                            enriched_images.append(clean_url)
+                        if clean_url not in own_imgs:
+                            own_imgs.append(clean_url)
 
                 elif "pisos.com" in portal_url.lower():
                     raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
@@ -1705,53 +1729,30 @@ def enrich_opportunity_gallery(
                         if "logo" in img.lower() or "icon" in img.lower():
                             continue
                         cleaned = img.replace("/fchm-wp/", "/fch-wp/")
-                        if cleaned not in enriched_images:
-                            enriched_images.append(cleaned)
+                        if cleaned not in own_imgs:
+                            own_imgs.append(cleaned)
 
                 elif "habitaclia.com" in portal_url.lower():
                     raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
                     for img in raw_imgs:
                         if "logo" in img.lower() or "icon" in img.lower() or "loading" in img.lower():
                             continue
-                        if img not in enriched_images:
-                            enriched_images.append(img)
+                        if img not in own_imgs:
+                            own_imgs.append(img)
+
+                if own_imgs:
+                    enriched_images = own_imgs[:25]
         except Exception as e_s:
             print(f"[Enrich Gallery] Advertencia raspando {portal_url}: {e_s}")
 
-    # 3. Si aún tiene menos de 20 fotos (ej. anuncio dado de baja o portal con carga dinámica),
-    # complementar hasta 20 fotos reales verificadas del mismo portal para completar el reportaje
-    if len(enriched_images) < 20 and catalog_items:
-        portal_id_name = (target_item.get("primary_portal") if target_item else "") or "Idealista"
-        matching_pool = []
-        for it in catalog_items:
-            if portal_id_name.lower() in (it.get("primary_portal") or "").lower() or portal_id_name.lower() in (it.get("portal_url") or "").lower():
-                for im in it.get("images", []):
-                    if im and im not in matching_pool:
-                        matching_pool.append(im)
-        if len(matching_pool) < 20:
-            for it in catalog_items:
-                for im in it.get("images", []):
-                    if im and im not in matching_pool:
-                        matching_pool.append(im)
-
-        if matching_pool:
-            h_offset = abs(hash(clean_id)) % len(matching_pool)
-            for i in range(len(matching_pool)):
-                cand = matching_pool[(h_offset + i) % len(matching_pool)]
-                if cand not in enriched_images:
-                    enriched_images.append(cand)
-                if len(enriched_images) >= 20:
-                    break
-
-    enriched_images = enriched_images[:20]
-
-    # Guardar en catálogo para persistencia permanente
-    if target_item and enriched_images:
+    # REGLA DE ORO: CERO datos simulados o fotos de otros inmuebles.
+    # Si se extrajeron fotos legítimas adicionales de este anuncio, guardar en catálogo
+    if target_item and enriched_images and len(enriched_images) > len(target_item.get("images", [])):
         target_item["images"] = enriched_images
         try:
             with open(catalog_path, "w", encoding="utf-8") as f:
                 json.dump(catalog_items, f, ensure_ascii=False, indent=2)
-            print(f"[Enrich Gallery] Guardadas {len(enriched_images)} fotos para {clean_id}")
+            print(f"[Enrich Gallery] Guardadas {len(enriched_images)} fotos legítimas para {clean_id}")
         except Exception as e_w:
             print(f"Error guardando catálogo actualizado: {e_w}")
 
@@ -1761,6 +1762,19 @@ def enrich_opportunity_gallery(
         "count": len(enriched_images),
         "portal": target_item.get("primary_portal", "Portal Inmobiliario") if target_item else "Idealista"
     }
+
+@app.post("/api/v1/market/guardian/audit")
+def guardian_audit_catalog_endpoint(
+    max_items: Optional[int] = Query(25, description="Número máximo de anuncios a auditar en este pase"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint de auditoría del Guardián de Catálogo:
+    Escanea anuncios en el catálogo y purga automáticamente cualquiera que haya sido dado de baja o caducado.
+    """
+    from app.services.catalog_guardian import CatalogGuardian
+    guardian = CatalogGuardian()
+    return guardian.audit_catalog(max_items=max_items)
 
 @app.api_route("/api/v1/market/sync", methods=["GET", "POST"])
 def sync_market_endpoint(
