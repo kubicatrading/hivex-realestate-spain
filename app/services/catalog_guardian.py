@@ -73,7 +73,25 @@ class CatalogGuardian:
             extracted = list(unique_pisos.values())
 
         elif "habitaclia.com" in url_lower:
-            # En Habitaclia las fotos son static|fotos.habitaclia.com
+            # En Habitaclia las fotos pertenecen a la red Adevinta (Fotocasa CDN) o images.habimg.com
+            # 1. Extraer UUIDs de la galería oficial (foto.htm?p=...imagen=UUID.jpg o static.fotocasa.es)
+            gallery_uuids = re.findall(r'imagen=([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jpg', content, re.I)
+            for uid in gallery_uuids:
+                fc_url = f"https://static.fotocasa.es/images/ads/{uid}"
+                if fc_url not in extracted:
+                    extracted.append(fc_url)
+
+            # 2. Si no hubo UUIDs de galería, buscar imágenes habimg
+            if not extracted:
+                habimg = re.findall(r'(?:https?:)?//images\.habimg\.com/imgh/[^\s\"\'\)<>]+[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}[A-Z]*\.(?:jpg|jpeg|webp)', content, re.I)
+                for h in habimg:
+                    if not h.startswith("http"):
+                        h = "https:" + h
+                    h_clean = re.sub(r'[A-Z]?\.(jpg|jpeg|webp)$', r'XL.\1', h)
+                    if h_clean not in extracted:
+                        extracted.append(h_clean)
+
+            # 3. Fallback a CDNs tradicionales de Habitaclia
             raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
             for img in raw_imgs:
                 if any(x in img.lower() for x in ["logo", "icon", "loading", "avatar", "watermark"]):
