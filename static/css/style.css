@@ -1201,12 +1201,22 @@ body {
 }
 
 #modal-google-maps {
-    z-index: 10005 !important;
+    z-index: 30005 !important;
 }
 
 #modal-google-maps .modal-content {
-    z-index: 10006 !important;
-    max-width: 850px;
+    z-index: 30006 !important;
+    max-width: min(920px, 94vw);
+    width: 920px;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+.spin {
+    animation: spin 1s linear infinite;
+    display: inline-block;
 }
 
 .modal-content {
@@ -1892,8 +1902,20 @@ body {
     box-sizing: border-box !important;
 }
 
-#modal-property-detail .modal-content,
-#modal-property-detail .modal-large,
+#modal-property-detail .modal-large {
+    width: 900px !important;
+    max-width: min(900px, 92vw) !important;
+    margin: 30px auto !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    border-radius: var(--radius-lg) !important;
+}
+
+#modal-property-detail .modal-content {
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
 #modal-property-detail #modal-prop-body,
 #modal-property-detail .modal-prop-container {
     max-width: 100% !important;

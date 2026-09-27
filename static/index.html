@@ -13,7 +13,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- App CSS -->
-    <link rel="stylesheet" href="/static/css/style.css?v=3.3.0">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.4.0">
 </head>
 <body>
     <!-- Background Glow Blobs -->
@@ -262,10 +262,15 @@
                 <span id="modal-gmaps-address" class="modal-subtitle">Cargando dirección...</span>
             </div>
             
-            <div class="gmaps-tab-bar" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
-                <button id="tab-btn-map" class="btn btn-primary btn-sm active">
-                    <i data-lucide="map"></i> Mapa Satélite / Terreno
-                </button>
+            <div class="gmaps-tab-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
+                <div style="display: flex; gap: 8px;">
+                    <button id="tab-btn-map" class="btn btn-primary btn-sm active">
+                        <i data-lucide="map"></i> Mapa Satélite / Terreno
+                    </button>
+                </div>
+                <a id="link-gmaps-external" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                    <i data-lucide="external-link"></i> Abrir en Google Maps
+                </a>
             </div>
 
             <div class="google-maps-container" style="margin-top: 10px;">
@@ -286,6 +291,6 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <!-- App JS -->
-    <script src="/static/js/app.js?v=3.3.0"></script>
+    <script src="/static/js/app.js?v=3.4.0"></script>
 </body>
 </html>

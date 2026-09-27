@@ -1979,6 +1979,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
         const modalImages = getOpportunityImagesList(opp);
+        const isPortalOpp = Boolean(
+            (opp.id && String(opp.id).startsWith('MKT-')) ||
+            opp.source_type === 'market' ||
+            opp.primary_portal ||
+            opp.portal_url ||
+            (opp.publications && opp.publications.length > 0)
+        );
+        const hasPortalEnrichment = isPortalOpp && modalImages.length <= 1;
+
         window.modalGalleryState = {
             images: modalImages,
             currentIndex: 0,
@@ -2003,9 +2012,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span id="modal-gallery-source-name" style="opacity: 0.8; margin-left: 6px;">• Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
                         </div>
                     ` : `
-                        <div class="modal-gallery-counter-badge">
+                        <div class="modal-gallery-counter-badge" id="modal-gallery-counter">
                             <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
                             <span>Foto 1 de 1 • Fuente: ${modalImages[0] && modalImages[0].includes('maps.googleapis.com') ? 'Google Street View (Fachada)' : escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                            ${hasPortalEnrichment ? `<span id="gallery-enrich-loader" style="color: #38bdf8; margin-left: 8px; font-weight: 500; font-size: 0.74rem; display: inline-flex; align-items: center; gap: 4px;"><i data-lucide="loader-2" class="spin" style="width: 12px; height: 12px;"></i> Obteniendo reportaje completo...</span>` : ''}
                         </div>
                     `}
                 </div>
@@ -2154,21 +2164,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Opción A: Enriquecimiento automático de galería bajo demanda si sólo tiene 1 foto
-        const currImgs = getOpportunityImagesList(opp);
-        const hasPortalSource = opp.portal_url || (opp.publications && opp.publications.length > 0 && opp.publications[0].url) || opp.source_type === 'market';
-        if (opp && hasPortalSource && currImgs.length <= 1) {
-            const counterBadge = document.querySelector('.modal-gallery-counter-badge');
-            if (counterBadge && !document.getElementById('gallery-enrich-loader')) {
-                const enrichBadge = document.createElement('span');
-                enrichBadge.id = 'gallery-enrich-loader';
-                enrichBadge.style.cssText = 'color: #38bdf8; margin-left: 8px; font-weight: 500; font-size: 0.74rem; display: inline-flex; align-items: center; gap: 4px;';
-                enrichBadge.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 12px; height: 12px;"></i> Obteniendo reportaje completo...';
-                counterBadge.appendChild(enrichBadge);
-                if (window.lucide) lucide.createIcons();
-            }
-
+        if (hasPortalEnrichment) {
             fetch(`/api/v1/opportunities/${encodeURIComponent(opp.id)}/enrich_gallery`)
-                .then(res => res.json())
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                })
                 .then(data => {
                     const loader = document.getElementById('gallery-enrich-loader');
                     if (loader) loader.remove();
@@ -2304,12 +2305,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const linkExt = document.getElementById('link-gmaps-external');
         const iframe = document.getElementById('iframe-gmaps');
 
-        let fullSearch = (address && typeof address === 'string' && address.trim() !== '') ? address.trim() : '';
-        if (fullSearch && !fullSearch.toLowerCase().includes('españa') && !fullSearch.toLowerCase().includes('spain')) {
-            fullSearch += ', España';
+        const hasCoords = (lat !== undefined && lat !== null && lon !== undefined && lon !== null && !isNaN(Number(lat)) && !isNaN(Number(lon)) && (Number(lat) !== 0 || Number(lon) !== 0));
+
+        let query = '';
+        if (hasCoords) {
+            query = `${lat},${lon}`;
+        } else {
+            let cleanAddress = (address && typeof address === 'string') ? address.trim() : '';
+            cleanAddress = cleanAddress.replace(/^(piso|casa|chalet|ático|atico|dúplex|duplex|estudio|local)\s+en\s+/i, '');
+            if (cleanAddress && !cleanAddress.toLowerCase().includes('españa') && !cleanAddress.toLowerCase().includes('spain')) {
+                cleanAddress += ', España';
+            }
+            query = cleanAddress || 'Madrid, España';
         }
 
-        const query = fullSearch || (lat && lon ? `${lat},${lon}` : 'España');
         const encQuery = encodeURIComponent(query);
 
         if (addrSpan) addrSpan.textContent = address || query;
@@ -2320,14 +2329,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gmapsKey) {
             window._gmapsMapUrl = `https://www.google.com/maps/embed/v1/search?key=${gmapsKey}&q=${encQuery}&maptype=satellite`;
         } else {
-            window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=18&ie=UTF8&iwloc=&output=embed`;
+            window._gmapsMapUrl = `https://maps.google.com/maps?q=${encQuery}&t=k&z=19&ie=UTF8&iwloc=&output=embed`;
         }
 
         if (iframe) iframe.src = window._gmapsMapUrl;
+        if (linkExt) {
+            linkExt.href = `https://www.google.com/maps/search/?api=1&query=${encQuery}`;
+        }
 
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
-        modal.style.zIndex = '10005';
+        modal.style.zIndex = '30005';
 
         if (window.lucide) lucide.createIcons();
     };
