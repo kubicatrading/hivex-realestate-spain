@@ -846,6 +846,69 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    window.updateModalGallery = function(opp, newImages) {
+        if (!newImages || newImages.length <= 1) return;
+        
+        window.modalGalleryState = {
+            images: newImages,
+            currentIndex: 0,
+            portal: opp.primary_portal || 'Idealista'
+        };
+
+        const galleryBox = document.querySelector('.modal-media-wrapper.modal-gallery-box');
+        if (!galleryBox) return;
+
+        galleryBox.innerHTML = `
+            <div class="modal-gallery-main" id="modal-gallery-main-view">
+                <img id="modal-gallery-active-img" src="${newImages[0]}" alt="${escapeHtml(opp.title)}" onerror="this.onerror=null; this.src='/api/v1/streetview_photo?lat=${opp.lat || ''}&lon=${opp.lon || ''}&address=${encodeURIComponent(opp.full_address || '')}';">
+                
+                <button type="button" class="modal-gallery-btn modal-gallery-prev" onclick="window.modalGalleryNav(-1)" title="Foto anterior (←)" aria-label="Foto anterior">
+                    <i data-lucide="chevron-left"></i>
+                </button>
+                <button type="button" class="modal-gallery-btn modal-gallery-next" onclick="window.modalGalleryNav(1)" title="Foto siguiente (→)" aria-label="Foto siguiente">
+                    <i data-lucide="chevron-right"></i>
+                </button>
+                <div class="modal-gallery-counter-badge" id="modal-gallery-counter">
+                    <i data-lucide="camera" style="width: 13px; height: 13px; display: inline;"></i> 
+                    <span>Foto <strong id="modal-gallery-cur-num">1</strong> de ${newImages.length}</span>
+                    <span id="modal-gallery-source-name" style="opacity: 0.8; margin-left: 6px;">• Fuente: ${escapeHtml(opp.primary_portal || 'Idealista')}</span>
+                </div>
+            </div>
+
+            <div class="modal-gallery-thumbnails" id="modal-gallery-thumbs">
+                ${newImages.map((imgUrl, thumbIdx) => `
+                    <div class="gallery-thumb-item ${thumbIdx === 0 ? 'active' : ''}" id="gallery-thumb-${thumbIdx}" onclick="window.modalGalleryGoTo(${thumbIdx})" title="Ver foto ${thumbIdx + 1}">
+                        <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy" alt="Miniatura ${thumbIdx + 1}" onerror="this.onerror=null; this.src='/api/v1/streetview_photo';">
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        if (window.lucide) lucide.createIcons();
+
+        // Reatar eventos de gestos táctiles (swipe)
+        const mainViewEl = document.getElementById('modal-gallery-main-view');
+        if (mainViewEl) {
+            let touchStartX = 0;
+            let touchEndX = 0;
+            mainViewEl.addEventListener('touchstart', (e) => {
+                if (e.changedTouches && e.changedTouches[0]) {
+                    touchStartX = e.changedTouches[0].screenX;
+                }
+            }, { passive: true });
+            mainViewEl.addEventListener('touchend', (e) => {
+                if (e.changedTouches && e.changedTouches[0]) {
+                    touchEndX = e.changedTouches[0].screenX;
+                    if (touchEndX < touchStartX - 40) {
+                        window.modalGalleryNav(1);
+                    } else if (touchEndX > touchStartX + 40) {
+                        window.modalGalleryNav(-1);
+                    }
+                }
+            }, { passive: true });
+        }
+    };
+
     // Keyboard navigation listener (Left / Right arrows)
     if (!window._modalGalleryKeyAttached) {
         window._modalGalleryKeyAttached = true;
@@ -2088,6 +2151,42 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }, { passive: true });
+        }
+
+        // Opción A: Enriquecimiento automático de galería bajo demanda si sólo tiene 1 foto
+        const currImgs = getOpportunityImagesList(opp);
+        const hasPortalSource = opp.portal_url || (opp.publications && opp.publications.length > 0 && opp.publications[0].url) || opp.source_type === 'market';
+        if (opp && hasPortalSource && currImgs.length <= 1) {
+            const counterBadge = document.querySelector('.modal-gallery-counter-badge');
+            if (counterBadge && !document.getElementById('gallery-enrich-loader')) {
+                const enrichBadge = document.createElement('span');
+                enrichBadge.id = 'gallery-enrich-loader';
+                enrichBadge.style.cssText = 'color: #38bdf8; margin-left: 8px; font-weight: 500; font-size: 0.74rem; display: inline-flex; align-items: center; gap: 4px;';
+                enrichBadge.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 12px; height: 12px;"></i> Obteniendo reportaje completo...';
+                counterBadge.appendChild(enrichBadge);
+                if (window.lucide) lucide.createIcons();
+            }
+
+            fetch(`/api/v1/opportunities/${encodeURIComponent(opp.id)}/enrich_gallery`)
+                .then(res => res.json())
+                .then(data => {
+                    const loader = document.getElementById('gallery-enrich-loader');
+                    if (loader) loader.remove();
+                    if (data && data.success && data.images && data.images.length > 1) {
+                        opp.images = data.images;
+                        if (window._lastOpportunities && typeof index === 'number' && window._lastOpportunities[index]) {
+                            window._lastOpportunities[index].images = data.images;
+                        }
+                        if (window._activeModalOpp && window._activeModalOpp.id === opp.id) {
+                            window.updateModalGallery(opp, data.images);
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.warn('[Enrich Gallery] Advertencia al obtener reportaje:', err);
+                    const loader = document.getElementById('gallery-enrich-loader');
+                    if (loader) loader.remove();
+                });
         }
     };
 

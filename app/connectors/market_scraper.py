@@ -382,14 +382,14 @@ class MarketScraper:
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-2.htm", "Madrid", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l", "Madrid", "fotocasa"),
-                ("https://www.pisos.com/comprar/pisos-madrid/", "Madrid", "pisoscom"),
+                ("https://www.pisos.com/venta/pisos-madrid/", "Madrid", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
             ],
             "barcelona": [
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
                 ("https://www.habitaclia.com/comprar-vivienda-en-barcelona/buscador.htm", "Barcelona", "habitaclia"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l", "Barcelona", "fotocasa"),
-                ("https://www.pisos.com/comprar/pisos-barcelona/", "Barcelona", "pisoscom"),
+                ("https://www.pisos.com/venta/pisos-barcelona/", "Barcelona", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
             ],
         }
@@ -403,7 +403,7 @@ class MarketScraper:
                 ("https://www.idealista.com/venta-viviendas/oliva-valencia/con-precio-rebajado/", "Oliva", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/sagunto-sagunt-valencia/con-precio-rebajado/", "Sagunto", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l", "Valencia", "fotocasa"),
-                ("https://www.pisos.com/comprar/pisos-valencia/", "Valencia", "pisoscom"),
+                ("https://www.pisos.com/venta/pisos-valencia/", "Valencia", "pisoscom"),
             ],
             "alicante": [
                 ("https://www.idealista.com/venta-viviendas/alicante-alacant-alicante/con-precio-rebajado/", "Alicante", "idealista"),
@@ -413,7 +413,7 @@ class MarketScraper:
                 ("https://www.idealista.com/venta-viviendas/calpe-calp-alicante/con-precio-rebajado/", "Calpe", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/torrevieja-alicante/con-precio-rebajado/", "Torrevieja", "idealista"),
                 ("https://www.habitaclia.com/viviendas-alicante.htm", "Alicante", "habitaclia"),
-                ("https://www.pisos.com/comprar/pisos-alicante/", "Alicante", "pisoscom"),
+                ("https://www.pisos.com/venta/pisos-alicante/", "Alicante", "pisoscom"),
             ],
             "tarragona": [
                 ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/", "Tarragona", "idealista"),

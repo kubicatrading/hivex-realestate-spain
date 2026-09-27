@@ -917,19 +917,29 @@ class FotocasaMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
-                if len(title) < 5 or re.match(r'^\d+/\d+$', title):
-                    continue
-
                 start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
                 prev_text = markdown_content[start_prev:match.start()]
                 end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
                 post_text = markdown_content[match.end():end_post]
 
+                title = re.sub(r'[*_~`]', '', title).strip()
+                if len(title) < 5 or re.match(r'^\d+/\d+$', title) or any(bad in title.lower() for bad in ["video del inmueble", "tour virtual", "visita virtual", "líder de zona"]):
+                    # Fallback de título en alt de foto o encabezado
+                    alt_title_m = re.search(r'!\[(?:Foto\s*\d+\s*de\s*)?([^\]]+)\]', prev_text[-500:] + "\n" + post_text[:500])
+                    h1_title_m = re.search(r'#\s*([^\n\r]+)', post_text[:500] + "\n" + prev_text[-500:])
+                    if alt_title_m and len(alt_title_m.group(1).strip()) > 5:
+                        title = alt_title_m.group(1).strip()
+                    elif h1_title_m and len(h1_title_m.group(1).strip()) > 5:
+                        title = h1_title_m.group(1).strip()
+                    else:
+                        continue
+
                 if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
                     continue
 
-                # Precios
-                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', post_text[:500])
+                # Precios: buscar tanto en prev_text (donde suele salir en la tarjeta de fotocasa) como en post_text
+                search_zone = prev_text[-400:] + "\n" + post_text[:500]
+                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', search_zone)
                 if not price_matches:
                     continue
 
@@ -1101,7 +1111,7 @@ class PisosComMarkdownParser:
             return listings
 
         link_pattern = re.compile(
-            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/comprar/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/(?:comprar|venta)/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
             re.IGNORECASE
         )
 
@@ -1127,7 +1137,9 @@ class PisosComMarkdownParser:
                 if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
                     continue
 
-                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', post_text[:500])
+                # Buscar precios en el bloque anterior (donde suele colocarse en pisos.com) y posterior
+                search_zone = prev_text[-400:] + "\n" + post_text[:500]
+                price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', search_zone)
                 if not price_matches:
                     continue
 
@@ -1159,8 +1171,10 @@ class PisosComMarkdownParser:
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
                 images = []
-                img_matches = re.findall(r'!\[[^\]]*\]\((https?://[^\)]+\.(?:jpg|jpeg|png|webp)[^\)]*)\)', prev_text + "\n" + post_text[:1200])
-                for img_url in img_matches:
+                all_candidate_imgs = re.findall(r'https?://(?:fotos|statics)\.imghs\.net/[^\s\"\)\']+\.(?:jpg|jpeg|png|webp)', prev_text + "\n" + post_text[:1200])
+                for img_url in all_candidate_imgs:
+                    if any(bad in img_url.lower() for bad in ["logo", "icon", "microphone", "map_", "loading"]):
+                        continue
                     if img_url not in images:
                         images.append(img_url)
 

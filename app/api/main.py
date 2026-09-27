@@ -1629,6 +1629,141 @@ def get_opportunity_by_id(
         detail_msg += f" [Diag: {' ; '.join(errors)}]"
     raise HTTPException(status_code=404, detail=detail_msg)
 
+@app.get("/api/v1/opportunities/{opp_id}/enrich_gallery")
+def enrich_opportunity_gallery(
+    opp_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Enriquece dinámicamente bajo demanda la galería fotográfica de un inmueble (Opción A).
+    Si el anuncio del portal solo aportó la foto de portada en el listado, visita la URL
+    de detalle para extraer el carrusel completo de 15 a 30 imágenes reales en alta resolución.
+    """
+    clean_id = opp_id.strip()
+    from app.connectors.supadata_client import SupadataClient
+    from pathlib import Path
+
+    # 1. Buscar la oportunidad en el catálogo
+    target_item = None
+    catalog_path = Path("app/data/verified_market_catalog.json")
+    catalog_items = []
+    
+    if catalog_path.exists():
+        try:
+            with open(catalog_path, "r", encoding="utf-8") as f:
+                catalog_items = json.load(f)
+            for it in catalog_items:
+                if str(it.get("id", "")).strip().upper() == clean_id.upper():
+                    target_item = it
+                    break
+        except Exception as e_c:
+            print(f"Error leyendo catálogo para enriquecimiento: {e_c}")
+
+    # Si ya tiene una galería completa (>2 fotos), retornarla de inmediato
+    if target_item and len(target_item.get("images", [])) > 2:
+        return {
+            "success": True,
+            "images": target_item.get("images", []),
+            "count": len(target_item.get("images", [])),
+            "cached": True
+        }
+
+    portal_url = None
+    if target_item:
+        portal_url = target_item.get("portal_url") or (target_item.get("publications", [{}])[0].get("url") if target_item.get("publications") else None)
+
+    if not portal_url:
+        current_images = target_item.get("images", []) if target_item else []
+        return {
+            "success": False,
+            "images": current_images,
+            "count": len(current_images),
+            "message": "Inmueble sin URL de portal comercial"
+        }
+
+    # 2. Consultar URL de detalle vía Supadata
+    try:
+        supadata = SupadataClient()
+        scrape_res = supadata.scrape_url(portal_url)
+        if not scrape_res or not scrape_res.get("content"):
+            return {
+                "success": False,
+                "images": target_item.get("images", []) if target_item else [],
+                "count": len(target_item.get("images", [])) if target_item else 0,
+                "message": "No se pudo extraer contenido de la página de detalle"
+            }
+
+        content = scrape_res.get("content", "")
+        enriched_images = []
+
+        # Extraer según portal
+        if "idealista.com" in portal_url.lower():
+            raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if "loading" in img or "avatar" in img or "common" in img:
+                    continue
+                cleaned = re.sub(r'/blur/[^/]+/', '/blur/WEB_DETAIL-XL-L/', img)
+                if cleaned not in enriched_images:
+                    enriched_images.append(cleaned)
+
+        elif "fotocasa.es" in portal_url.lower():
+            raw_imgs = re.findall(r'https?://static\.fotocasa\.es/images/ads/[a-f0-9\-]+', content)
+            for img in raw_imgs:
+                clean_url = img.split("?")[0]
+                if clean_url not in enriched_images:
+                    enriched_images.append(clean_url)
+
+        elif "pisos.com" in portal_url.lower():
+            raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if "logo" in img.lower() or "icon" in img.lower():
+                    continue
+                cleaned = img.replace("/fchm-wp/", "/fch-wp/")
+                if cleaned not in enriched_images:
+                    enriched_images.append(cleaned)
+
+        elif "habitaclia.com" in portal_url.lower():
+            raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if "logo" in img.lower() or "icon" in img.lower() or "loading" in img.lower():
+                    continue
+                if img not in enriched_images:
+                    enriched_images.append(img)
+
+        enriched_images = enriched_images[:20]
+
+        # Si se extrajeron nuevas imágenes, guardar en catálogo para persistencia permanente
+        if enriched_images and len(enriched_images) > len(target_item.get("images", [])):
+            target_item["images"] = enriched_images
+            try:
+                with open(catalog_path, "w", encoding="utf-8") as f:
+                    json.dump(catalog_items, f, ensure_ascii=False, indent=2)
+                print(f"[Enrich Gallery] Guardadas {len(enriched_images)} fotos para {clean_id}")
+            except Exception as e_w:
+                print(f"Error guardando catálogo actualizado: {e_w}")
+
+            return {
+                "success": True,
+                "images": enriched_images,
+                "count": len(enriched_images),
+                "portal": target_item.get("primary_portal", "Portal Inmobiliario")
+            }
+        else:
+            current_imgs = target_item.get("images", []) if target_item else []
+            return {
+                "success": True,
+                "images": current_imgs,
+                "count": len(current_imgs),
+                "portal": target_item.get("primary_portal", "Portal Inmobiliario") if target_item else "Idealista"
+            }
+    except Exception as e:
+        print(f"[Enrich Gallery Error] Error enriqueciendo fotos para {clean_id}: {e}")
+        return {
+            "success": False,
+            "images": target_item.get("images", []) if target_item else [],
+            "message": str(e)
+        }
+
 @app.api_route("/api/v1/market/sync", methods=["GET", "POST"])
 def sync_market_endpoint(
     live: bool = Query(False, description="Ejecutar raspado en vivo multiciudad dentro de la ventana de 300s"),
