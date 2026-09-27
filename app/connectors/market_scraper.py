@@ -377,63 +377,77 @@ class MarketScraper:
 
         # MATRIZ NACIONAL HIVEX: EXACTAMENTE 40 PÁGINAS (40 CRÉDITOS / DÍA = 1.200 CRÉDITOS / MES)
         # 1. Mercados Grandes: Idealista, Fotocasa, Habitaclia y Pisos.com
+        # 1. Mercados Primarios (Tier 1): Madrid y Barcelona (Multicanal)
         tier_1 = {
             "madrid": [
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/madrid-madrid/con-precio-rebajado/pagina-2.htm", "Madrid", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l", "Madrid", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/madrid-provincia/madrid-capital/s", "Madrid", "habitaclia"),
                 ("https://www.pisos.com/venta/pisos-madrid/", "Madrid", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/madrid-madrid/con-precio-rebajado/", "Madrid", "idealista"),
             ],
             "barcelona": [
                 ("https://www.idealista.com/venta-viviendas/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
-                ("https://www.habitaclia.com/comprar-vivienda-en-barcelona/buscador.htm", "Barcelona", "habitaclia"),
+                ("https://www.habitaclia.com/comprar/viviendas/barcelona-provincia/barcelona-capital/s", "Barcelona", "habitaclia"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l", "Barcelona", "fotocasa"),
                 ("https://www.pisos.com/venta/pisos-barcelona/", "Barcelona", "pisoscom"),
                 ("https://www.idealista.com/venta-terrenos/barcelona-barcelona/con-precio-rebajado/", "Barcelona", "idealista"),
             ],
         }
 
-        # 2. Mercados de Segundo Nivel (Capitales y Municipios Clave de Provincia)
+        # 2. Mercados de Segundo Nivel (Tier 2): Valencia, Alicante, Málaga, Sevilla, Baleares, Zaragoza, etc.
         tier_2 = {
             "valencia": [
                 ("https://www.idealista.com/venta-viviendas/valencia-valencia/con-precio-rebajado/", "Valencia", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/gandia-valencia/con-precio-rebajado/", "Gandía", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/cullera-valencia/con-precio-rebajado/", "Cullera", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/oliva-valencia/con-precio-rebajado/", "Oliva", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/sagunto-sagunt-valencia/con-precio-rebajado/", "Sagunto", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l", "Valencia", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/valencia-provincia/valencia-capital/s", "Valencia", "habitaclia"),
                 ("https://www.pisos.com/venta/pisos-valencia/", "Valencia", "pisoscom"),
             ],
             "alicante": [
                 ("https://www.idealista.com/venta-viviendas/alicante-alacant-alicante/con-precio-rebajado/", "Alicante", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/denia-alicante/con-precio-rebajado/", "Dénia", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/benidorm-alicante/con-precio-rebajado/", "Benidorm", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/altea-alicante/con-precio-rebajado/", "Altea", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/calpe-calp-alicante/con-precio-rebajado/", "Calpe", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/torrevieja-alicante/con-precio-rebajado/", "Torrevieja", "idealista"),
-                ("https://www.habitaclia.com/viviendas-alicante.htm", "Alicante", "habitaclia"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/alicante-alacant/todas-las-zonas/l", "Alicante", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/alicante-provincia/alicante-capital/s", "Alicante", "habitaclia"),
                 ("https://www.pisos.com/venta/pisos-alicante/", "Alicante", "pisoscom"),
-            ],
-            "tarragona": [
-                ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/", "Tarragona", "idealista"),
-                ("https://www.habitaclia.com/comprar-vivienda-en-tarragona/buscador.htm", "Tarragona", "habitaclia"),
             ],
             "malaga": [
                 ("https://www.idealista.com/venta-viviendas/malaga-malaga/con-precio-rebajado/", "Málaga", "idealista"),
                 ("https://www.idealista.com/venta-viviendas/marbella-malaga/con-precio-rebajado/", "Marbella", "idealista"),
-                ("https://www.idealista.com/venta-viviendas/estepona-malaga/con-precio-rebajado/", "Estepona", "idealista"),
                 ("https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l", "Málaga", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/malaga-provincia/malaga-capital/s", "Málaga", "habitaclia"),
+                ("https://www.pisos.com/venta/pisos-malaga/", "Málaga", "pisoscom"),
+            ],
+            "sevilla": [
+                ("https://www.idealista.com/venta-viviendas/sevilla-sevilla/con-precio-rebajado/", "Sevilla", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/sevilla-capital/todas-las-zonas/l", "Sevilla", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/sevilla-provincia/sevilla-capital/s", "Sevilla", "habitaclia"),
+                ("https://www.pisos.com/venta/pisos-sevilla/", "Sevilla", "pisoscom"),
+            ],
+            "zaragoza": [
+                ("https://www.idealista.com/venta-viviendas/zaragoza-zaragoza/con-precio-rebajado/", "Zaragoza", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/zaragoza-capital/todas-las-zonas/l", "Zaragoza", "fotocasa"),
+            ],
+            "baleares": [
+                ("https://www.idealista.com/venta-viviendas/palma-de-mallorca-baleares/con-precio-rebajado/", "Baleares", "idealista"),
+                ("https://www.fotocasa.es/es/comprar/viviendas/palma-de-mallorca/todas-las-zonas/l", "Baleares", "fotocasa"),
+                ("https://www.habitaclia.com/comprar/viviendas/baleares-illes/palma-de-mallorca/s", "Baleares", "habitaclia"),
+            ],
+            "tarragona": [
+                ("https://www.idealista.com/venta-viviendas/tarragona-provincia/con-precio-rebajado/", "Tarragona", "idealista"),
+                ("https://www.habitaclia.com/comprar/viviendas/tarragona-provincia/tarragona-capital/s", "Tarragona", "habitaclia"),
+            ],
+            "girona": [
+                ("https://www.idealista.com/venta-viviendas/girona-girona/con-precio-rebajado/", "Girona", "idealista"),
+                ("https://www.habitaclia.com/comprar/viviendas/girona-provincia/girona-capital/s", "Girona", "habitaclia"),
             ],
         }
 
-        # 3. Resto de Mercados Estratégicos: 1 página cada uno (24 páginas)
+        # 3. Resto de Mercados Estratégicos (1 página por ciudad)
         tier_3 = {
-            "sevilla": [("https://www.idealista.com/venta-viviendas/sevilla-sevilla/con-precio-rebajado/", "Sevilla", "idealista")],
-            "zaragoza": [("https://www.idealista.com/venta-viviendas/zaragoza-zaragoza/con-precio-rebajado/", "Zaragoza", "idealista")],
             "murcia": [("https://www.idealista.com/venta-viviendas/murcia-murcia/con-precio-rebajado/", "Murcia", "idealista")],
             "valladolid": [("https://www.idealista.com/venta-viviendas/valladolid-valladolid/con-precio-rebajado/", "Valladolid", "idealista")],
-            "baleares": [("https://www.idealista.com/venta-viviendas/palma-de-mallorca-baleares/con-precio-rebajado/", "Baleares", "idealista")],
             "toledo": [("https://www.idealista.com/venta-viviendas/talavera-de-la-reina-toledo/con-precio-rebajado/", "Toledo", "idealista")],
             "guipuzcoa": [("https://www.idealista.com/venta-viviendas/donostia-san-sebastian-guipuzcoa/con-precio-rebajado/", "Guipúzcoa", "idealista")],
             "vizcaya": [("https://www.idealista.com/venta-viviendas/bilbao-vizcaya/con-precio-rebajado/", "Vizcaya", "idealista")],
@@ -447,8 +461,6 @@ class MarketScraper:
             "asturias": [("https://www.idealista.com/venta-viviendas/gijon-asturias/con-precio-rebajado/", "Asturias", "idealista")],
             "granada": [("https://www.idealista.com/venta-viviendas/granada-granada/con-precio-rebajado/", "Granada", "idealista")],
             "cordoba": [("https://www.idealista.com/venta-viviendas/cordoba-cordoba/con-precio-rebajado/", "Córdoba", "idealista")],
-            "girona": [("https://www.idealista.com/venta-viviendas/girona-girona/con-precio-rebajado/", "Girona", "idealista")],
-            "pontevedra": [("https://www.idealista.com/venta-viviendas/vigo-pontevedra/con-precio-rebajado/", "Pontevedra", "idealista")],
             "almeria": [("https://www.idealista.com/venta-viviendas/almeria-almeria/con-precio-rebajado/", "Almería", "idealista")],
             "castellon": [("https://www.idealista.com/venta-viviendas/castellon-de-la-plana-castello-de-la-plana-castellon/con-precio-rebajado/", "Castellón", "idealista")],
             "salamanca": [("https://www.idealista.com/venta-viviendas/salamanca-salamanca/con-precio-rebajado/", "Salamanca", "idealista")],
@@ -474,12 +486,23 @@ class MarketScraper:
             if not targets:
                 targets.append((f"https://www.idealista.com/venta-viviendas/{p_clean}-{p_clean}/", province.capitalize(), "idealista"))
         else:
-            # En sincronizaciones completas, procesar la matriz completa
+            # En sincronizaciones completas, recopilar la matriz completa
             for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
                 targets.extend(t_list)
 
-        # Procesamos targets con un pool concurrente
-        targets = targets[:40]
+        # CONTROL ESTRICTO DE PRESUPUESTO SUPADATA (1.200 créditos/mes = máx 40/día):
+        # Idealista requiere proxy residencial Supadata (1 crédito por página).
+        # Capping estricto de <= 30 targets para Idealista (margen de seguridad garantizado).
+        # Fotocasa, Habitaclia y Pisos.com se consultan directamente vía HTTP sin gastar créditos Supadata.
+        idealista_targets = [t for t in targets if t[2] == "idealista"][:30]
+        free_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom"]]
+        active_targets = idealista_targets + free_targets
+
+        logger.info(
+            f"[Market Live Scraper] Total targets preparados: {len(active_targets)} "
+            f"({len(idealista_targets)} Idealista [<= 30 créditos Supadata], "
+            f"{len(free_targets)} portales directos [0 créditos])."
+        )
 
         def _scrape_worker(target_info):
             url, prov_name, portal_type = target_info
@@ -488,11 +511,33 @@ class MarketScraper:
                 if portal_type == "idealista" and "ordenado-por=" not in clean_url:
                     sep = "&" if "?" in clean_url else "?"
                     clean_url = f"{clean_url}{sep}ordenado-por=rebajas-desc"
-                logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata [{clean_url}]...")
-                scrape_res = self.supadata_client.scrape_url(clean_url)
-                if not scrape_res or not scrape_res.get("content"):
+
+                content = ""
+                # Portales directos con 0 créditos: Habitaclia, Fotocasa, Pisos.com
+                if portal_type in ["fotocasa", "habitaclia", "pisoscom"]:
+                    try:
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                        }
+                        resp = httpx.get(clean_url, headers=headers, follow_redirects=True, timeout=18.0)
+                        if resp.status_code == 200 and len(resp.text) > 1000:
+                            content = resp.text
+                            logger.info(f"[Market Live Scraper] Fetch directo exitoso para {portal_type} ({prov_name}) [0 créditos Supadata].")
+                    except Exception as e_direct:
+                        logger.warning(f"Fetch directo no completado para {portal_type}: {e_direct}")
+
+                # Idealista (o si portal directo no obtuvo contenido)
+                if not content:
+                    logger.info(f"[Market Live Scraper] Consultando {portal_type} ({prov_name}) vía Supadata [{clean_url}]...")
+                    scrape_res = self.supadata_client.scrape_url(clean_url)
+                    if scrape_res and scrape_res.get("content"):
+                        content = scrape_res.get("content", "")
+
+                if not content:
                     return []
-                content = scrape_res.get("content", "")
+
                 if portal_type == "idealista":
                     return IdealistaMarkdownParser.parse_listings(content, default_province=prov_name)
                 elif portal_type == "habitaclia":
@@ -507,9 +552,9 @@ class MarketScraper:
                 return []
 
         import concurrent.futures
-        # Con 6 workers concurrentes y 300s de tiempo máximo, 40 páginas toman ~35-50 segundos
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_target = {executor.submit(_scrape_worker, t): t for t in targets}
+        # Con 8 workers concurrentes y fetch directo ultrarrápido, los targets directos terminan en pocos segundos
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_target = {executor.submit(_scrape_worker, t): t for t in active_targets}
             try:
                 for future in concurrent.futures.as_completed(future_to_target, timeout=240.0):
                     try:
@@ -556,19 +601,37 @@ class MarketScraper:
             key = it.get("portal_url") or it.get("portal_id") or it.get("id")
             if key:
                 existing_map[key] = it
-        combined = list(existing_map.values())
+        def _clean_surrogates(obj):
+            if isinstance(obj, str):
+                return obj.encode('utf-16', 'surrogatepass').decode('utf-16', 'replace')
+            elif isinstance(obj, dict):
+                return {k: _clean_surrogates(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_clean_surrogates(v) for v in obj]
+            return obj
+
+        combined = _clean_surrogates(list(existing_map.values()))
         targets = [
             Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
             Path.cwd() / "app" / "data" / "verified_market_catalog.json"
         ]
+        seen_targets = set()
         for tgt in targets:
             try:
-                tgt.parent.mkdir(parents=True, exist_ok=True)
-                with open(tgt, "w", encoding="utf-8") as f:
+                resolved = tgt.resolve()
+                if resolved in seen_targets:
+                    continue
+                seen_targets.add(resolved)
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                tmp_tgt = resolved.with_name(f"{resolved.name}.tmp")
+                with open(tmp_tgt, "w", encoding="utf-8") as f:
                     json.dump(combined, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+                    f.flush()
+                    os.fsync(f.fileno())
+                tmp_tgt.replace(resolved)
+            except Exception as e_tgt:
+                logger.warning(f"Error guardando catálogo en {tgt}: {e_tgt}")
 
     def _build_verified_market_catalog(self) -> List[Dict[str, Any]]:
         """

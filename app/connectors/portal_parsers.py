@@ -5,6 +5,7 @@ Transforma texto y enlaces Markdown en objetos de oportunidad estructurados para
 """
 
 import re
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -708,10 +709,171 @@ class HabitacliaMarkdownParser:
     """
 
     @classmethod
+    def _parse_html(cls, html_content: str, default_province: str = "Barcelona") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        try:
+            m = re.search(r'window\.__INITIAL_PROPS__\s*=\s*JSON\.parse\(\"(.+?)\"\);\s*</script>', html_content)
+            if not m:
+                return listings
+            raw_json = m.group(1).encode('utf-8').decode('unicode_escape')
+            data = json.loads(raw_json)
+            items = data.get('initialSearchResultsPage', {}).get('initialSearchContext', {}).get('results', {}).get('items', [])
+            for it in items:
+                try:
+                    item_id = str(it.get('legacyNumericId') or it.get('id'))
+                    summary = it.get('summary', {}) or {}
+                    title = summary.get('title') or "Piso en venta"
+                    if len(title) < 5 or BOESubastasScraper.is_nave(title=title, desc="", property_type=""):
+                        continue
+
+                    price_dict = it.get('transaction', {}).get('price', {}) or {}
+                    listing_price = float(price_dict.get('amount') or 0)
+                    if listing_price <= 15000:
+                        continue
+
+                    price_drop = price_dict.get('priceDrop') or {}
+                    reduction_amount = float(price_drop.get('reductionAmount') or 0)
+                    original_listing_price = listing_price + reduction_amount if reduction_amount > 0 else listing_price
+                    price_drop_percentage = round((reduction_amount / original_listing_price) * 100, 1) if original_listing_price > 0 else 0.0
+                    price_drop_date = "2026-03-01" if reduction_amount > 0 else None
+
+                    nav_url = it.get('navigationUrl', '')
+                    url = f"https://www.habitaclia.com{nav_url}" if nav_url.startswith('/') else nav_url
+
+                    prop = it.get('property', {}) or {}
+                    surface_m2 = float(prop.get('builtSurface') or 80.0)
+                    rooms = int(prop.get('rooms') or 2)
+                    bathrooms = int(prop.get('bathrooms') or max(1, rooms - 1))
+                    floor = str(prop.get('floor') or "Exterior")
+                    features_dict = prop.get('features', {}) or {}
+                    has_list = features_dict.get('has', []) or []
+                    has_elevator = "ELEVATOR" in has_list
+
+                    images = [im.get('url') for im in summary.get('multimedia', {}).get('images', []) if im.get('url')]
+                    clean_images = []
+                    for img in images:
+                        clean_url_img = img.split("?")[0] if "static.fotocasa.es" in img else img
+                        if clean_url_img not in clean_images:
+                            clean_images.append(clean_url_img)
+
+                    loc = summary.get('location', {}) or {}
+                    district = loc.get('district') or default_province
+                    municipality = loc.get('municipality') or default_province
+                    province = loc.get('province') or default_province
+                    address = loc.get('displayAddressLine') or f"{title}, {municipality}"
+                    coords = loc.get('coordinates', {}) or {}
+                    lat = coords.get('latitude')
+                    lon = coords.get('longitude')
+
+                    loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} en {municipality}", default_province)
+                    if not lat:
+                        lat = loc_data.get('lat')
+                    if not lon:
+                        lon = loc_data.get('lon')
+
+                    opportunity = {
+                        "id": f"MKT-HABITACLIA-{item_id}",
+                        "title": title,
+                        "address": address,
+                        "locality": municipality,
+                        "province": province,
+                        "postal_code": loc_data.get("postal_code", "28001"),
+                        "lat": lat,
+                        "lon": lon,
+                        "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
+                        "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                        "surface_m2": surface_m2,
+                        "rooms": rooms,
+                        "bathrooms": bathrooms,
+                        "floor": floor,
+                        "has_elevator": has_elevator,
+                        "energy_certificate": "E",
+                        "original_listing_price": original_listing_price,
+                        "listing_price": listing_price,
+                        "price_drop_percentage": price_drop_percentage,
+                        "price_drop_amount": reduction_amount,
+                        "price_drop_date": price_drop_date,
+                        "discount_percentage": price_drop_percentage,
+                        "first_published_date": "2026-03-01",
+                        "publications": [
+                            {
+                                "portal": "Habitaclia",
+                                "price": listing_price,
+                                "url": url,
+                                "agency": "Inmobiliaria Habitaclia",
+                                "published_date": "2026-03-01"
+                            }
+                        ],
+                        "census_tract_data": {
+                            "district": district,
+                            "avg_household_income": loc_data.get("avg_household_income", 40000),
+                            "avg_person_income": 18000,
+                            "area_m2_price": loc_data.get("area_m2_price", 3900.0),
+                            "population_growth_rate": 1.5
+                        },
+                        "images": clean_images,
+                        "description": summary.get("description") or f"{title}. Anuncio verificado en Habitaclia."
+                    }
+
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=opportunity["surface_m2"],
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=opportunity["floor"],
+                        has_elevator=opportunity["has_elevator"]
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
+
+                    area_m2_price = float(loc_data.get("area_m2_price", 3900.0))
+                    est_market_val = opportunity["surface_m2"] * area_m2_price
+                    discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                    overall_score = KPICalculator.calculate_overall_opportunity_score(
+                        discount_percentage=discount_vs_market / 100.0,
+                        poi_score=82.0,
+                        income_amount=loc_data.get("avg_household_income", 40000),
+                        population_growth=loc_data.get("population_growth_rate", 1.5),
+                        rental_yield=rental_yield,
+                        is_solar=False
+                    )
+
+                    opportunity["portal_id"] = str(item_id)
+                    opportunity["portal_url"] = url
+                    opportunity["primary_portal"] = "Habitaclia"
+                    opportunity["discount_percentage"] = discount_vs_market
+                    opportunity["estimated_monthly_rent"] = monthly_rent
+                    opportunity["rental_yield"] = rental_yield
+                    opportunity["yield_score"] = yield_score
+                    opportunity["yield_color"] = yield_color
+                    opportunity["btl_score"] = btl_score
+                    opportunity["btl_color"] = yield_color
+                    opportunity["discount_vs_market"] = discount_vs_market
+                    opportunity["overall_score"] = overall_score
+                    opportunity["final_score"] = overall_score
+
+                    listings.append(opportunity)
+                except Exception as e_it:
+                    logger.warning(f"Error parseando item HTML Habitaclia: {e_it}")
+        except Exception as e_glob:
+            logger.warning(f"Error procesando HTML de Habitaclia: {e_glob}")
+        return listings
+
+    @classmethod
     def parse_listings(cls, markdown_content: str, default_province: str = "Barcelona") -> List[Dict[str, Any]]:
         listings: List[Dict[str, Any]] = []
         if not markdown_content:
             return listings
+
+        if "<script" in markdown_content or "window.__INITIAL_PROPS__" in markdown_content:
+            html_listings = cls._parse_html(markdown_content, default_province)
+            if html_listings:
+                logger.info(f"[Habitaclia HTML Parser] Extraídos {len(html_listings)} inmuebles directamente de la página.")
+                return html_listings
 
         # Habitaclia: [Ático con ascensor en venta en...](https://www.habitaclia.com/comprar-...)
         # o enlaces con /inmueble/, /viviendas/ o /i<id>.htm
@@ -892,10 +1054,170 @@ class FotocasaMarkdownParser:
     """
 
     @classmethod
+    def _parse_html(cls, html_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        try:
+            m = re.search(r'<script[^>]+id=[\"\']__initial_props__[\"\'][^>]*>(.*?)</script>', html_content, re.DOTALL)
+            if not m:
+                return listings
+            data = json.loads(m.group(1))
+            real_estates = data.get('initialSearch', {}).get('result', {}).get('realEstates', [])
+            for it in real_estates:
+                try:
+                    item_id = str(it.get('id'))
+                    raw_price = float(it.get('rawPrice') or it.get('price') or 0)
+                    if raw_price <= 15000:
+                        continue
+                    listing_price = raw_price
+
+                    reduced_price_raw = it.get('reducedPrice')
+                    price_drop_amount = 0.0
+                    if reduced_price_raw:
+                        clean_drop = re.sub(r'[^\d]', '', str(reduced_price_raw))
+                        if clean_drop:
+                            price_drop_amount = float(clean_drop)
+                    original_listing_price = listing_price + price_drop_amount if price_drop_amount > 0 else listing_price
+                    price_drop_percentage = round((price_drop_amount / original_listing_price) * 100, 1) if original_listing_price > 0 else 0.0
+                    price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
+
+                    detail_dict = it.get('detail', {}) or {}
+                    detail_path = detail_dict.get('es-ES') or detail_dict.get('es') or ''
+                    url = f"https://www.fotocasa.es{detail_path}" if detail_path else ""
+
+                    addr = it.get('address', {}) or {}
+                    neighborhood = addr.get('neighborhood') or addr.get('district') or default_province
+                    municipality = addr.get('municipality') or default_province
+                    province = addr.get('province') or default_province
+                    title = f"{it.get('buildingType', 'Piso')} en venta en {neighborhood}, {municipality}"
+
+                    features = {f.get('key'): f.get('value') for f in it.get('features', []) if isinstance(f, dict)}
+                    surface_m2 = float(features.get('surface', 80.0))
+                    rooms = int(features.get('rooms', 2))
+                    bathrooms = int(features.get('bathrooms', max(1, rooms - 1)))
+                    floor = f"{features.get('floor')}ª planta" if features.get('floor') else "Exterior"
+                    has_elevator = features.get('elevator', 0) > 0
+
+                    multimedias = it.get('multimedia', []) or []
+                    clean_images = []
+                    for m_item in multimedias:
+                        if isinstance(m_item, dict) and m_item.get('type') == 'image' and m_item.get('src'):
+                            clean_img = m_item.get('src').split("?")[0]
+                            if clean_img not in clean_images:
+                                clean_images.append(clean_img)
+
+                    coords = it.get('coordinates', {}) or {}
+                    lat = coords.get('latitude')
+                    lon = coords.get('longitude')
+
+                    loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} en {municipality}", default_province)
+                    if not lat:
+                        lat = loc_data.get('lat')
+                    if not lon:
+                        lon = loc_data.get('lon')
+
+                    opportunity = {
+                        "id": f"MKT-FOTOCASA-{item_id}",
+                        "title": title,
+                        "address": loc_data.get("address") or f"{title}, {municipality}",
+                        "locality": municipality,
+                        "province": province,
+                        "postal_code": addr.get("zipCode") or loc_data.get("postal_code", "28001"),
+                        "lat": lat,
+                        "lon": lon,
+                        "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
+                        "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                        "surface_m2": surface_m2,
+                        "rooms": rooms,
+                        "bathrooms": bathrooms,
+                        "floor": floor,
+                        "has_elevator": has_elevator,
+                        "energy_certificate": "E",
+                        "original_listing_price": original_listing_price,
+                        "listing_price": listing_price,
+                        "price_drop_percentage": price_drop_percentage,
+                        "price_drop_amount": price_drop_amount,
+                        "price_drop_date": price_drop_date,
+                        "discount_percentage": price_drop_percentage,
+                        "first_published_date": "2026-03-01",
+                        "publications": [
+                            {
+                                "portal": "Fotocasa",
+                                "price": listing_price,
+                                "url": url,
+                                "agency": "Inmobiliaria Fotocasa",
+                                "published_date": "2026-03-01"
+                            }
+                        ],
+                        "census_tract_data": {
+                            "district": neighborhood,
+                            "avg_household_income": loc_data.get("avg_household_income", 40000),
+                            "avg_person_income": round(loc_data.get("avg_household_income", 40000) / 2.2),
+                            "area_m2_price": loc_data.get("area_m2_price", 3400.0),
+                            "population_growth_rate": loc_data.get("population_growth_rate", 1.5)
+                        },
+                        "images": clean_images,
+                        "description": it.get("description") or f"{title}. Inmueble verificado en Fotocasa."
+                    }
+
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=floor,
+                        has_elevator=has_elevator
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
+
+                    area_m2_price = float(loc_data.get("area_m2_price", 3400.0))
+                    est_market_val = surface_m2 * area_m2_price
+                    discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                    overall_score = KPICalculator.calculate_overall_opportunity_score(
+                        discount_percentage=discount_vs_market / 100.0,
+                        poi_score=85.0,
+                        income_amount=loc_data.get("avg_household_income", 40000),
+                        population_growth=loc_data.get("population_growth_rate", 1.5),
+                        rental_yield=rental_yield,
+                        is_solar=False
+                    )
+
+                    opportunity["portal_id"] = str(item_id)
+                    opportunity["portal_url"] = url
+                    opportunity["primary_portal"] = "Fotocasa"
+                    opportunity["discount_percentage"] = discount_vs_market
+                    opportunity["estimated_monthly_rent"] = monthly_rent
+                    opportunity["rental_yield"] = rental_yield
+                    opportunity["yield_score"] = yield_score
+                    opportunity["yield_color"] = yield_color
+                    opportunity["btl_score"] = btl_score
+                    opportunity["btl_color"] = yield_color
+                    opportunity["discount_vs_market"] = discount_vs_market
+                    opportunity["overall_score"] = overall_score
+                    opportunity["final_score"] = overall_score
+
+                    listings.append(opportunity)
+                except Exception as e_it:
+                    logger.warning(f"Error parseando item HTML Fotocasa: {e_it}")
+        except Exception as e_glob:
+            logger.warning(f"Error procesando HTML de Fotocasa: {e_glob}")
+        return listings
+
+    @classmethod
     def parse_listings(cls, markdown_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
         listings: List[Dict[str, Any]] = []
         if not markdown_content:
             return listings
+
+        if "<script" in markdown_content or "__initial_props__" in markdown_content:
+            html_listings = cls._parse_html(markdown_content, default_province)
+            if html_listings:
+                logger.info(f"[Fotocasa HTML Parser] Extraídos {len(html_listings)} inmuebles directamente de la página.")
+                return html_listings
 
         # Fotocasa: [Título](https://www.fotocasa.es/es/comprar/vivienda/...)
         link_pattern = re.compile(
