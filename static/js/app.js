@@ -1330,12 +1330,19 @@ document.addEventListener('DOMContentLoaded', () => {
         let opp = null;
         if (typeof index === 'object' && index !== null) {
             opp = index;
-        } else if (state.filteredOpportunities && state.filteredOpportunities[index]) {
-            opp = state.filteredOpportunities[index];
-        } else if (state.allOpportunities && state.allOpportunities[index]) {
-            opp = state.allOpportunities[index];
-        } else if (window._lastOpportunities && window._lastOpportunities[index]) {
-            opp = window._lastOpportunities[index];
+        } else if (typeof index === 'string') {
+            const cleanId = String(index).trim().toUpperCase();
+            opp = (window._lastOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId)
+               || (state.allOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId)
+               || (state.filteredOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId);
+        } else if (typeof index === 'number') {
+            if (state.filteredOpportunities && state.filteredOpportunities[index]) {
+                opp = state.filteredOpportunities[index];
+            } else if (state.allOpportunities && state.allOpportunities[index]) {
+                opp = state.allOpportunities[index];
+            } else if (window._lastOpportunities && window._lastOpportunities[index]) {
+                opp = window._lastOpportunities[index];
+            }
         }
         if (!opp) return;
 
@@ -1999,6 +2006,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="modal-gallery-main" id="modal-gallery-main-view">
                     <img id="modal-gallery-active-img" src="${modalImages[0]}" alt="${escapeHtml(opp.title)}" onerror="this.onerror=null; this.src='/api/v1/streetview_photo?lat=${opp.lat || ''}&lon=${opp.lon || ''}&address=${encodeURIComponent(opp.full_address || '')}';">
                     
+                    ${hasPortalEnrichment ? `
+                        <div id="gallery-enrich-loader-pill" style="position: absolute; top: 12px; right: 12px; z-index: 25; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; color: #38bdf8; font-size: 0.78rem; font-weight: 700; padding: 6px 14px; border-radius: 20px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 16px rgba(56, 189, 248, 0.4); backdrop-filter: blur(8px);">
+                            <i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i>
+                            <span>Obteniendo fotos del anunciante...</span>
+                        </div>
+                    ` : ''}
+
                     ${modalImages.length > 1 ? `
                         <button type="button" class="modal-gallery-btn modal-gallery-prev" onclick="window.modalGalleryNav(-1)" title="Foto anterior (←)" aria-label="Foto anterior">
                             <i data-lucide="chevron-left"></i>
@@ -2173,6 +2187,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(data => {
                     const loader = document.getElementById('gallery-enrich-loader');
                     if (loader) loader.remove();
+                    const loaderPill = document.getElementById('gallery-enrich-loader-pill');
+                    if (loaderPill) loaderPill.remove();
 
                     if (data && data.delisted) {
                         // Anuncio dado de baja en origen: avisar al usuario, cerrar modal y purgar de la lista
@@ -2180,6 +2196,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         showToast('Inmueble retirado: El anuncio ha sido dado de baja en el portal original y se ha eliminado automáticamente del catálogo de HIVEX.', 'warning');
                         if (window._lastOpportunities && Array.isArray(window._lastOpportunities)) {
                             window._lastOpportunities = window._lastOpportunities.filter(o => o.id !== opp.id);
+                        }
+                        if (state.allOpportunities && Array.isArray(state.allOpportunities)) {
+                            state.allOpportunities = state.allOpportunities.filter(o => o.id !== opp.id);
+                        }
+                        if (state.filteredOpportunities && Array.isArray(state.filteredOpportunities)) {
+                            state.filteredOpportunities = state.filteredOpportunities.filter(o => o.id !== opp.id);
                         }
                         if (typeof renderOpportunities === 'function' && window._lastOpportunities) {
                             renderOpportunities(window._lastOpportunities);
@@ -2189,11 +2211,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (data && data.success && data.images && data.images.length > 1) {
                         opp.images = data.images;
-                        if (window._lastOpportunities && typeof index === 'number' && window._lastOpportunities[index]) {
-                            window._lastOpportunities[index].images = data.images;
-                        }
-                        if (window._activeModalOpp && window._activeModalOpp.id === opp.id) {
+                        // Sincronizar en todos los arrays del cliente
+                        [window._lastOpportunities, state.allOpportunities, state.filteredOpportunities].forEach(arr => {
+                            if (arr && Array.isArray(arr)) {
+                                const found = arr.find(o => String(o.id) === String(opp.id));
+                                if (found) found.images = data.images;
+                            }
+                        });
+
+                        // Actualizar modal si sigue abierto en este inmueble
+                        if (window._activeModalOpp && String(window._activeModalOpp.id) === String(opp.id)) {
                             window.updateModalGallery(opp, data.images);
+                        }
+
+                        // Actualizar badge en popup si está visible
+                        const popupLoader = document.getElementById(`popup-loader-${opp.id}`);
+                        if (popupLoader) {
+                            popupLoader.outerHTML = `<span style="position: absolute; bottom: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">📷 ${data.images.length} fotos</span>`;
                         }
                     }
                 })
@@ -2201,6 +2235,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.warn('[Enrich Gallery] Advertencia al obtener reportaje:', err);
                     const loader = document.getElementById('gallery-enrich-loader');
                     if (loader) loader.remove();
+                    const loaderPill = document.getElementById('gallery-enrich-loader-pill');
+                    if (loaderPill) loaderPill.remove();
                 });
         }
     };
@@ -2513,16 +2549,31 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }
 
+        const popupImages = getOpportunityImagesList(opp);
+        const isPortalOpp = Boolean(
+            (opp.id && String(opp.id).startsWith('MKT-')) ||
+            opp.source_type === 'market' ||
+            opp.primary_portal ||
+            opp.portal_url ||
+            (opp.publications && opp.publications.length > 0)
+        );
+        const hasPortalEnrichment = isPortalOpp && popupImages.length <= 1;
+
         return `
             <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
-                <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a;">
-                    <img src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a; position: relative;">
+                    <img id="popup-img-${escapeHtml(opp.id)}" src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                    ${popupImages.length > 1 ? `
+                        <span style="position: absolute; bottom: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">📷 ${popupImages.length} fotos</span>
+                    ` : (hasPortalEnrichment ? `
+                        <span id="popup-loader-${escapeHtml(opp.id)}" style="position: absolute; bottom: 4px; left: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #38bdf8; font-size: 10px; font-weight: 600; padding: 3px 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 4px; backdrop-filter: blur(4px);"><span class="spin">⏳</span> Obteniendo fotos reales...</span>
+                    ` : '')}
                 </div>
                 ${loteHeaderHtml}
                 <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>
                 <span style="color: #64748b; font-size: 11px; display: block; margin-bottom: 6px;">📍 ${escapeHtml(fullAddress)}</span>
                 ${popupDetailHtml}
-                <button onclick="openPropertyDetailModal(${idx})" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
+                <button onclick="openPropertyDetailModal('${escapeHtml(opp.id)}')" style="width: 100%; padding: 7px 12px; background: #2563eb; color: #ffffff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 4px rgba(37,99,235,0.3);">
                     🔍 Ver Ficha Completa
                 </button>
             </div>

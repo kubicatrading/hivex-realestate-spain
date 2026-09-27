@@ -110,6 +110,19 @@ class CatalogGuardian:
 
         return False, None, photos
 
+    def is_delisted_content(self, content: str, portal_url: str = "") -> Tuple[bool, Optional[str]]:
+        """
+        Método de compatibilidad con llamadas anteriores.
+        Evalúa si el contenido o portal_url carece de fotos o indica recurso no disponible.
+        """
+        if not content or len(content.strip()) < 50:
+            return True, "Contenido vacío o inaccesible"
+        if portal_url:
+            photos = self.extract_photos_from_content(portal_url, content)
+            if len(photos) == 0:
+                return True, "El portal no dispone de fotos para este anuncio"
+        return False, None
+
     def purge_opportunity(self, opp_id: str) -> bool:
         """
         Elimina de forma permanente e inmediata un inmueble del catálogo de mercado en disco.

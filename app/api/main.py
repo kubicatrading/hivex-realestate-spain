@@ -1688,57 +1688,27 @@ def enrich_opportunity_gallery(
         try:
             supadata = SupadataClient()
             scrape_res = supadata.scrape_url(portal_url)
-            if scrape_res and scrape_res.get("content"):
+            if scrape_res:
                 content = scrape_res.get("content", "")
+                http_code = scrape_res.get("status_code", 200)
 
-                # GUARDIÁN DE CATÁLOGO: Detección estricta de anuncios dados de baja o caducados
+                # GUARDIÁN DE CATÁLOGO: Detección estricta de bajas (HTTP 404 / 0 fotos en portal)
                 from app.services.catalog_guardian import CatalogGuardian
                 guardian = CatalogGuardian(catalog_path=catalog_path)
-                is_delisted, reason = guardian.is_delisted_content(content)
+                is_delisted, reason, own_imgs = guardian.verify_listing_active_status(
+                    portal_url=portal_url,
+                    content=content,
+                    http_code=http_code
+                )
                 if is_delisted:
-                    print(f"[CatalogGuardian] Inmueble {clean_id} dado de baja en origen ({reason}). Eliminando automáticamente...")
+                    print(f"[CatalogGuardian] Inmueble {clean_id} retirado o sin fotos ({reason}). Purgando...")
                     guardian.purge_opportunity(clean_id)
                     return {
                         "success": False,
                         "delisted": True,
-                        "message": "Este inmueble ya no está publicado en el portal de origen y ha sido eliminado automáticamente del catálogo de HIVEX.",
+                        "message": "Este inmueble ya no dispone de fotos o ha sido dado de baja en el portal original. Ha sido eliminado automáticamente del catálogo de HIVEX.",
                         "id": clean_id
                     }
-
-                # Extraer ÚNICA Y EXCLUSIVAMENTE fotos reales que pertenezcan a este anuncio
-                own_imgs = []
-                if "idealista.com" in portal_url.lower():
-                    raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+\.jpg', content)
-                    for img in raw_imgs:
-                        if "loading" in img or "avatar" in img or "common" in img:
-                            continue
-                        cleaned = re.sub(r'/blur/[^/]+/', '/blur/WEB_DETAIL-XL-L/', img)
-                        if cleaned not in own_imgs:
-                            own_imgs.append(cleaned)
-
-                elif "fotocasa.es" in portal_url.lower():
-                    raw_imgs = re.findall(r'https?://static\.fotocasa\.es/images/ads/[a-f0-9\-]+', content)
-                    for img in raw_imgs:
-                        clean_url = img.split("?")[0]
-                        if clean_url not in own_imgs:
-                            own_imgs.append(clean_url)
-
-                elif "pisos.com" in portal_url.lower():
-                    raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
-                    for img in raw_imgs:
-                        if "logo" in img.lower() or "icon" in img.lower():
-                            continue
-                        cleaned = img.replace("/fchm-wp/", "/fch-wp/")
-                        if cleaned not in own_imgs:
-                            own_imgs.append(cleaned)
-
-                elif "habitaclia.com" in portal_url.lower():
-                    raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
-                    for img in raw_imgs:
-                        if "logo" in img.lower() or "icon" in img.lower() or "loading" in img.lower():
-                            continue
-                        if img not in own_imgs:
-                            own_imgs.append(img)
 
                 if own_imgs:
                     enriched_images = own_imgs[:25]
