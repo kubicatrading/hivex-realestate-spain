@@ -62,12 +62,15 @@ class CatalogGuardian:
         elif "pisos.com" in url_lower:
             # En Pisos.com las fotos de inmuebles son fotos.imghs.net
             raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
+            unique_pisos: dict = {}
             for img in raw_imgs:
-                if any(x in img.lower() for x in ["logo", "icon", "placeholder", "watermark", "avatar"]):
+                if any(x in img.lower() for x in ["logo", "icon", "placeholder", "watermark", "avatar", "prof-wp"]):
                     continue
-                cleaned = img.replace("/fchm-wp/", "/fch-wp/")
-                if cleaned not in extracted:
-                    extracted.append(cleaned)
+                high_res = re.sub(r'/(?:fchm|apps|appswm|xl|fch)-wp/', '/fch-wp/', img)
+                filename = high_res.split('/')[-1]
+                if filename not in unique_pisos:
+                    unique_pisos[filename] = high_res
+            extracted = list(unique_pisos.values())
 
         elif "habitaclia.com" in url_lower:
             # En Habitaclia las fotos son static|fotos.habitaclia.com

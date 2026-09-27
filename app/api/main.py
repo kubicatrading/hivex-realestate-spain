@@ -1683,15 +1683,42 @@ def enrich_opportunity_gallery(
 
     enriched_images = list(target_item.get("images", [])) if target_item else []
 
-    # 2. Consultar URL de detalle vía Supadata si hay portal_url disponible
+    # 2. Consultar URL de detalle vía descarga directa (para obtener HTML completo con carruseles de 30+ fotos) o vía Supadata
     if portal_url:
-        try:
-            supadata = SupadataClient()
-            scrape_res = supadata.scrape_url(portal_url)
-            if scrape_res:
-                content = scrape_res.get("content", "")
-                http_code = scrape_res.get("status_code", 200)
+        content = ""
+        http_code = 200
 
+        # 2a. Intento directo rápido: portales como pisos.com entregan el HTML íntegro con todas las fotos sin recortar a markdown
+        try:
+            import httpx
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+            }
+            with httpx.Client(timeout=7.0, follow_redirects=True) as client:
+                res_direct = client.get(portal_url, headers=headers)
+                if res_direct.status_code == 200 and len(res_direct.text) > 500:
+                    content = res_direct.text
+                    http_code = 200
+                elif res_direct.status_code in (404, 410):
+                    http_code = res_direct.status_code
+        except Exception as e_d:
+            logger.debug(f"[Enrich Gallery] Petición directa omitida o fallida: {e_d}")
+
+        # 2b. Si la petición directa no obtuvo contenido o fue bloqueada (ej. Idealista con 403 DataDome), consultar vía Supadata
+        if not content and http_code not in (404, 410):
+            try:
+                supadata = SupadataClient()
+                scrape_res = supadata.scrape_url(portal_url)
+                if scrape_res:
+                    content = scrape_res.get("content", "")
+                    http_code = scrape_res.get("status_code", 200)
+            except Exception as e_s:
+                print(f"[Enrich Gallery] Advertencia raspando {portal_url}: {e_s}")
+
+        if content or http_code in (404, 410):
+            try:
                 # GUARDIÁN DE CATÁLOGO: Detección estricta de bajas (HTTP 404 / 0 fotos en portal)
                 from app.services.catalog_guardian import CatalogGuardian
                 guardian = CatalogGuardian(catalog_path=catalog_path)
@@ -1711,9 +1738,9 @@ def enrich_opportunity_gallery(
                     }
 
                 if own_imgs:
-                    enriched_images = own_imgs[:25]
-        except Exception as e_s:
-            print(f"[Enrich Gallery] Advertencia raspando {portal_url}: {e_s}")
+                    enriched_images = own_imgs[:50]
+            except Exception as e_g:
+                print(f"[Enrich Gallery] Advertencia procesando fotos de {portal_url}: {e_g}")
 
     # REGLA DE ORO: CERO datos simulados o fotos de otros inmuebles.
     # Si se extrajeron fotos legítimas adicionales de este anuncio, guardar en catálogo
