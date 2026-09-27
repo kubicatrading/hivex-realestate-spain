@@ -1,62 +1,114 @@
 """
 Guardián del Catálogo de Oportunidades (HIVEX Catalog Guardian)
 =============================================================
-Responsabilidad estricta:
-1. CERO datos simulados o fotos cruzadas de otros inmuebles.
-2. Detección proactiva de anuncios despublicados, caducados o retirados en portales de origen.
-3. Purga inmediata y automática de cualquier oportunidad que haya dejado de estar disponible en el mercado.
+Principios de diseño:
+1. REGLA ESTRUCTURAL UNIVERSAL (Sin dependencia lingüística ni modismos):
+   - Código HTTP 404 / 410 / Inaccesible -> Inmueble caducado / retirado.
+   - Si el portal ya NO dispone de fotografías para ese inmueble (0 fotos reales encontradas) -> Inmueble caducado / retirado.
+   - Cero fotos simuladas o prestadas de otros inmuebles.
+2. MODOS DE OPERACIÓN:
+   - REACTIVO (En tiempo real / On-Demand): Al abrir un inmueble en la plataforma.
+   - PROACTIVO Y PROGRAMADO (Scheduled / Background Worker): Auditoría periódica autónoma en segundo plano.
+   - ADMINISTRATIVO: Disparo manual bajo demanda vía API endpoint (/api/v1/market/guardian/audit).
 """
 
 import json
 import logging
+import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("hivex.catalog_guardian")
-
-DELISTED_PATTERNS = [
-    r"ya no está publicado",
-    r"anuncio ya no está publicado",
-    r"el anunciante lo dio de baja",
-    r"el anunciante ha dado de baja",
-    r"este inmueble ya no está disponible",
-    r"el anuncio ya no está disponible",
-    r"inmueble no disponible",
-    r"anuncio no disponible",
-    r"este anuncio ya no está",
-    r"anuncio caducado",
-    r"anuncio finalizado",
-    r"anuncio retirado",
-    r"inmueble retirado",
-    r"propiedad no disponible",
-    r"no encontramos este inmueble",
-    r"lo sentimos,\s*no hemos encontrado",
-    r"página no encontrada",
-    r"404\s*-\s*página no encontrada",
-    r"anuncio dado de baja",
-]
 
 
 class CatalogGuardian:
     def __init__(self, catalog_path: Optional[Path] = None):
         self.catalog_path = catalog_path or (Path("app/data/verified_market_catalog.json"))
 
-    def is_delisted_content(self, content: str) -> Tuple[bool, Optional[str]]:
+    @staticmethod
+    def extract_photos_from_content(portal_url: str, content: str) -> List[str]:
         """
-        Determina si el contenido extraído de la URL indica que el anuncio ha sido dado de baja o ya no existe.
+        Extrae exclusivamente fotografías reales del inmueble en el portal indicado.
+        Totalmente independiente del idioma en que esté renderizada la página.
         """
-        if not content:
-            return False, None
+        if not portal_url or not content:
+            return []
 
-        content_lower = content.lower()
-        for pattern in DELISTED_PATTERNS:
-            if re.search(pattern, content_lower):
-                matched_reason = f"Detectado patrón de despublicación: '{pattern}'"
-                logger.info(f"[CatalogGuardian] {matched_reason}")
-                return True, matched_reason
+        url_lower = portal_url.lower()
+        extracted: List[str] = []
 
-        return False, None
+        if "idealista.com" in url_lower:
+            # En Idealista las fotos reales de anuncio se sirven desde imgX.idealista.com
+            # Descartamos avatares, logos comunes, mapas y assets de interfaz
+            raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if any(x in img.lower() for x in ["loading", "avatar", "common", "user", "static/common", "logo"]):
+                    continue
+                cleaned = re.sub(r'/blur/[^/]+/', '/blur/WEB_DETAIL-XL-L/', img)
+                if cleaned not in extracted:
+                    extracted.append(cleaned)
+
+        elif "fotocasa.es" in url_lower:
+            # En Fotocasa las fotos de inmueble son /images/ads/UUID
+            raw_imgs = re.findall(r'https?://static\.fotocasa\.es/images/ads/[a-f0-9\-]+', content)
+            for img in raw_imgs:
+                clean_url = img.split("?")[0]
+                if clean_url not in extracted:
+                    extracted.append(clean_url)
+
+        elif "pisos.com" in url_lower:
+            # En Pisos.com las fotos de inmuebles son fotos.imghs.net
+            raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if any(x in img.lower() for x in ["logo", "icon", "placeholder", "watermark", "avatar"]):
+                    continue
+                cleaned = img.replace("/fchm-wp/", "/fch-wp/")
+                if cleaned not in extracted:
+                    extracted.append(cleaned)
+
+        elif "habitaclia.com" in url_lower:
+            # En Habitaclia las fotos son static|fotos.habitaclia.com
+            raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
+            for img in raw_imgs:
+                if any(x in img.lower() for x in ["logo", "icon", "loading", "avatar", "watermark"]):
+                    continue
+                if img not in extracted:
+                    extracted.append(img)
+
+        return extracted
+
+    def verify_listing_active_status(
+        self,
+        portal_url: str,
+        content: Optional[str] = None,
+        http_code: Optional[int] = None
+    ) -> Tuple[bool, Optional[str], List[str]]:
+        """
+        Regla Determinista Universal (Independiente del idioma):
+        - Código HTTP 404 / 410 -> Despublicado (Inmueble retirado o página inexistente).
+        - Si el portal ya NO dispone de fotos para ese inmueble (0 fotos válidas) -> Despublicado.
+        - Si el portal dispone de al menos 1 foto real -> Activo.
+
+        Retorna:
+            (is_delisted: bool, reason: Optional[str], valid_photos: List[str])
+        """
+        # 1. Validación por códigos de estado HTTP estándar
+        if http_code in (404, 410):
+            return True, f"Código HTTP {http_code} (Página inexistente / Anuncio eliminado)", []
+
+        if not content or len(content.strip()) < 50:
+            return True, "Respuesta vacía o inaccesible desde el portal", []
+
+        # 2. Validación estructural: ¿El portal dispone de fotos para este inmueble?
+        photos = self.extract_photos_from_content(portal_url, content)
+        if len(photos) == 0:
+            # El portal ya no dispone de reportaje fotográfico para este activo
+            return True, "El portal ya no dispone de fotografías para este inmueble (anuncio retirado/caducado)", []
+
+        return False, None, photos
 
     def purge_opportunity(self, opp_id: str) -> bool:
         """
@@ -86,22 +138,11 @@ class CatalogGuardian:
             logger.error(f"[CatalogGuardian] Error purgando oportunidad {clean_id}: {e}")
             return False
 
-    def check_and_purge_if_delisted(self, opp_id: str, content: str) -> bool:
+    def audit_catalog(self, max_items: Optional[int] = 30) -> Dict[str, Any]:
         """
-        Si el contenido del anuncio indica que está dado de baja, lo purga del catálogo automáticamente.
-        Devuelve True si fue purgado.
-        """
-        is_delisted, reason = self.is_delisted_content(content)
-        if is_delisted:
-            logger.warning(f"[CatalogGuardian] Purgando {opp_id} por estar dado de baja en origen ({reason})")
-            self.purge_opportunity(opp_id)
-            return True
-        return False
-
-    def audit_catalog(self, max_items: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Auditoría bajo demanda de oportunidades de mercado.
-        Verifica el estado de los anuncios con portal_url y purga automáticamente los caducados.
+        Auditoría proactiva del catálogo:
+        Recorre inmuebles con portal_url, consulta el estado real en origen y purga
+        los que devuelvan 404 o carezcan de fotos.
         """
         from app.connectors.supadata_client import SupadataClient
 
@@ -131,15 +172,21 @@ class CatalogGuardian:
             try:
                 scrape_res = supadata.scrape_url(portal_url)
                 content = scrape_res.get("content", "") if scrape_res else ""
-                is_delisted, reason = self.is_delisted_content(content)
+                http_code = scrape_res.get("status_code", 200) if scrape_res else 404
+
+                is_delisted, reason, photos = self.verify_listing_active_status(
+                    portal_url=portal_url,
+                    content=content,
+                    http_code=http_code
+                )
+
                 if is_delisted:
-                    logger.warning(f"[CatalogGuardian Audit] Inmueble caducado {opp_id} en {portal_url}. Purgando...")
+                    logger.warning(f"[CatalogGuardian Audit] Inmueble {opp_id} sin fotos o caducado en origen ({reason}). Purgando...")
                     self.purge_opportunity(opp_id)
                     purged_ids.append({"id": opp_id, "url": portal_url, "reason": reason})
             except Exception as e_s:
-                logger.debug(f"[CatalogGuardian Audit] Error verificando {opp_id}: {e_s}")
+                logger.debug(f"[CatalogGuardian Audit] Advertencia auditando {opp_id}: {e_s}")
 
-        # Recalcular restantes
         remaining = 0
         if self.catalog_path.exists():
             with open(self.catalog_path, "r", encoding="utf-8") as f:
@@ -151,3 +198,38 @@ class CatalogGuardian:
             "purged_count": len(purged_ids),
             "remaining": remaining
         }
+
+
+# Demonio / Hilo de Auditoría Periódica Autónomo
+_guardian_thread = None
+_guardian_running = False
+
+def start_periodic_guardian_worker(interval_seconds: int = 43200, batch_size: int = 25):
+    """
+    Inicia un worker en segundo plano que ejecuta el Guardián de forma proactiva y programada
+    cada `interval_seconds` (por defecto cada 12 horas) procesando lotes de `batch_size`.
+    """
+    global _guardian_thread, _guardian_running
+    if _guardian_running:
+        return
+
+    _guardian_running = True
+
+    def _worker():
+        guardian = CatalogGuardian()
+        # Esperar 60 segundos tras el arranque antes del primer pase para no saturar el inicio
+        time.sleep(60)
+        while _guardian_running:
+            try:
+                logger.info("[CatalogGuardian Worker] Iniciando ciclo programado de auditoría...")
+                res = guardian.audit_catalog(max_items=batch_size)
+                logger.info(f"[CatalogGuardian Worker] Ciclo completado: {res.get('purged_count', 0)} purgados de {res.get('checked', 0)} auditados.")
+            except Exception as e:
+                logger.error(f"[CatalogGuardian Worker] Error en ciclo programado: {e}")
+
+            # Dormir hasta el siguiente intervalo
+            time.sleep(interval_seconds)
+
+    _guardian_thread = threading.Thread(target=_worker, daemon=True, name="HivexCatalogGuardianWorker")
+    _guardian_thread.start()
+    logger.info(f"[CatalogGuardian] Worker programado iniciado en segundo plano (intervalo: {interval_seconds}s).")
