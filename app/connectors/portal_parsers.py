@@ -231,6 +231,22 @@ DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
     "pozuelo de alarcon": {"lat": 40.4354, "lon": -3.8138, "income": 78000, "m2_price": 4400.0, "growth": 0.9, "cp": "28223"},
     "las rozas de madrid": {"lat": 40.4925, "lon": -3.8744, "income": 62000, "m2_price": 3800.0, "growth": 1.4, "cp": "28231"},
     "alcobendas": {"lat": 40.5475, "lon": -3.6421, "income": 59000, "m2_price": 3900.0, "growth": 1.3, "cp": "28100"},
+
+    # ZARAGOZA CAPITAL Y PROVINCIA
+    "zaragoza": {"lat": 41.6488, "lon": -0.8891, "income": 36000, "m2_price": 2200.0, "growth": 2.1, "cp": "50001"},
+    "delicias zaragoza": {"lat": 41.6520, "lon": -0.9060, "income": 31000, "m2_price": 1850.0, "growth": 1.9, "cp": "50017"},
+    "casetas": {"lat": 41.7220, "lon": -1.0250, "income": 29000, "m2_price": 1550.0, "growth": 1.7, "cp": "50620"},
+    "actur": {"lat": 41.6720, "lon": -0.8900, "income": 39000, "m2_price": 2350.0, "growth": 2.3, "cp": "50018"},
+    "romareda": {"lat": 41.6360, "lon": -0.8980, "income": 48000, "m2_price": 2750.0, "growth": 1.8, "cp": "50009"},
+    "san jose zaragoza": {"lat": 41.6380, "lon": -0.8720, "income": 33000, "m2_price": 1950.0, "growth": 1.9, "cp": "50007"},
+    "las fuentes zaragoza": {"lat": 41.6450, "lon": -0.8620, "income": 31000, "m2_price": 1800.0, "growth": 1.8, "cp": "50002"},
+    "torrero": {"lat": 41.6280, "lon": -0.8840, "income": 30000, "m2_price": 1750.0, "growth": 1.8, "cp": "50006"},
+    "almozara": {"lat": 41.6620, "lon": -0.9020, "income": 34000, "m2_price": 2100.0, "growth": 2.0, "cp": "50003"},
+    "miralbueno": {"lat": 41.6540, "lon": -0.9420, "income": 37000, "m2_price": 2200.0, "growth": 2.2, "cp": "50011"},
+    "valdefierro": {"lat": 41.6440, "lon": -0.9320, "income": 32000, "m2_price": 1850.0, "growth": 1.9, "cp": "50012"},
+    "santa isabel zaragoza": {"lat": 41.6650, "lon": -0.8250, "income": 33000, "m2_price": 1900.0, "growth": 1.9, "cp": "50016"},
+    "utebo": {"lat": 41.7144, "lon": -0.9950, "income": 34000, "m2_price": 1650.0, "growth": 2.0, "cp": "50180"},
+    "calatayud": {"lat": 41.3533, "lon": -1.6433, "income": 29000, "m2_price": 1350.0, "growth": 1.5, "cp": "50300"},
 }
 
 LOCALITY_TO_PROVINCE: Dict[str, str] = {
@@ -274,6 +290,37 @@ LOCALITY_TO_PROVINCE: Dict[str, str] = {
     "málaga": "Málaga",
     "sevilla": "Sevilla",
     "zaragoza": "Zaragoza",
+    "casetas": "Zaragoza",
+    "utebo": "Zaragoza",
+    "calatayud": "Zaragoza",
+    "palma": "Baleares",
+    "palma de mallorca": "Baleares",
+    "tarragona": "Tarragona",
+    "reus": "Tarragona",
+    "girona": "Girona",
+    "gerona": "Girona",
+}
+
+# Prefijos de Código Postal para las 52 provincias españolas
+SPAIN_PROV_CP_PREFIX: Dict[str, str] = {
+    "alava": "01", "araba": "01", "albacete": "02", "alicante": "03", "alacant": "03",
+    "almeria": "04", "almería": "04", "avila": "05", "ávila": "05", "badajoz": "06",
+    "baleares": "07", "balears": "07", "illes balears": "07", "palma": "07",
+    "barcelona": "08", "burgos": "09", "caceres": "10", "cáceres": "10", "cadiz": "11", "cádiz": "11",
+    "castellon": "12", "castelló": "12", "ciudad real": "13", "cordoba": "14", "córdoba": "14",
+    "coruña": "15", "a coruña": "15", "la coruña": "15", "cuenca": "16",
+    "girona": "17", "gerona": "17", "granada": "18", "guadalajara": "19",
+    "gipuzkoa": "20", "guipuzcoa": "20", "guipúzcoa": "20",
+    "huelva": "21", "huesca": "22", "jaen": "23", "jaén": "23", "leon": "24", "león": "24",
+    "lleida": "25", "lerida": "25", "lérida": "25", "la rioja": "26", "rioja": "26", "logroño": "26",
+    "lugo": "27", "madrid": "28", "malaga": "29", "málaga": "29", "murcia": "30",
+    "navarra": "31", "ourense": "32", "orense": "32", "asturias": "33", "oviedo": "33", "gijon": "33", "gijón": "33",
+    "palencia": "34", "las palmas": "35", "gran canaria": "35", "pontevedra": "36", "vigo": "36",
+    "salamanca": "37", "santa cruz de tenerife": "38", "tenerife": "38", "cantabria": "39", "santander": "39",
+    "segovia": "40", "sevilla": "41", "soria": "42", "tarragona": "43", "teruel": "44",
+    "toledo": "45", "valencia": "46", "valència": "46", "valladolid": "47",
+    "bizkaia": "48", "vizcaya": "48", "bilbao": "48", "zamora": "49", "zaragoza": "50",
+    "ceuta": "51", "melilla": "52",
 }
 
 
@@ -532,9 +579,19 @@ class IdealistaMarkdownParser:
         t_lower = (title or "").lower()
         prov_lower = (default_province or "Madrid").lower().strip()
 
+        # Determinar prefijo provincial de CP para evitar cruces entre provincias (ej. Delicias Madrid vs Zaragoza)
+        target_cp_prefix = None
+        for prov_name, pref in SPAIN_PROV_CP_PREFIX.items():
+            if prov_name in prov_lower:
+                target_cp_prefix = pref
+                break
+
         # 1. Buscar coincidencias en DISTRICT_NEIGHBORHOOD_TO_CP (priorizando nombres más largos)
         matched_neighborhood = None
         for n_key, cp in sorted(DISTRICT_NEIGHBORHOOD_TO_CP.items(), key=lambda x: len(x[0]), reverse=True):
+            # Si conocemos el prefijo provincial esperado, descartar barrios de otras provincias
+            if target_cp_prefix and not cp.startswith(target_cp_prefix):
+                continue
             if re.search(rf'\b{re.escape(n_key)}\b', t_lower):
                 matched_neighborhood = n_key
                 break
@@ -578,6 +635,12 @@ class IdealistaMarkdownParser:
 
         if detected_loc_key:
             province = LOCALITY_TO_PROVINCE[detected_loc_key]
+            if not target_cp_prefix:
+                for prov_name, pref in SPAIN_PROV_CP_PREFIX.items():
+                    if prov_name in province.lower():
+                        target_cp_prefix = pref
+                        break
+
             # Normalizar nombre formal de la localidad
             loc_names = {
                 "denia": "Dénia", "dénia": "Dénia",
@@ -593,7 +656,7 @@ class IdealistaMarkdownParser:
                 "sant cugat del valles": "Sant Cugat del Vallès", "sant cugat del vallès": "Sant Cugat del Vallès",
                 "pozuelo de alarcon": "Pozuelo de Alarcón", "pozuelo de alarcón": "Pozuelo de Alarcón",
                 "las rozas": "Las Rozas de Madrid", "las rozas de madrid": "Las Rozas de Madrid",
-                "alcobendas": "Alcobendas"
+                "alcobendas": "Alcobendas", "casetas": "Casetas", "utebo": "Utebo", "calatayud": "Calatayud"
             }
             locality = loc_names.get(detected_loc_key, detected_loc_key.capitalize())
             district_label = f"{locality} Centro"
@@ -623,68 +686,63 @@ class IdealistaMarkdownParser:
             postal_code=postal_code
         )
 
-        PROV_CP_PREFIX = {
-            "madrid": "28",
-            "barcelona": "08",
-            "valencia": "46",
-            "valència": "46",
-            "malaga": "29",
-            "málaga": "29",
-            "sevilla": "41",
-            "alicante": "03",
-        }
-        target_cp_prefix = None
-        for prov_name, pref in PROV_CP_PREFIX.items():
-            if prov_name in prov_lower or prov_name in locality.lower():
-                target_cp_prefix = pref
-                break
-
         # 6. Coordenadas geográficas
         lat, lon = None, None
-        for d_key, coords in DISTRICT_COORDINATES.items():
-            coord_cp = coords.get("cp", "")
-            if target_cp_prefix and coord_cp and not coord_cp.startswith(target_cp_prefix):
-                continue
-            if d_key in t_lower or (matched_neighborhood and d_key == matched_neighborhood):
-                lat = coords.get("lat")
-                lon = coords.get("lon")
-                if not postal_code and coord_cp:
-                    postal_code = coord_cp
-                break
 
-        # Fallback de coordenadas por provincia o capital
+        # Si es Zaragoza, mapear distritos y barrios específicos de Zaragoza
+        ZARAGOZA_DISTRICTS = {
+            "delicias": {"lat": 41.6520, "lon": -0.9060, "cp": "50017", "name": "Delicias", "income": 31000, "m2_price": 1850.0},
+            "casetas": {"lat": 41.7220, "lon": -1.0250, "cp": "50620", "name": "Casetas", "income": 29000, "m2_price": 1550.0},
+            "actur": {"lat": 41.6720, "lon": -0.8900, "cp": "50018", "name": "Actur", "income": 39000, "m2_price": 2350.0},
+            "romareda": {"lat": 41.6360, "lon": -0.8980, "cp": "50009", "name": "Romareda", "income": 48000, "m2_price": 2750.0},
+            "san jose": {"lat": 41.6380, "lon": -0.8720, "cp": "50007", "name": "San José", "income": 33000, "m2_price": 1950.0},
+            "las fuentes": {"lat": 41.6450, "lon": -0.8620, "cp": "50002", "name": "Las Fuentes", "income": 31000, "m2_price": 1800.0},
+            "torrero": {"lat": 41.6280, "lon": -0.8840, "cp": "50006", "name": "Torrero", "income": 30000, "m2_price": 1750.0},
+            "almozara": {"lat": 41.6620, "lon": -0.9020, "cp": "50003", "name": "La Almozara", "income": 34000, "m2_price": 2100.0},
+            "miralbueno": {"lat": 41.6540, "lon": -0.9420, "cp": "50011", "name": "Miralbueno", "income": 37000, "m2_price": 2200.0},
+            "valdefierro": {"lat": 41.6440, "lon": -0.9320, "cp": "50012", "name": "Valdefierro", "income": 32000, "m2_price": 1850.0},
+            "santa isabel": {"lat": 41.6650, "lon": -0.8250, "cp": "50016", "name": "Santa Isabel", "income": 33000, "m2_price": 1900.0},
+            "utebo": {"lat": 41.7144, "lon": -0.9950, "cp": "50180", "name": "Utebo", "income": 34000, "m2_price": 1650.0},
+            "calatayud": {"lat": 41.3533, "lon": -1.6433, "cp": "50300", "name": "Calatayud", "income": 29000, "m2_price": 1350.0},
+            "casco antiguo": {"lat": 41.6560, "lon": -0.8780, "cp": "50003", "name": "Casco Antiguo", "income": 35000, "m2_price": 2400.0},
+            "centro": {"lat": 41.6500, "lon": -0.8830, "cp": "50004", "name": "Centro", "income": 42000, "m2_price": 2600.0},
+        }
+
+        if target_cp_prefix == "50" or "zaragoza" in prov_lower or "zaragoza" in locality.lower():
+            for z_key, z_info in ZARAGOZA_DISTRICTS.items():
+                if re.search(rf'\b{re.escape(z_key)}\b', t_lower):
+                    lat, lon = z_info["lat"], z_info["lon"]
+                    if not postal_code:
+                        postal_code = z_info["cp"]
+                    district_label = f"Zaragoza {z_info['name']}"
+                    avg_income = z_info["income"]
+                    break
+
+        if lat is None or lon is None:
+            for d_key, coords in DISTRICT_COORDINATES.items():
+                coord_cp = coords.get("cp", "")
+                if target_cp_prefix and coord_cp and not coord_cp.startswith(target_cp_prefix):
+                    continue
+                if d_key in t_lower or (matched_neighborhood and d_key == matched_neighborhood):
+                    lat = coords.get("lat")
+                    lon = coords.get("lon")
+                    if not postal_code and coord_cp:
+                        postal_code = coord_cp
+                    break
+
+        # Fallback de coordenadas por geo_utils (garantiza tierra firme en su provincia/municipio real en TODA España)
         if lat is None or lon is None:
             coords_prov = DISTRICT_COORDINATES.get(province.lower()) or DISTRICT_COORDINATES.get(locality.lower())
-            if coords_prov:
+            if coords_prov and (not target_cp_prefix or coords_prov.get("cp", "").startswith(target_cp_prefix)):
                 lat, lon = coords_prov.get("lat"), coords_prov.get("lon")
             else:
-                if "valencia" in prov_lower or "valència" in prov_lower or "valencia" in locality.lower():
-                    lat, lon = (39.4699, -0.3763)
-                elif "madrid" in prov_lower:
-                    lat, lon = (40.4168, -3.7038)
-                elif "barcelona" in prov_lower:
-                    lat, lon = (41.3879, 2.1699)
-                elif "malaga" in prov_lower or "málaga" in prov_lower:
-                    lat, lon = (36.7213, -4.4214)
-                elif "sevilla" in prov_lower:
-                    lat, lon = (37.3891, -5.9845)
-                elif "alicante" in prov_lower:
-                    lat, lon = (38.3452, -0.4810)
-                else:
-                    lat, lon = (40.4168, -3.7038)
+                from app.core.geo_utils import get_spanish_province_coords
+                lat, lon = get_spanish_province_coords(province, locality, apply_jitter=True)
 
         # Fallback de postal_code si aún es None
         if not postal_code:
-            if "madrid" in prov_lower:
-                postal_code = "28001"
-            elif "barcelona" in prov_lower:
-                postal_code = "08001"
-            elif "valencia" in prov_lower:
-                postal_code = "46001"
-            elif "malaga" in prov_lower or "málaga" in prov_lower:
-                postal_code = "29001"
-            elif "toledo" in prov_lower:
-                postal_code = "45600" if "talavera" in t_lower else "45001"
+            if target_cp_prefix:
+                postal_code = f"{target_cp_prefix}001"
             else:
                 postal_code = "28001"
 

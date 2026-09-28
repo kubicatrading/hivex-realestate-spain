@@ -316,6 +316,20 @@ def startup_event():
     except Exception as e:
         print(f"Advertencia al crear tablas en startup: {e}")
 
+    # 1. Iniciar el Guardián de Catálogo en segundo plano (auditoría silenciosa cada 6h)
+    try:
+        from app.services.catalog_guardian import start_periodic_guardian_worker
+        start_periodic_guardian_worker(interval_seconds=21600, max_items_per_run=30)
+    except Exception as e_guardian:
+        print(f"Advertencia al iniciar Guardián de Catálogo: {e_guardian}")
+
+    # 2. Iniciar el Worker Silencioso de Fotos en segundo plano (enriquecimiento proactivo sin intervención)
+    try:
+        from app.services.photos_backfill import start_periodic_backfill_worker
+        start_periodic_backfill_worker(interval_seconds=1800, batch_size=25)
+    except Exception as e_backfill:
+        print(f"Advertencia al iniciar Worker de Backfill de Fotos: {e_backfill}")
+
 @app.get("/")
 @app.get("/api/index.py")
 def serve_dashboard():
@@ -1683,6 +1697,17 @@ def enrich_opportunity_gallery(
 
     enriched_images = list(target_item.get("images", [])) if target_item else []
 
+    # Si el anuncio ya dispone de una galería completa (>= 10 fotos), retornar inmediatamente sin re-raspar
+    if len(enriched_images) >= 10:
+        return {
+            "status": "success",
+            "opportunity_id": opportunity_id,
+            "images": enriched_images,
+            "count": len(enriched_images),
+            "cached": True,
+            "portal": target_item.get("primary_portal", "Portal Inmobiliario") if target_item else "Desconocido"
+        }
+
     # 2. Consultar URL de detalle vía descarga directa (para obtener HTML completo con carruseles de 30+ fotos) o vía Supadata
     if portal_url:
         content = ""
@@ -1772,6 +1797,31 @@ def guardian_audit_catalog_endpoint(
     from app.services.catalog_guardian import CatalogGuardian
     guardian = CatalogGuardian()
     return guardian.audit_catalog(max_items=max_items)
+
+@app.get("/api/v1/market/backfill/status")
+def backfill_status_endpoint(current_user: dict = Depends(get_current_user)):
+    """Retorna las métricas y estado del worker de enriquecimiento silencioso de fotos."""
+    from app.services.photos_backfill import PhotosBackfillWorker, is_backfill_running
+    worker = PhotosBackfillWorker()
+    stats = worker.get_stats()
+    stats["worker_running"] = is_backfill_running()
+    return stats
+
+@app.post("/api/v1/market/backfill/trigger")
+def backfill_trigger_endpoint(
+    max_items: Optional[int] = Query(25, description="Número máximo de oportunidades a enriquecer en este pase"),
+    portal: Optional[str] = Query(None, description="Filtrar por portal específico (ej. Pisos.com, Habitaclia)"),
+    allow_idealista: bool = Query(False, description="Permitir consumo dosificado de créditos Supadata para Idealista"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Dispara un pase manual de enriquecimiento de fotos en segundo plano."""
+    from app.services.photos_backfill import PhotosBackfillWorker
+    worker = PhotosBackfillWorker()
+    return worker.run_backfill_batch(
+        max_items=max_items,
+        target_portal=portal,
+        allow_idealista_credits=allow_idealista
+    )
 
 @app.api_route("/api/v1/market/sync", methods=["GET", "POST"])
 def sync_market_endpoint(
