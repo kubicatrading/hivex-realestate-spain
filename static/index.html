@@ -157,6 +157,16 @@
                     </button>
                 </div>
 
+                <div class="filter-group" id="filter-group-favorites">
+                    <label class="filter-label" for="btn-toggle-favorites">
+                        <i data-lucide="heart"></i> Mis Favoritos
+                    </label>
+                    <button id="btn-toggle-favorites" class="btn-favorites-pill" onclick="toggleFavoritesFilter()" title="Filtrar por mis oportunidades favoritas guardadas">
+                        <i data-lucide="heart" style="width: 14px; height: 14px;"></i>
+                        <span>Solo Favoritos (<span id="fav-count-badge">0</span>)</span>
+                    </button>
+                </div>
+
                 <div class="toolbar-stats" id="filtered-count">
                     Cargando oportunidades...
                 </div>

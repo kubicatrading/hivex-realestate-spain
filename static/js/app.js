@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchQuery: '',
         activeSource: 'subastas',
         onlySynergyPGOU: false,
+        onlyFavorites: false,
         isLoading: false
     };
 
@@ -563,6 +564,121 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     };
 
+    // ==========================================================================
+    // FAVORITES SYSTEM (Storage, Reactive DOM updates & Toolbar Filter)
+    // ==========================================================================
+    const FAVORITES_STORAGE_KEY = 'hivex_favorite_ids';
+
+    function getFavoritesSet() {
+        try {
+            const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+            if (!raw) return new Set();
+            const arr = JSON.parse(raw);
+            return new Set(Array.isArray(arr) ? arr.map(id => String(id).trim().toUpperCase()) : []);
+        } catch (e) {
+            console.error('Error al cargar favoritos de localStorage:', e);
+            return new Set();
+        }
+    }
+
+    function saveFavoritesSet(set) {
+        try {
+            const arr = Array.from(set);
+            localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(arr));
+        } catch (e) {
+            console.error('Error al guardar favoritos en localStorage:', e);
+        }
+    }
+
+    function updateFavoritesCountBadge() {
+        const badge = document.getElementById('fav-count-badge');
+        if (!badge) return;
+        const favs = getFavoritesSet();
+        badge.textContent = favs.size;
+    }
+
+    function renderHeartSvg(isFav, size = 16) {
+        return `<svg class="heart-icon" viewBox="0 0 24 24" width="${size}" height="${size}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="${isFav ? 'currentColor' : 'none'}"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`;
+    }
+
+    window.toggleFavorite = function(oppId, event) {
+        if (event) {
+            event.stopPropagation();
+            if (event.preventDefault) event.preventDefault();
+        }
+        if (!oppId) return;
+        const idStr = String(oppId).trim().toUpperCase();
+        const favs = getFavoritesSet();
+        const isNowFav = !favs.has(idStr);
+
+        if (isNowFav) {
+            favs.add(idStr);
+        } else {
+            favs.delete(idStr);
+        }
+        saveFavoritesSet(favs);
+        updateFavoritesCountBadge();
+        updateFavoriteDomElements(idStr, isNowFav);
+
+        if (isNowFav) {
+            showToast('❤️ Oportunidad guardada en tus favoritos', 'success');
+        } else {
+            showToast('🤍 Oportunidad eliminada de favoritos', 'info');
+        }
+
+        if (state.onlyFavorites) {
+            applyFilters();
+        }
+    };
+
+    function updateFavoriteDomElements(oppId, isFav) {
+        const idStr = String(oppId).trim().toUpperCase();
+
+        // Card button
+        const cardBtn = document.getElementById(`fav-btn-${idStr}`);
+        if (cardBtn) {
+            cardBtn.classList.toggle('is-favorite', isFav);
+            cardBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
+            cardBtn.innerHTML = renderHeartSvg(isFav, 16);
+        }
+
+        // Modal button
+        const modalBtn = document.getElementById(`fav-modal-btn-${idStr}`);
+        if (modalBtn) {
+            modalBtn.classList.toggle('is-favorite', isFav);
+            modalBtn.title = isFav ? 'Eliminar de favoritos' : 'Guardar en favoritos';
+            modalBtn.innerHTML = `${renderHeartSvg(isFav, 16)} <span id="fav-modal-label-${idStr}" style="font-size: 0.82rem; font-weight: 700;">${isFav ? 'Favorito' : 'Guardar'}</span>`;
+        }
+
+        // Popup button
+        const popupBtn = document.getElementById(`fav-popup-btn-${idStr}`);
+        if (popupBtn) {
+            popupBtn.classList.toggle('is-favorite', isFav);
+            popupBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
+            popupBtn.innerHTML = renderHeartSvg(isFav, 14);
+        }
+    }
+
+    window.toggleFavoritesFilter = function() {
+        state.onlyFavorites = !state.onlyFavorites;
+        const btn = document.getElementById('btn-toggle-favorites');
+        const favs = getFavoritesSet();
+        const totalFavs = favs.size;
+
+        if (btn) {
+            if (state.onlyFavorites) {
+                btn.classList.add('active');
+                btn.innerHTML = `<i data-lucide="check" style="width: 13px; height: 13px;"></i> <span>❤️ Favoritos (Activo)</span>`;
+                showToast(`❤️ Mostrando solo tus ${totalFavs} oportunidades favoritas`, 'info');
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = `<i data-lucide="heart" style="width: 13px; height: 13px;"></i> <span>Solo Favoritos (<span id="fav-count-badge">${totalFavs}</span>)</span>`;
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+        applyFilters();
+    };
+
     // Jump from Market synergy card to PGOU sector viewer
     window.jumpToPgouSector = function(pgouId) {
         closePropertyDetailModal();
@@ -650,10 +766,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Apply Filter Logic
     function applyFilters() {
+        const favoriteIds = getFavoritesSet();
+        updateFavoritesCountBadge();
+
         state.filteredOpportunities = state.allOpportunities.filter(opp => {
             // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg. vs Market)
             const oppSource = opp.source_type || 'subastas';
             if (oppSource !== state.activeSource) {
+                return false;
+            }
+            // Favorites Filter
+            if (state.onlyFavorites && !favoriteIds.has(String(opp.id || '').trim().toUpperCase())) {
                 return false;
             }
             // Sinergia PGOU Filter (for Market)
@@ -687,7 +810,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTabBadges();
         const activeTotal = state.allOpportunities.filter(o => (o.source_type || 'subastas') === state.activeSource).length;
         if (filteredCount) {
-            filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${activeTotal} oportunidades`;
+            if (state.onlyFavorites) {
+                filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} favoritas (${favoriteIds.size} total) en ${state.activeSource.toUpperCase()}`;
+            } else {
+                filteredCount.textContent = `Mostrando ${state.filteredOpportunities.length} de ${activeTotal} oportunidades`;
+            }
         }
         renderDeals(state.filteredOpportunities);
         renderMapMarkers(state.filteredOpportunities);
@@ -938,7 +1065,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const favoriteIds = getFavoritesSet();
+
         dealsContainer.innerHTML = opps.map((opp, idx) => {
+            const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+            const isFav = favoriteIds.has(oppIdUpper);
             const isFlipping = opp.strategy === 'HOUSE_FLIPPING';
             const stratLabel = isFlipping ? 'House Flipping' : 'Suelo / Desarrollo';
             const stratClass = isFlipping ? 'strat-flipping' : 'strat-land';
@@ -1204,17 +1335,27 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span class="badge-strategy" style="background: #9333ea; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">📐 DESARROLLO SUELO</span>
                                     ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
                                 </div>
-                                <span class="badge-discount" style="background: rgba(168, 85, 247, 0.25); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-weight: 700;">${escapeHtml(opp.planning_status || 'PGOU')}</span>
+                                <div style="display: flex; align-items: center; gap: 6px; pointer-events: auto;">
+                                    <span class="badge-discount" style="background: rgba(168, 85, 247, 0.25); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-weight: 700;">${escapeHtml(opp.planning_status || 'PGOU')}</span>
+                                    <button type="button" class="btn-fav-card ${isFav ? 'is-favorite' : ''}" id="fav-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}">
+                                        ${renderHeartSvg(isFav, 16)}
+                                    </button>
+                                </div>
                             ` : (opp.source_type === 'edictos' ? `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: ${opp.category === 'HERENCIA_YACENTE' ? '#b45309' : '#4338ca'}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${opp.category === 'HERENCIA_YACENTE' ? '⚖️ HERENCIA YACENTE' : '👥 COSA COMÚN'}</span>
                                     ${opp.is_new ? '<span class="badge-new-pill" title="Nueva oportunidad incorporada recientemente"><i data-lucide="sparkles"></i> New!</span>' : ''}
                                 </div>
-                                ${opp.discount_percentage > 0 ? `
-                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
-                                ` : `
-                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Edicto s/ Tipo</span>
-                                `}
+                                <div style="display: flex; align-items: center; gap: 6px; pointer-events: auto;">
+                                    ${opp.discount_percentage > 0 ? `
+                                        <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                    ` : `
+                                        <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Edicto s/ Tipo</span>
+                                    `}
+                                    <button type="button" class="btn-fav-card ${isFav ? 'is-favorite' : ''}" id="fav-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}">
+                                        ${renderHeartSvg(isFav, 16)}
+                                    </button>
+                                </div>
                             ` : (opp.source_type === 'market' ? `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: #059669; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
@@ -1222,11 +1363,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span class="badge-xpublicacion" title="Contabiliza publicaciones con precios distintos"><i data-lucide="layers" style="width: 12px; height: 12px;"></i> xPublicación: ${escapeHtml(opp.x_publicacion || 'x1')}</span>
                                     ${opp.has_pgou_synergy ? `<span class="badge-synergy" title="Inmueble con Sinergia Urbanística PGOU"><i data-lucide="crosshair" style="width: 12px; height: 12px;"></i> 🎯 SINERGIA PGOU</span>` : ''}
                                 </div>
-                                ${opp.discount_percentage > 0 ? `
-                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 1)}% dto.</span>
-                                ` : `
-                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Precio Inicial</span>
-                                `}
+                                <div style="display: flex; align-items: center; gap: 6px; pointer-events: auto;">
+                                    ${opp.discount_percentage > 0 ? `
+                                        <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 1)}% dto.</span>
+                                    ` : `
+                                        <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Precio Inicial</span>
+                                    `}
+                                    <button type="button" class="btn-fav-card ${isFav ? 'is-favorite' : ''}" id="fav-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}">
+                                        ${renderHeartSvg(isFav, 16)}
+                                    </button>
+                                </div>
                             ` : `
                                 <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                     <span class="badge-strategy" style="background: ${subastaBadgeBg}; color: #fff; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${subastaTypeBadge}</span>
@@ -1237,13 +1383,18 @@ document.addEventListener('DOMContentLoaded', () => {
                                         </span>
                                     ` : ''}
                                 </div>
-                                ${opp.is_surface_missing ? `
-                                    <span class="badge-discount" style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠️ Requiere Nota Simple</span>
-                                ` : (opp.discount_percentage > 0 ? `
-                                    <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
-                                ` : `
-                                    <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Subasta s/ Tipo</span>
-                                `)}
+                                <div style="display: flex; align-items: center; gap: 6px; pointer-events: auto;">
+                                    ${opp.is_surface_missing ? `
+                                        <span class="badge-discount" style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠️ Requiere Nota Simple</span>
+                                    ` : (opp.discount_percentage > 0 ? `
+                                        <span class="badge-discount" style="background: #10b981; color: #fff; font-weight: 800; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">-${formatNumber(opp.discount_percentage, 0)}% Descuento</span>
+                                    ` : `
+                                        <span class="badge-discount" style="background: rgba(100, 116, 139, 0.4); color: #cbd5e1; font-weight: 600; border: 1px solid rgba(148, 163, 184, 0.25);">Subasta s/ Tipo</span>
+                                    `)}
+                                    <button type="button" class="btn-fav-card ${isFav ? 'is-favorite' : ''}" id="fav-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}">
+                                        ${renderHeartSvg(isFav, 16)}
+                                    </button>
+                                </div>
                             `))}
                         </div>
                     </div>
@@ -1273,7 +1424,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">${opp.source_type === 'market' ? 'Precio de Venta' : (opp.source_type === 'pgou' ? 'Precio Adquisición' : (opp.source_type === 'edictos' ? 'Salida / Tipo' : 'Valor Subasta'))}</span>
-                                <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700; color: ${opp.source_type === 'market' ? '#38bdf8' : '#f8fafc'};">${formatCurrency(opp.source_type === 'market' ? opp.listing_price : refVal)}</span>
+                                <span class="fin-val val-tasacion" style="font-size: 0.95rem; font-weight: 700; color: ${opp.source_type === 'market' ? '#38bdf8' : '#f8fafc'};">${formatPriceWithMarketDiff(opp.source_type === 'market' ? opp.listing_price : refVal, estimatedMktVal, true)}</span>
                             </div>
                             <div class="fin-cell">
                                 <span class="fin-lbl">${opp.source_type === 'market' ? 'Bajada Anuncio' : 'Valor Mercado Estimado'}</span>
@@ -1288,7 +1439,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="fin-cell">
                                 <span class="fin-lbl" style="color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                                 <span class="fin-val val-profit" style="font-size: 0.88rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitVal >= 0 ? '#4ade80' : '#f87171')};">
-                                    ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : (opp.source_type === 'market' ? `${profitFormatted} ${opp.discount_vs_market > 0 ? `<span style="font-size: 0.74rem; font-weight: 700; color: #38bdf8;">(-${formatNumber(opp.discount_vs_market, 1)}% dto. mkt)</span>` : ''}` : profitFormatted)}
+                                    ${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : (opp.source_type === 'market' ? `${profitFormatted} ${opp.discount_vs_market > 0 ? `<span style="font-size: 0.74rem; font-weight: 700; color: #34d399;">(-${formatNumber(opp.discount_vs_market, 1)}% dto. mkt)</span>` : (estimatedMktVal && opp.listing_price > estimatedMktVal ? `<span style="font-size: 0.74rem; font-weight: 700; color: #f87171;">(+${formatNumber(((opp.listing_price - estimatedMktVal) / estimatedMktVal) * 100, 1)}% sobre mkt)</span>` : '')}` : profitFormatted)}
                                 </span>
                             </div>
                         </div>
@@ -1347,6 +1498,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!opp) return;
 
         window._activeModalOpp = opp;
+
+        const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+        const favsSetModal = getFavoritesSet();
+        const isFav = favsSetModal.has(oppIdUpper);
 
         const modal = document.getElementById('modal-property-detail');
         const body = document.getElementById('modal-prop-body');
@@ -2076,7 +2231,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             </span>
                         ` : ''}
                     </div>
-                    <h2>${escapeHtml(opp.title)}</h2>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 6px;">
+                        <h2 style="margin: 0; flex: 1; min-width: 250px;">${escapeHtml(opp.title)}</h2>
+                        <button type="button" class="btn-fav-modal ${isFav ? 'is-favorite' : ''}" id="fav-modal-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Guardar en favoritos'}">
+                            ${renderHeartSvg(isFav, 16)} <span id="fav-modal-label-${escapeHtml(oppIdUpper)}" style="font-size: 0.82rem; font-weight: 700;">${isFav ? 'Favorito' : 'Guardar'}</span>
+                        </button>
+                    </div>
                     <div class="modal-prop-address" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
                         <a href="javascript:void(0)" class="address-maps-link" style="font-size: 0.92rem; padding: 6px 12px; width: fit-content;" onclick="openGoogleMapsFromModal(event)">
                             <i data-lucide="map-pin"></i> ${escapeHtml(fullAddress)}
@@ -2098,7 +2258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">${opp.source_type === 'market' ? 'Precio de Venta' : (opp.source_type === 'pgou' ? 'Precio Adquisición Ref.' : (opp.source_type === 'edictos' ? 'Salida / Tipo Estimado' : 'Valor de Subasta'))}</span>
-                        <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px; color: ${opp.source_type === 'market' ? '#38bdf8' : 'inherit'};">${formatCurrency(opp.source_type === 'market' ? opp.listing_price : refValModal)}</span>
+                        <span class="fin-val price" style="display: block; font-size: 1.15rem; font-weight: 800; margin-top: 2px; color: ${opp.source_type === 'market' ? '#38bdf8' : 'inherit'};">${formatPriceWithMarketDiff(opp.source_type === 'market' ? opp.listing_price : refValModal, estimatedMktValModal, true)}</span>
                     </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${isSurfaceMissingModal ? '#f59e0b' : '#38bdf8'}; font-weight: 600; line-height: 1.2;">Valor Mercado Est.</span>
@@ -2121,7 +2281,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>
-                        ${opp.source_type === 'market' && opp.discount_vs_market > 0 ? `<div style="font-size: 0.74rem; color: #38bdf8; font-weight: 700; margin-top: 2px;">-${formatNumber(opp.discount_vs_market, 1)}% dto. vs mercado</div>` : ''}
+                        ${opp.source_type === 'market' && opp.discount_vs_market > 0 ? `<div style="font-size: 0.74rem; color: #34d399; font-weight: 700; margin-top: 2px;">-${formatNumber(opp.discount_vs_market, 1)}% dto. vs mercado</div>` : (opp.source_type === 'market' && estimatedMktValModal && opp.listing_price > estimatedMktValModal ? `<div style="font-size: 0.74rem; color: #f87171; font-weight: 700; margin-top: 2px;">+${formatNumber(((opp.listing_price - estimatedMktValModal) / estimatedMktValModal) * 100, 1)}% sobre mercado</div>` : '')}
                     </div>
                 </div>
 
@@ -2464,6 +2624,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgInfo = getOpportunityMainImage(opp);
         const mainImg = imgInfo.url;
         const fullAddress = formatFullAddress(opp);
+        const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+        const favsSetPopup = getFavoritesSet();
+        const isFav = favsSetPopup.has(oppIdUpper);
 
         let loteHeaderHtml = '';
         if (opp.is_lotes || opp.is_new || (isMarket && (opp.x_publicacion || opp.has_pgou_synergy))) {
@@ -2528,7 +2691,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     🏛️ <strong>Origen:</strong> ${escapeHtml(opp.court_or_notary || 'Notaría / Juzgado')}
                 </div>
                 <div style="margin-bottom: 10px; font-weight: 700; color: #059669; font-size: 12px;">
-                    -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid || opp.property_ref_value)}
+                    -${formatNumber(opp.discount_percentage, 0)}% Descuento | Salida: ${formatPriceWithMarketDiff(opp.listing_price || opp.starting_bid || opp.property_ref_value, opp.estimated_reference_value, false)}
                 </div>
             `;
         } else if (isMarket) {
@@ -2545,7 +2708,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <strong>% dto. bajada:</strong> ${opp.discount_percentage > 0 ? `-${formatNumber(opp.discount_percentage, 1)}% dto.` : '0% (Precio Inicial)'}
                 </div>
                 <div style="margin-bottom: 10px; font-weight: 800; color: #0284c7; font-size: 12px;">
-                    Precio Venta: ${formatCurrency(opp.listing_price)}
+                    Precio Venta: ${formatPriceWithMarketDiff(opp.listing_price, opp.estimated_reference_value, false)}
                 </div>
             `;
         } else {
@@ -2562,7 +2725,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <strong>Estimación Mercado:</strong> ${mktEstPopup}
                 </div>
                 <div style="margin-bottom: 10px; font-weight: 700; color: ${opp.is_surface_missing ? '#d97706' : (opp.discount_percentage > 0 ? '#059669' : '#64748b')}; font-size: 12px;">
-                    ${discountBadgePopup} | Salida: ${formatCurrency(opp.listing_price || opp.starting_bid)}
+                    ${discountBadgePopup} | Salida: ${formatPriceWithMarketDiff(opp.listing_price || opp.starting_bid, opp.estimated_reference_value, false)}
                 </div>
             `;
         }
@@ -2581,6 +2744,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="font-family: sans-serif; color: #1e293b; max-width: 260px; padding: 4px;">
                 <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; border: 1px solid #cbd5e1; background: #0f172a; position: relative;">
                     <img id="popup-img-${escapeHtml(opp.id)}" src="${mainImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="${escapeHtml(opp.title)}">
+                    <button type="button" class="btn-fav-popup ${isFav ? 'is-favorite' : ''}" id="fav-popup-btn-${escapeHtml(oppIdUpper)}" onclick="window.toggleFavorite('${escapeHtml(oppIdUpper)}', event);" title="${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}">
+                        ${renderHeartSvg(isFav, 14)}
+                    </button>
                     ${popupImages.length > 1 ? `
                         <span style="position: absolute; bottom: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">📷 ${popupImages.length} fotos</span>
                     ` : (hasPortalEnrichment ? `
@@ -3017,6 +3183,32 @@ document.addEventListener('DOMContentLoaded', () => {
             maximumFractionDigits: hasDecimals ? 2 : 0
         }).format(num);
         return `${formatted} €`;
+    }
+
+    function formatPriceWithMarketDiff(price, marketVal, isDarkTheme = true) {
+        if (price === null || price === undefined || price === '' || isNaN(price) || Number(price) <= 0) return '0 €';
+        const baseFormatted = formatCurrency(price);
+        if (marketVal === null || marketVal === undefined || marketVal === '' || isNaN(marketVal) || Number(marketVal) <= 0) return baseFormatted;
+
+        const numPrice = Number(price);
+        const numMkt = Number(marketVal);
+        const diffPct = ((numPrice - numMkt) / numMkt) * 100;
+        const rounded = Math.round(diffPct * 10) / 10;
+
+        if (Math.abs(rounded) < 0.1) {
+            return `${baseFormatted} <span style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;" title="Precio en paridad con valor estimado de mercado">(= mkt)</span>`;
+        }
+
+        const absVal = Math.abs(rounded);
+        const pctStr = (absVal % 1 === 0 ? absVal.toFixed(0) : absVal.toFixed(1)).replace('.', ',');
+
+        if (rounded < 0) {
+            const color = isDarkTheme ? '#34d399' : '#059669';
+            return `${baseFormatted} <span style="font-size: 0.78rem; font-weight: 800; color: ${color}; white-space: nowrap;" title="${pctStr}% por debajo del valor de mercado">(-${pctStr}%)</span>`;
+        } else {
+            const color = isDarkTheme ? '#f87171' : '#dc2626';
+            return `${baseFormatted} <span style="font-size: 0.78rem; font-weight: 800; color: ${color}; white-space: nowrap;" title="${pctStr}% más caro que el valor de mercado">(+${pctStr}%)</span>`;
+        }
     }
 
     function formatExactPercentage(val) {

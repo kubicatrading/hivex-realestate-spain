@@ -2332,4 +2332,160 @@ table.two-cols-table td {
     }
 }
 
+/* ==========================================================================
+   FAVORITES SYSTEM (Cards, Detail Modal, Map Popup & Filter Toolbar)
+   ========================================================================== */
+.btn-favorites-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 20px;
+    color: #f87171;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-favorites-pill:hover {
+    background: rgba(239, 68, 68, 0.22);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #fecaca;
+    transform: translateY(-1px);
+}
+
+.btn-favorites-pill.active {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border-color: #fca5a5;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+}
+
+.btn-favorites-pill svg,
+.btn-favorites-pill i {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.2s ease;
+}
+
+.btn-favorites-pill.active svg,
+.btn-favorites-pill.active i {
+    fill: currentColor;
+    transform: scale(1.1);
+}
+
+.btn-fav-card {
+    position: relative;
+    z-index: 10;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    pointer-events: auto;
+}
+
+.btn-fav-card:hover {
+    transform: scale(1.15);
+    color: #f87171;
+    border-color: rgba(248, 113, 113, 0.5);
+    background: rgba(15, 23, 42, 0.9);
+}
+
+.btn-fav-card.is-favorite {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: #ef4444;
+    color: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+.btn-fav-card.is-favorite svg {
+    fill: #ef4444;
+}
+
+.btn-fav-modal {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #cbd5e1;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-fav-modal:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+
+.btn-fav-modal.is-favorite {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: #ef4444;
+    color: #f87171;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+}
+
+.btn-fav-modal.is-favorite svg {
+    fill: #ef4444;
+}
+
+.btn-fav-popup {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 10;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+
+.btn-fav-popup:hover {
+    transform: scale(1.1);
+    color: #f87171;
+    border-color: #f87171;
+}
+
+.btn-fav-popup.is-favorite {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+.btn-fav-popup.is-favorite svg {
+    fill: #ef4444;
+}
+
+.heart-icon {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+
 
