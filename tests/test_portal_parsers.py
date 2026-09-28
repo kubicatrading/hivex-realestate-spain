@@ -171,3 +171,43 @@ def test_meso_market_price_by_postal_code():
     )
     assert loc_salamanca["postal_code"] == "28001"
     assert loc_salamanca["area_m2_price"] == 7500.0
+
+
+def test_toponym_normalization_and_zaragoza_isolation():
+    from app.connectors.portal_parsers import (
+        normalize_spanish_address_and_title,
+        extract_clean_description,
+        IdealistaMarkdownParser
+    )
+    # 1. Normalización toponímica para Zaragoza (Avenida de Madrid en Delicias)
+    t, a = normalize_spanish_address_and_title("Piso en Madrid, Delicias, Zaragoza", "Zaragoza", "Zaragoza")
+    assert t == "Piso en Av. de Madrid, Delicias, Zaragoza"
+    assert a == "Av. de Madrid, Delicias, Zaragoza"
+
+    # 2. Resolución de KPI y precio meso sin colisión con Madrid capital
+    loc_zgza = IdealistaMarkdownParser._resolve_location_and_kpis(
+        "Piso en Madrid, Delicias, Zaragoza", default_province="Zaragoza"
+    )
+    assert loc_zgza["province"] == "Zaragoza"
+    assert loc_zgza["postal_code"] == "50017"
+    assert loc_zgza["area_m2_price"] == 1850.0
+    assert "Arganzuela" not in (loc_zgza.get("meso_label") or "")
+    assert "Zaragoza - Delicias" in (loc_zgza.get("meso_label") or "")
+
+    # 3. Limpieza de descripciones evitando etiquetas de precios
+    dirty_snippet = "155.000€\n-8%\n3 hab. 103 m²\n1ª exterior con ascensor"
+    clean_desc = extract_clean_description(
+        post_text=dirty_snippet,
+        title="Piso en Av. de Madrid, Delicias, Zaragoza",
+        property_type="PISO",
+        surface_m2=103.0,
+        rooms=3,
+        floor="1ª exterior",
+        has_elevator=True,
+        locality="Zaragoza",
+        province="Zaragoza",
+        agency="Agencia Inmobiliaria"
+    )
+    assert "155.000" not in clean_desc
+    assert "Piso de 103 m² con 3 dormitorios" in clean_desc
+

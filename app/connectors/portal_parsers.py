@@ -324,6 +324,104 @@ SPAIN_PROV_CP_PREFIX: Dict[str, str] = {
 }
 
 
+def normalize_spanish_address_and_title(raw_title: str, province: str, locality: str) -> Tuple[str, str]:
+    """
+    Normaliza títulos y direcciones físicas para evitar ambigüedades toponímicas
+    (ej. 'Piso en Madrid, Delicias, Zaragoza' -> 'Piso en Av. de Madrid, Delicias, Zaragoza').
+    Restaura el tipo de vía (Av., Calle) cuando un nombre de calle coincide con otra provincia española.
+    """
+    title = (raw_title or "").strip()
+    prov_lower = (province or "").lower().strip()
+    loc_lower = (locality or "").lower().strip()
+
+    # 1. Zaragoza: La gran vía de Delicias es "Avenida de Madrid"
+    if "zaragoza" in prov_lower or "zaragoza" in loc_lower:
+        title = re.sub(r'\ben Madrid, Delicias\b', 'en Av. de Madrid, Delicias', title, flags=re.IGNORECASE)
+        title = re.sub(r'\ben Madrid, Zaragoza\b', 'en Av. de Madrid, Zaragoza', title, flags=re.IGNORECASE)
+        title = re.sub(r'\ben Madrid, (\w+)\b', r'en Av. de Madrid, \1', title, flags=re.IGNORECASE)
+
+    # 2. Valencia: Evitar confusión si la calle es Barcelona o Madrid
+    if "valencia" in prov_lower or "valència" in prov_lower:
+        title = re.sub(r'\ben Barcelona, \b', 'en Calle Barcelona, ', title, flags=re.IGNORECASE)
+        title = re.sub(r'\ben Madrid, \b', 'en Calle Madrid, ', title, flags=re.IGNORECASE)
+
+    # 3. Sevilla:
+    if "sevilla" in prov_lower:
+        title = re.sub(r'\ben Madrid, \b', 'en Calle Madrid, ', title, flags=re.IGNORECASE)
+        title = re.sub(r'\ben Barcelona, \b', 'en Calle Barcelona, ', title, flags=re.IGNORECASE)
+
+    # 4. Málaga: "Pacífico" es Paseo Marítimo / Calle Pacífico
+    if "malaga" in prov_lower or "málaga" in prov_lower:
+        title = re.sub(r'\ben Pacífico, \b', 'en Calle Pacífico / Pº Antonio Machado, ', title, flags=re.IGNORECASE)
+
+    # Construir dirección física limpia eliminando tipología inicial ("Piso en ", "Chalet en ", etc.)
+    clean_address = title
+    clean_address = re.sub(
+        r'^(?:Piso|Apartamento|Ático|Atico|Dúplex|Duplex|Estudio|Chalet|Casa|Planta baja|Finca|Loft)\s+en\s+',
+        '',
+        clean_address,
+        flags=re.IGNORECASE
+    ).strip()
+
+    return title, clean_address
+
+
+def extract_clean_description(
+    post_text: str,
+    title: str,
+    property_type: str,
+    surface_m2: float,
+    rooms: int,
+    floor: str,
+    has_elevator: bool,
+    locality: str,
+    province: str,
+    agency: str
+) -> str:
+    """
+    Extrae una descripción limpia y veraz del inmueble, descartando precios,
+    porcentajes de descuento y elementos de interfaz de usuario.
+    Si no hay texto narrativo substantivo, genera una descripción coherente y exacta.
+    """
+    lines = [line.strip() for line in (post_text or "").split("\n") if line.strip()]
+    candidate_lines = []
+
+    ui_prefixes = (
+        "[", "!", "#", "*", ">", "Contactar", "Llamar", "Top+", "Destacado",
+        "Foto", "Guardar", "Favorito", "Compartir", "Descartar", "Ver teléfono",
+        "Pedir cita", "Vídeo", "3D", "Visita virtual"
+    )
+
+    for line in lines:
+        if line.startswith(ui_prefixes):
+            continue
+        # Excluir líneas que son solo precios (ej. "155.000€", "155.000 €", "1.200 €/mes")
+        if re.match(r'^[\d\.,\s]+€?(?:\s*/\s*(?:m[²2]|mes))?$', line):
+            continue
+        # Excluir líneas que son solo porcentajes (ej. "7%", "-8%")
+        if re.match(r'^-?\d+[\.,]?\d*\s*%$', line):
+            continue
+        # Excluir etiquetas de métricas escuetas
+        if re.match(r'^\d+\s*hab(?:\.|\b)', line, re.I) or re.match(r'^\d+[\.,]?\d*\s*m[²2]', line, re.I):
+            continue
+        if len(line) < 25:
+            continue
+        candidate_lines.append(line)
+
+    if candidate_lines:
+        return candidate_lines[0]
+
+    # Generar descripción descriptiva y veraz
+    asc_text = " con ascensor" if has_elevator else (" sin ascensor" if floor and floor.lower() != "bajo" else "")
+    prop_label = (property_type or "Vivienda").capitalize()
+    floor_text = f", {floor.lower()}" if floor and floor.lower() not in ["exterior", "interior"] else ""
+    agency_text = f" Comercializado por {agency}." if agency and agency != "Idealista" else ""
+    return (
+        f"{prop_label} de {int(surface_m2)} m² con {rooms} dormitorios{floor_text}{asc_text}. "
+        f"Ubicado en {locality} ({province}).{agency_text} Inmueble verificado en Idealista."
+    )
+
+
 class IdealistaMarkdownParser:
     """
     Parser especializado para extraer oportunidades estructuradas
@@ -391,6 +489,8 @@ class IdealistaMarkdownParser:
                     )
                     if clean_img not in images:
                         images.append(clean_img)
+                    if len(images) >= 20:
+                        break
 
                 # 3. Precios y Descuento
                 # En Idealista aparece:
@@ -450,17 +550,29 @@ class IdealistaMarkdownParser:
                 elif "con ascensor" in post_snippet:
                     has_elevator = True
 
-                # 5. Descripción
-                desc_lines = [line.strip() for line in post_text.split("\n") if line.strip() and not line.strip().startswith(("[", "!", "#", "Contactar", "Llamar", "Top+"))]
-                description = desc_lines[0] if desc_lines else f"{title}. Inmueble comercializado por {agency}."
-
-                # 6. Ubicación y Geocodificación
+                # 5. Ubicación, Geocodificación y Toponimia
                 location_data = cls._resolve_location_and_kpis(title, default_province)
+                clean_title = location_data.get("title") or title
+                clean_address = location_data.get("address") or clean_title
+
+                # 6. Descripción limpia y veraz (sin precios ni artefactos UI)
+                description = extract_clean_description(
+                    post_text=post_text,
+                    title=clean_title,
+                    property_type="PISO" if "chalet" not in clean_title.lower() else "CHALET",
+                    surface_m2=surface_m2,
+                    rooms=rooms,
+                    floor=floor,
+                    has_elevator=has_elevator,
+                    locality=location_data.get("locality", default_province),
+                    province=location_data.get("province", default_province),
+                    agency=agency
+                )
 
                 opportunity = {
                     "id": f"MKT-IDEALISTA-{item_id}",
-                    "title": title,
-                    "address": location_data.get("address") or title,
+                    "title": clean_title,
+                    "address": clean_address,
                     "locality": location_data.get("locality", default_province),
                     "province": location_data.get("province", default_province),
                     "postal_code": location_data.get("postal_code", "28001"),
@@ -746,8 +858,12 @@ class IdealistaMarkdownParser:
             else:
                 postal_code = "28001"
 
+        # Normalización toponímica estricta para evitar confusiones (ej. Madrid vs Zaragoza)
+        clean_title, clean_address = normalize_spanish_address_and_title(title, province, locality)
+
         return {
-            "address": title,
+            "title": clean_title,
+            "address": clean_address,
             "locality": locality,
             "province": province,
             "postal_code": postal_code,

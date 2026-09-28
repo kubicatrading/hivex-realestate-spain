@@ -965,7 +965,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const oppImages = getOpportunityImagesList(opp);
             const mainImg = oppImages[0];
             const imgCount = oppImages.length;
-            const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
+            const fullAddress = formatFullAddress(opp, true);
             const refVal = (opp.source_type === 'pgou' || opp.source_type === 'edictos')
                 ? (opp.listing_price || opp.starting_bid || opp.property_ref_value || 0)
                 : (opp.property_ref_value || opp.starting_bid || opp.appraisal_value || opp.listing_price || 0);
@@ -1351,7 +1351,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modal-property-detail');
         const body = document.getElementById('modal-prop-body');
         const images = (opp.images && opp.images.length > 0) ? opp.images : [];
-        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality}, ${opp.province}`;
+        const fullAddress = formatFullAddress(opp, true);
 
         const totalSurface = (opp.surface_m2 && opp.surface_m2 > 0) ? opp.surface_m2 : null;
         const effectiveSurface = (opp.effective_surface_m2 && opp.effective_surface_m2 > 0) ? opp.effective_surface_m2 : totalSurface;
@@ -2328,7 +2328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const opps = window._lastOpportunities || (state && state.filteredOpportunities) || [];
         const opp = opps[idx];
         if (!opp) return;
-        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
+        const fullAddress = formatFullAddress(opp, true) + ', España';
         window.openGoogleMapsModal(fullAddress, opp.lat, opp.lon, event);
     };
 
@@ -2339,7 +2339,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const opp = window._activeModalOpp;
         if (!opp) return;
-        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}, ${opp.province || ''}, España`;
+        const fullAddress = formatFullAddress(opp, true) + ', España';
         window.openGoogleMapsModal(fullAddress, opp.lat, opp.lon, event);
     };
 
@@ -2439,13 +2439,31 @@ document.addEventListener('DOMContentLoaded', () => {
         currentSpiderClusterKey = null;
     };
 
+    function formatFullAddress(opp, includeProvince = false) {
+        if (!opp) return 'Ubicación referencial';
+        let addr = (opp.full_address || opp.address || '').trim();
+        // Limpiar prefijo tipológico ("Piso en ", "Chalet en ", "Ático en ", etc.)
+        addr = addr.replace(/^(?:Piso|Apartamento|Ático|Atico|Dúplex|Duplex|Estudio|Chalet|Casa|Planta baja|Finca|Loft)\s+en\s+/i, '').trim();
+
+        const loc = (opp.locality || '').trim();
+        const prov = (opp.province || '').trim();
+
+        if (loc && !addr.toLowerCase().includes(loc.toLowerCase())) {
+            addr = addr ? `${addr}, ${loc}` : loc;
+        }
+        if (includeProvince && prov && !addr.toLowerCase().includes(prov.toLowerCase())) {
+            addr = addr ? `${addr}, ${prov}` : prov;
+        }
+        return addr || loc || prov || 'Ubicación referencial';
+    }
+
     function buildPopupHtml(opp, idx) {
         const isPgou = opp.source_type === 'pgou';
         const isEdictos = opp.source_type === 'edictos';
         const isMarket = opp.source_type === 'market';
         const imgInfo = getOpportunityMainImage(opp);
         const mainImg = imgInfo.url;
-        const fullAddress = opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`;
+        const fullAddress = formatFullAddress(opp);
 
         let loteHeaderHtml = '';
         if (opp.is_lotes || opp.is_new || (isMarket && (opp.x_publicacion || opp.has_pgou_synergy))) {

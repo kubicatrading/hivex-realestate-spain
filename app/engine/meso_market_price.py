@@ -372,9 +372,35 @@ CP_DISTRICT_MARKET_2X2: Dict[str, Tuple[Dict[str, Dict[str, float]], str]] = {
 
     # === TIER 2: ZARAGOZA, CORUÑA, ASTURIAS, CANARIAS, MURCIA, CASTILLA ===
     "50001": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 15.0}}, "Zaragoza - Centro"),
-    "50004": ({"URBANO": {"INMUEBLE": 2500.0, "SOLAR": 800.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "Zaragoza - Paseo Independencia"),
-    "50017": ({"URBANO": {"INMUEBLE": 1400.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 280.0, "SOLAR": 12.0}}, "Zaragoza - Delicias"),
-    "50018": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 620.0}, "RÚSTICO": {"INMUEBLE": 310.0, "SOLAR": 13.0}}, "Zaragoza - Actur"),
+    "50002": ({"URBANO": {"INMUEBLE": 1800.0, "SOLAR": 550.0}, "RÚSTICO": {"INMUEBLE": 280.0, "SOLAR": 12.0}}, "Zaragoza - Las Fuentes"),
+    "50003": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 650.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 13.0}}, "Zaragoza - La Almozara / Casco Histórico"),
+    "50004": ({"URBANO": {"INMUEBLE": 2600.0, "SOLAR": 850.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "Zaragoza - Paseo Independencia"),
+    "50006": ({"URBANO": {"INMUEBLE": 1750.0, "SOLAR": 520.0}, "RÚSTICO": {"INMUEBLE": 270.0, "SOLAR": 12.0}}, "Zaragoza - Torrero / La Paz"),
+    "50007": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 600.0}, "RÚSTICO": {"INMUEBLE": 290.0, "SOLAR": 13.0}}, "Zaragoza - San José"),
+    "50009": ({"URBANO": {"INMUEBLE": 2750.0, "SOLAR": 880.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "Zaragoza - Romareda / Universidad"),
+    "50011": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 650.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 13.0}}, "Zaragoza - Miralbueno / Oliver"),
+    "50012": ({"URBANO": {"INMUEBLE": 1850.0, "SOLAR": 550.0}, "RÚSTICO": {"INMUEBLE": 280.0, "SOLAR": 12.0}}, "Zaragoza - Valdefierro"),
+    "50014": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 600.0}, "RÚSTICO": {"INMUEBLE": 290.0, "SOLAR": 13.0}}, "Zaragoza - Barrio Jesús / Arrabal"),
+    "50016": ({"URBANO": {"INMUEBLE": 1900.0, "SOLAR": 580.0}, "RÚSTICO": {"INMUEBLE": 280.0, "SOLAR": 12.0}}, "Zaragoza - Santa Isabel"),
+    "50017": ({"URBANO": {"INMUEBLE": 1850.0, "SOLAR": 550.0}, "RÚSTICO": {"INMUEBLE": 280.0, "SOLAR": 12.0}}, "Zaragoza - Delicias"),
+    "50018": ({"URBANO": {"INMUEBLE": 2350.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 310.0, "SOLAR": 13.0}}, "Zaragoza - Actur"),
+    "50019": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Zaragoza - Montecanal / Valdespartera"),
+    "50022": ({"URBANO": {"INMUEBLE": 1750.0, "SOLAR": 520.0}, "RÚSTICO": {"INMUEBLE": 270.0, "SOLAR": 12.0}}, "Zaragoza - Arcosur"),
+    "50620": ({"URBANO": {"INMUEBLE": 1550.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 250.0, "SOLAR": 10.0}}, "Zaragoza - Casetas"),
+    "50190": ({"URBANO": {"INMUEBLE": 1450.0, "SOLAR": 420.0}, "RÚSTICO": {"INMUEBLE": 240.0, "SOLAR": 10.0}}, "Zaragoza - Garrapinillos"),
+    "50180": ({"URBANO": {"INMUEBLE": 1650.0, "SOLAR": 480.0}, "RÚSTICO": {"INMUEBLE": 250.0, "SOLAR": 11.0}}, "Utebo"),
+    "50300": ({"URBANO": {"INMUEBLE": 1350.0, "SOLAR": 380.0}, "RÚSTICO": {"INMUEBLE": 220.0, "SOLAR": 10.0}}, "Calatayud"),
+    "50820": ({"URBANO": {"INMUEBLE": 1400.0, "SOLAR": 400.0}, "RÚSTICO": {"INMUEBLE": 240.0, "SOLAR": 10.0}}, "Zaragoza - San Juan de Mozarrifar"),
+    # Sevilla distritos
+    "41008": ({"URBANO": {"INMUEBLE": 1650.0, "SOLAR": 500.0}, "RÚSTICO": {"INMUEBLE": 260.0, "SOLAR": 12.0}}, "Sevilla - San Diego / Pino Montano"),
+    "41010": ({"URBANO": {"INMUEBLE": 3200.0, "SOLAR": 1050.0}, "RÚSTICO": {"INMUEBLE": 400.0, "SOLAR": 16.0}}, "Sevilla - Triana"),
+    "41011": ({"URBANO": {"INMUEBLE": 3400.0, "SOLAR": 1100.0}, "RÚSTICO": {"INMUEBLE": 420.0, "SOLAR": 17.0}}, "Sevilla - Los Remedios"),
+    "41005": ({"URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0}, "RÚSTICO": {"INMUEBLE": 390.0, "SOLAR": 16.0}}, "Sevilla - Nervión"),
+    "41009": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 650.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 13.0}}, "Sevilla - Macarena"),
+    # Málaga distritos
+    "29003": ({"URBANO": {"INMUEBLE": 2800.0, "SOLAR": 900.0}, "RÚSTICO": {"INMUEBLE": 370.0, "SOLAR": 15.0}}, "Málaga - Carretera de Cádiz"),
+    "29004": ({"URBANO": {"INMUEBLE": 3200.0, "SOLAR": 1050.0}, "RÚSTICO": {"INMUEBLE": 400.0, "SOLAR": 16.0}}, "Málaga - Carretera de Cádiz / Pacífico"),
+    "29010": ({"URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0}, "RÚSTICO": {"INMUEBLE": 390.0, "SOLAR": 16.0}}, "Málaga - Teatinos"),
     "15001": ({"URBANO": {"INMUEBLE": 2700.0, "SOLAR": 850.0}, "RÚSTICO": {"INMUEBLE": 360.0, "SOLAR": 16.0}}, "A Coruña - Ciudad Vieja"),
     "15003": ({"URBANO": {"INMUEBLE": 2600.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "A Coruña - Ensanche / Riazor"),
     "33001": ({"URBANO": {"INMUEBLE": 2000.0, "SOLAR": 620.0}, "RÚSTICO": {"INMUEBLE": 310.0, "SOLAR": 13.0}}, "Oviedo - Centro"),
@@ -636,6 +662,164 @@ DISTRICT_NEIGHBORHOOD_TO_CP: Dict[str, str] = {
     "sierra de pineda": "28018"
 }
 
+# Prefijos de Código Postal para las 52 provincias españolas
+SPAIN_PROV_CP_PREFIX: Dict[str, str] = {
+    "alava": "01", "araba": "01", "albacete": "02", "alicante": "03", "alacant": "03",
+    "almeria": "04", "almería": "04", "avila": "05", "ávila": "05", "badajoz": "06",
+    "baleares": "07", "balears": "07", "illes balears": "07", "palma": "07",
+    "barcelona": "08", "burgos": "09", "caceres": "10", "cáceres": "10", "cadiz": "11", "cádiz": "11",
+    "castellon": "12", "castelló": "12", "ciudad real": "13", "cordoba": "14", "córdoba": "14",
+    "coruña": "15", "a coruña": "15", "la coruña": "15", "cuenca": "16",
+    "girona": "17", "gerona": "17", "granada": "18", "guadalajara": "19",
+    "gipuzkoa": "20", "guipuzcoa": "20", "guipúzcoa": "20",
+    "huelva": "21", "huesca": "22", "jaen": "23", "jaén": "23", "leon": "24", "león": "24",
+    "lleida": "25", "lerida": "25", "lérida": "25", "la rioja": "26", "rioja": "26", "logroño": "26",
+    "lugo": "27", "madrid": "28", "malaga": "29", "málaga": "29", "murcia": "30",
+    "navarra": "31", "ourense": "32", "orense": "32", "asturias": "33", "oviedo": "33", "gijon": "33", "gijón": "33",
+    "palencia": "34", "las palmas": "35", "gran canaria": "35", "pontevedra": "36", "vigo": "36",
+    "salamanca": "37", "santa cruz de tenerife": "38", "tenerife": "38", "cantabria": "39", "santander": "39",
+    "segovia": "40", "sevilla": "41", "soria": "42", "tarragona": "43", "teruel": "44",
+    "toledo": "45", "valencia": "46", "valència": "46", "valladolid": "47",
+    "bizkaia": "48", "vizcaya": "48", "bilbao": "48", "zamora": "49", "zaragoza": "50",
+    "ceuta": "51", "melilla": "52",
+}
+
+# Mapeo de barrios/distritos por prefijo provincial para evitar colisiones cruzadas (ej. Delicias Zaragoza vs Madrid)
+DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX: Dict[str, Dict[str, str]] = {
+    # Zaragoza (50)
+    "50": {
+        "delicias": "50017",
+        "parque delicias": "50017",
+        "la bozada": "50017",
+        "actur": "50018",
+        "rey fernando": "50018",
+        "romareda": "50009",
+        "universidad": "50009",
+        "san jose": "50007",
+        "las fuentes": "50002",
+        "torrero": "50006",
+        "la paz": "50006",
+        "almozara": "50003",
+        "la almozara": "50003",
+        "miralbueno": "50011",
+        "valdefierro": "50012",
+        "santa isabel": "50016",
+        "oliver": "50011",
+        "valdespartera": "50019",
+        "montecanal": "50019",
+        "rosales del canal": "50019",
+        "arcosur": "50022",
+        "barrio jesus": "50014",
+        "arrabal": "50014",
+        "san juan de mozarrifar": "50820",
+        "casetas": "50620",
+        "garrapinillos": "50190",
+        "monzalbarba": "50120",
+        "utebo": "50180",
+        "calatayud": "50300",
+        "independencia": "50004",
+        "paseo independencia": "50004",
+        "centro zaragoza": "50001",
+        "casco historico": "50003",
+        "casco antiguo": "50003"
+    },
+    # Sevilla (41)
+    "41": {
+        "san diego": "41008",
+        "los carteros": "41008",
+        "pino montano": "41008",
+        "triana": "41010",
+        "los remedios": "41011",
+        "nervion": "41005",
+        "nervión": "41005",
+        "macarena": "41009",
+        "santa cruz": "41004",
+        "alfalfa": "41004",
+        "bellavista": "41014"
+    },
+    # Málaga (29)
+    "29": {
+        "pacifico": "29004",
+        "pacífico": "29004",
+        "carretera de cadiz": "29003",
+        "carretera de cádiz": "29003",
+        "cruz de humilladero": "29006",
+        "teatinos": "29010",
+        "malagueta": "29016",
+        "la malagueta": "29016",
+        "limonar": "29016",
+        "el limonar": "29016"
+    },
+    # Madrid (28)
+    "28": {
+        "delicias": "28045",
+        "arganzuela": "28045",
+        "legazpi": "28045",
+        "san diego": "28053",
+        "pacifico": "28007",
+        "pacífico": "28007",
+        "palomeras": "28018",
+        "vallecas": "28018",
+        "retiro": "28009",
+        "salamanca": "28001",
+        "chamberi": "28010",
+        "chamberí": "28010",
+        "chamartin": "28002",
+        "chamartín": "28002",
+        "tetuan": "28020",
+        "tetuán": "28020",
+        "carabanchel": "28019",
+        "usera": "28026",
+        "villaverde": "28021",
+        "latina": "28011",
+        "moncloa": "28008",
+        "hortaleza": "28033",
+        "fuencarral": "28034",
+        "ciudad lineal": "28017",
+        "san blas": "28037",
+        "barajas": "28042",
+        "moratalaz": "28030",
+        "vicalvaro": "28032",
+        "vicálvaro": "28032"
+    },
+    # Barcelona (08)
+    "08": {
+        "eixample": "08007",
+        "gracia": "08012",
+        "gràcia": "08012",
+        "poblenou": "08005",
+        "sarria": "08017",
+        "sarrià": "08017",
+        "sant gervasi": "08006",
+        "ciutat vella": "08001",
+        "gotic": "08002",
+        "gòtic": "08002",
+        "born": "08003",
+        "barceloneta": "08003",
+        "sants": "08014",
+        "les corts": "08029",
+        "horta": "08031",
+        "nou barris": "08016",
+        "sant andreu": "08030",
+        "sant marti": "08020",
+        "sant martí": "08020"
+    },
+    # Valencia (46)
+    "46": {
+        "ruzafa": "46006",
+        "russafa": "46006",
+        "gran via": "46005",
+        "ciutat vella": "46001",
+        "el carme": "46001",
+        "cabanyal": "46011",
+        "el grau": "46024",
+        "campanar": "46015",
+        "benimaclet": "46020",
+        "patraix": "46018",
+        "malilla": "46026"
+    }
+}
+
 def extract_postal_code(text: str) -> Optional[str]:
     """Extrae un código postal español válido (5 dígitos, 01000 - 52999) del texto."""
     if not text:
@@ -661,11 +845,12 @@ def resolve_meso_market_price_2x2(
     Eje X: [INMUEBLE, SOLAR]
 
     Jerarquía:
-    1. Código postal explícito o extraído en CP_DISTRICT_MARKET_2X2
-    2. Detección de barrio / distrito en DISTRICT_NEIGHBORHOOD_TO_CP
-    3. Coincidencia con Municipio en MUNICIPALITY_MARKET_2X2
-    4. Coincidencia con Distrito Capital
-    5. Benchmark Provincial
+    1. Código postal explícito o extraído en CP_DISTRICT_MARKET_2X2 (filtrado por provincia)
+    2. Detección de barrio / distrito en DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX según provincia
+    3. Mapeo general en DISTRICT_NEIGHBORHOOD_TO_CP (verificando coherencia provincial)
+    4. Coincidencia con Municipio en MUNICIPALITY_MARKET_2X2
+    5. Coincidencia con Distrito Capital
+    6. Benchmark Provincial
     """
     prov_key = (province_str or "").strip().upper()
     loc_key = (locality_str or "").strip().upper()
@@ -679,34 +864,66 @@ def resolve_meso_market_price_2x2(
     combined_text = f"{full_address_str} {desc_text} {locality_str} {province_str}".lower()
     text_normalized = combined_text.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
 
+    # Determinar prefijo provincial de CP para garantizar coherencia geográfica
+    target_prov_prefix = None
+    if prov_key:
+        prov_lookup = prov_key.lower().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        for p_name, p_pref in SPAIN_PROV_CP_PREFIX.items():
+            if p_name in prov_lookup:
+                target_prov_prefix = p_pref
+                break
+    if not target_prov_prefix and loc_key:
+        loc_lookup = loc_key.lower().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        for p_name, p_pref in SPAIN_PROV_CP_PREFIX.items():
+            if p_name in loc_lookup:
+                target_prov_prefix = p_pref
+                break
+
     # 1. Intentar por Código Postal (CP) explícito o en texto
     cp_candidate = (postal_code or "").strip()
     if not cp_candidate or len(cp_candidate) != 5:
         cp_candidate = extract_postal_code(combined_text)
+
+    # Si conocemos la provincia, el CP DEBE coincidir con el prefijo provincial (evita falsos positivos como 28045 en Zaragoza)
+    if cp_candidate and target_prov_prefix and not cp_candidate.startswith(target_prov_prefix):
+        cp_candidate = None
 
     if cp_candidate and cp_candidate in CP_DISTRICT_MARKET_2X2:
         matrix, label = CP_DISTRICT_MARKET_2X2[cp_candidate]
         price = matrix[y_axis][x_axis]
         return price, "SECCION", f"Barrio/CP MIVAU [{label} ({cp_candidate})]"
 
-    # 2. Intentar por Barrio / Distrito mapeado directamente a CP
-    # Ordenar por longitud descendente para que "palomeras sureste" coincida antes que "palomeras"
+    # 2. Intentar por Barrio / Distrito con prefijo provincial específico (PREVIENE cruces entre provincias)
+    if target_prov_prefix and target_prov_prefix in DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX:
+        prov_dict = DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX[target_prov_prefix]
+        for neighborhood_key, mapped_cp in sorted(prov_dict.items(), key=lambda x: len(x[0]), reverse=True):
+            if re.search(rf'\b{re.escape(neighborhood_key)}\b', text_normalized):
+                if mapped_cp in CP_DISTRICT_MARKET_2X2:
+                    matrix, label = CP_DISTRICT_MARKET_2X2[mapped_cp]
+                    price = matrix[y_axis][x_axis]
+                    return price, "SECCION", f"Barrio/CP MIVAU [{label} ({mapped_cp})]"
+
+    # 3. Intentar por mapeo general DISTRICT_NEIGHBORHOOD_TO_CP (verificando prefijo si se conoce la provincia)
     for neighborhood_key, mapped_cp in sorted(DISTRICT_NEIGHBORHOOD_TO_CP.items(), key=lambda x: len(x[0]), reverse=True):
+        if target_prov_prefix and not mapped_cp.startswith(target_prov_prefix):
+            continue
         if re.search(rf'\b{re.escape(neighborhood_key)}\b', text_normalized):
             if mapped_cp in CP_DISTRICT_MARKET_2X2:
                 matrix, label = CP_DISTRICT_MARKET_2X2[mapped_cp]
                 price = matrix[y_axis][x_axis]
                 return price, "SECCION", f"Barrio/CP MIVAU [{label} ({mapped_cp})]"
 
-    # 3. Intentar por Municipio / Localidad exacta
+    # 4. Intentar por Municipio / Localidad exacta
     if loc_key in MUNICIPALITY_MARKET_2X2:
         matrix = MUNICIPALITY_MARKET_2X2[loc_key]
         price = matrix[y_axis][x_axis]
         return price, "MUNICIPAL", f"Municipio MIVAU [{locality_str or loc_key}]"
 
-    # 4. Intentar por Distrito en Grandes Capitales
-    if prov_key in ["MADRID", "BARCELONA", "MÁLAGA", "MALAGA", "VALENCIA", "VALÈNCIA", "VALENCIA/VALÈNCIA", "SEVILLA"]:
+    # 5. Intentar por Distrito en Grandes Capitales (restringiendo a la provincia objetivo)
+    if prov_key in ["MADRID", "BARCELONA", "MÁLAGA", "MALAGA", "VALENCIA", "VALÈNCIA", "VALENCIA/VALÈNCIA", "SEVILLA", "ZARAGOZA"]:
         for cp_key, (matrix, district_name) in CP_DISTRICT_MARKET_2X2.items():
+            if target_prov_prefix and not cp_key.startswith(target_prov_prefix):
+                continue
             dist_norm = district_name.lower().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
             if dist_norm in text_normalized:
                 price = matrix[y_axis][x_axis]

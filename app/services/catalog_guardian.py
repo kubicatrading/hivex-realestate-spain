@@ -136,8 +136,24 @@ class CatalogGuardian:
         Método de compatibilidad con llamadas anteriores.
         Evalúa si el contenido o portal_url carece de fotos o indica recurso no disponible.
         """
-        if not content or len(content.strip()) < 50:
+        if not content:
             return True, "Contenido vacío o inaccesible"
+
+        content_lower = content.lower()
+        delisted_keywords = [
+            "ya no está publicado",
+            "dio de baja el",
+            "ya no está disponible",
+            "404 - página no encontrada",
+            "anuncio caducado",
+            "inmueble no disponible",
+            "anuncio desactivado",
+            "página no encontrada",
+        ]
+        for kw in delisted_keywords:
+            if kw in content_lower:
+                return True, f"Patrón de despublicación detectado: {kw}"
+
         if portal_url:
             photos = self.extract_photos_from_content(portal_url, content)
             if len(photos) == 0:
