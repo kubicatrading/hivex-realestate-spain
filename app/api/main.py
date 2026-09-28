@@ -1788,6 +1788,7 @@ def enrich_opportunity_gallery(
 @app.post("/api/v1/market/guardian/audit")
 def guardian_audit_catalog_endpoint(
     max_items: Optional[int] = Query(25, description="Número máximo de anuncios a auditar en este pase"),
+    allow_idealista: bool = Query(False, description="Permitir consumo de créditos Supadata para Idealista"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1796,7 +1797,7 @@ def guardian_audit_catalog_endpoint(
     """
     from app.services.catalog_guardian import CatalogGuardian
     guardian = CatalogGuardian()
-    return guardian.audit_catalog(max_items=max_items)
+    return guardian.audit_catalog(max_items=max_items, allow_idealista_credits=allow_idealista)
 
 @app.get("/api/v1/market/backfill/status")
 def backfill_status_endpoint(current_user: dict = Depends(get_current_user)):

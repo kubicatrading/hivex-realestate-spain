@@ -172,11 +172,12 @@ class CatalogGuardian:
             logger.error(f"[CatalogGuardian] Error purgando oportunidad {clean_id}: {e}")
             return False
 
-    def audit_catalog(self, max_items: Optional[int] = 30) -> Dict[str, Any]:
+    def audit_catalog(self, max_items: Optional[int] = 30, allow_idealista_credits: bool = False) -> Dict[str, Any]:
         """
         Auditoría proactiva del catálogo:
         Recorre inmuebles con portal_url, consulta el estado real en origen y purga
         los que devuelvan 404 o carezcan de fotos.
+        Portales directos (Pisos.com, Habitaclia, Fotocasa) se auditan con 0 créditos.
         """
         from app.connectors.supadata_client import SupadataClient
 
@@ -201,12 +202,38 @@ class CatalogGuardian:
         for it in target_items:
             opp_id = it.get("id")
             portal_url = it.get("portal_url")
+            portal_low = (it.get("primary_portal") or "").lower()
             checked_count += 1
 
             try:
-                scrape_res = supadata.scrape_url(portal_url)
-                content = scrape_res.get("content", "") if scrape_res else ""
-                http_code = scrape_res.get("status_code", 200) if scrape_res else 404
+                content = ""
+                http_code = 200
+                is_free_portal = any(p in portal_low or p in portal_url.lower() for p in ["pisos", "habitaclia", "fotocasa"])
+
+                # Verificación directa para portales sin bloqueo agresivo (0 créditos Supadata)
+                if is_free_portal:
+                    try:
+                        import httpx
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        }
+                        with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+                            resp = client.get(portal_url, headers=headers)
+                            http_code = resp.status_code
+                            if resp.status_code == 200:
+                                content = resp.text
+                    except Exception as e_d:
+                        logger.debug(f"[CatalogGuardian Audit] Check directo para {opp_id}: {e_d}")
+
+                # Para Idealista (requiere proxy residencial Supadata)
+                if not content and not is_free_portal:
+                    if allow_idealista_credits:
+                        scrape_res = supadata.scrape_url(portal_url)
+                        content = scrape_res.get("content", "") if scrape_res else ""
+                        http_code = scrape_res.get("status_code", 200) if scrape_res else 404
+                    else:
+                        continue
 
                 is_delisted, reason, photos = self.verify_listing_active_status(
                     portal_url=portal_url,
