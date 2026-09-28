@@ -568,6 +568,18 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         market_items = market_scraper.fetch_market_opportunities(live_scrape=True, pgou_items=pgou_items)
         MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
 
+        # 5. Enriquecimiento proactivo de fotos: Portales gratuitos (0 créditos) + bolsa de 10 créditos Supadata diarios para Idealista
+        try:
+            from app.services.photos_backfill import PhotosBackfillWorker
+            backfill_worker = PhotosBackfillWorker()
+            backfill_res = backfill_worker.run_backfill_batch(max_items=25, allow_idealista_credits=True)
+            logger.info(
+                f"[Pipeline Run] Backfill de fotos completado: {backfill_res.get('enriched', 0)} enriquecidos "
+                f"(Idealista créditos consumidos hoy: {backfill_res.get('supadata_quota', {}).get('credits_used_today')}/10)."
+            )
+        except Exception as e_bf:
+            logger.debug(f"[Pipeline Run] Aviso en backfill de fotos: {e_bf}")
+
         new_opp_ids = getattr(scoring_engine, "newly_created_opp_ids", [])
 
         # Consultar sincronizaciones previas para conocer los IDs históricos de PGOU, Edictos y Market
@@ -1812,7 +1824,7 @@ def backfill_status_endpoint(current_user: dict = Depends(get_current_user)):
 def backfill_trigger_endpoint(
     max_items: Optional[int] = Query(25, description="Número máximo de oportunidades a enriquecer en este pase"),
     portal: Optional[str] = Query(None, description="Filtrar por portal específico (ej. Pisos.com, Habitaclia)"),
-    allow_idealista: bool = Query(False, description="Permitir consumo dosificado de créditos Supadata para Idealista"),
+    allow_idealista: bool = Query(True, description="Permitir enriquecimiento dosificado de Idealista (estricto máx 10 créditos/día)"),
     current_user: dict = Depends(get_current_user)
 ):
     """Dispara un pase manual de enriquecimiento de fotos en segundo plano."""

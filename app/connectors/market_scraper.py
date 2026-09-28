@@ -583,24 +583,22 @@ class MarketScraper:
         logger.info(f"[Market Live Scraper] Total de {len(results)} oportunidades en vivo extraídas y ordenadas.")
         return results
 
-    def _save_to_verified_catalog(self, new_items: List[Dict[str, Any]]) -> None:
+    def _save_to_verified_catalog(self, new_items: List[Dict[str, Any]], live_sync: bool = True) -> None:
         """
-        Acumula de forma persistente los inmuebles reales recién extraídos en el catálogo de mercado.
+        Sincronización declarativa inmediata en el momento del raspado:
+        1. Para los portales y provincias recién raspados, lo que devuelve el portal en vivo
+           ES la verdad absoluta en ese instante.
+        2. Los inmuebles existentes que siguen apareciendo se actualizan conservando sus
+           galerías completas enriquecidas (>= 10 fotos).
+        3. Los inmuebles que hayan sido retirados, vendidos o que ya no aparezcan en la búsqueda
+           SE PURGAN DE INMEDIATO EN EL ACTO (cero espera, cero zombies).
         """
         if not new_items:
             return
         import json
         from pathlib import Path
         existing_items = self._build_verified_market_catalog()
-        existing_map = {}
-        for it in existing_items:
-            key = it.get("portal_url") or it.get("portal_id") or it.get("id")
-            if key:
-                existing_map[key] = it
-        for it in new_items:
-            key = it.get("portal_url") or it.get("portal_id") or it.get("id")
-            if key:
-                existing_map[key] = it
+
         def _clean_surrogates(obj):
             if isinstance(obj, str):
                 return obj.encode('utf-16', 'surrogatepass').decode('utf-16', 'replace')
@@ -610,7 +608,81 @@ class MarketScraper:
                 return [_clean_surrogates(v) for v in obj]
             return obj
 
-        combined = _clean_surrogates(list(existing_map.values()))
+        if not live_sync:
+            existing_map = {}
+            for it in existing_items:
+                key = it.get("portal_url") or it.get("portal_id") or it.get("id")
+                if key:
+                    existing_map[key] = it
+            for it in new_items:
+                key = it.get("portal_url") or it.get("portal_id") or it.get("id")
+                if key:
+                    existing_map[key] = it
+            combined = _clean_surrogates(list(existing_map.values()))
+        else:
+            # Sincronización declarativa viva: purga inmediata en el momento del raspado
+            scraped_portals = set(
+                (it.get("primary_portal") or "").lower().strip()
+                for it in new_items if it.get("primary_portal")
+            )
+            scraped_provinces = set(
+                (it.get("province") or "").lower().strip()
+                for it in new_items if it.get("province")
+            )
+
+            # Mapa de nuevos items extraídos vivos
+            new_map = {}
+            for it in new_items:
+                key = str(it.get("portal_url") or it.get("portal_id") or it.get("id") or "").strip().lower()
+                if key:
+                    new_map[key] = it
+
+            final_items = []
+            purged_count = 0
+            updated_count = 0
+            preserved_galleries_count = 0
+
+            # Procesar catálogo existente
+            for old_it in existing_items:
+                old_portal = (old_it.get("primary_portal") or "").lower().strip()
+                old_prov = (old_it.get("province") or "").lower().strip()
+                old_key = str(old_it.get("portal_url") or old_it.get("portal_id") or old_it.get("id") or "").strip().lower()
+
+                # ¿Pertenece este anuncio antiguo a un portal y provincia que se acaban de raspar?
+                in_scraped_scope = (old_portal in scraped_portals) and (old_prov in scraped_provinces)
+
+                if in_scraped_scope:
+                    if old_key in new_map:
+                        # SIGUE VIVO: actualizar datos, preservando galería fotográfica si ya estaba enriquecida
+                        fresh_it = new_map.pop(old_key)
+                        old_images = old_it.get("images") or []
+                        fresh_images = fresh_it.get("images") or []
+                        if len(old_images) >= 10 and len(fresh_images) < len(old_images):
+                            fresh_it["images"] = old_images
+                            preserved_galleries_count += 1
+                        final_items.append(fresh_it)
+                        updated_count += 1
+                    else:
+                        # YA NO APARECE EN EL RASPADO VIVO: VENDIDO / DADO DE BAJA / CADUCADO
+                        # PURGA INMEDIATA EN EL ACTO
+                        purged_count += 1
+                else:
+                    # Inmueble de un portal o provincia fuera del alcance de este raspado concreto -> conservar
+                    final_items.append(old_it)
+
+            # Agregar los inmuebles totalmente nuevos que no estaban antes en catálogo
+            added_count = len(new_map)
+            for fresh_it in new_map.values():
+                final_items.append(fresh_it)
+
+            logger.info(
+                f"[Market Declarative Sync] Sincronización inmediata completada: "
+                f"{updated_count} actualizados, {added_count} nuevas altas, "
+                f"{purged_count} PURGADOS EN EL ACTO (ya no existen en origen), "
+                f"{preserved_galleries_count} fotos preservadas. Total catálogo: {len(final_items)}."
+            )
+            combined = _clean_surrogates(final_items)
+
         targets = [
             Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",

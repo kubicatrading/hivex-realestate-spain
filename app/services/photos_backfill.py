@@ -50,6 +50,61 @@ class PhotosBackfillWorker:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
 
+    def get_daily_quota(self) -> Dict[str, Any]:
+        """
+        Retorna y actualiza el estado de la cuota diaria de créditos Supadata (máx 10/día = 300/mes).
+        """
+        today_str = time.strftime("%Y-%m-%d", time.gmtime())
+        quota_paths = [
+            os.path.join(os.path.dirname(self.catalog_path), "supadata_backfill_quota.json"),
+            "/tmp/supadata_backfill_quota.json"
+        ]
+        data = {
+            "date": today_str,
+            "credits_used_today": 0,
+            "daily_budget": 10,
+            "monthly_budget": 300,
+            "credits_remaining_today": 10
+        }
+        for qp in quota_paths:
+            if os.path.exists(qp):
+                try:
+                    with open(qp, "r", encoding="utf-8") as f:
+                        saved = json.load(f)
+                    if saved.get("date") == today_str:
+                        data["credits_used_today"] = saved.get("credits_used_today", 0)
+                        break
+                except Exception:
+                    pass
+        data["credits_remaining_today"] = max(0, data["daily_budget"] - data["credits_used_today"])
+        return data
+
+    def record_idealista_credit_used(self) -> int:
+        """
+        Registra 1 crédito consumido para Idealista en la cuota diaria persistida.
+        """
+        today_str = time.strftime("%Y-%m-%d", time.gmtime())
+        quota = self.get_daily_quota()
+        quota["credits_used_today"] += 1
+        quota["date"] = today_str
+        quota["daily_budget"] = 10
+        quota["monthly_budget"] = 300
+        quota["credits_remaining_today"] = max(0, quota["daily_budget"] - quota["credits_used_today"])
+        quota["last_updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        quota_paths = [
+            os.path.join(os.path.dirname(self.catalog_path), "supadata_backfill_quota.json"),
+            "/tmp/supadata_backfill_quota.json"
+        ]
+        for qp in quota_paths:
+            try:
+                os.makedirs(os.path.dirname(qp), exist_ok=True)
+                with open(qp, "w", encoding="utf-8") as f:
+                    json.dump(quota, f, indent=2)
+            except Exception as e:
+                logger.debug(f"[PhotosBackfill] Error persistiendo cuota en {qp}: {e}")
+        return quota["credits_used_today"]
+
     def get_stats(self) -> Dict[str, Any]:
         """Retorna estadísticas sobre el estado de fotos del catálogo."""
         if not os.path.exists(self.catalog_path):
@@ -94,7 +149,8 @@ class PhotosBackfillWorker:
             "single_photo_count": single_photo_count,
             "completion_rate_pct": round((complete_count / total * 100), 1) if total > 0 else 0.0,
             "by_portal": by_portal,
-            "catalog_path": self.catalog_path
+            "catalog_path": self.catalog_path,
+            "supadata_daily_quota": self.get_daily_quota()
         }
 
     # =========================================================================
@@ -233,12 +289,13 @@ class PhotosBackfillWorker:
         self,
         max_items: int = 25,
         target_portal: Optional[str] = None,
-        allow_idealista_credits: bool = False
+        allow_idealista_credits: bool = True
     ) -> Dict[str, Any]:
         """
-        Ejecuta un pase de backfill silencioso sobre el catálogo.
-        Prioriza por defecto portales de coste cero (Pisos.com, Habitaclia, Fotocasa).
-        Si `allow_idealista_credits` es True, permite un cupo controlado de Idealista.
+        Ejecuta un pase de backfill silencioso sobre el catálogo:
+        1. Portales de coste cero (Pisos.com, Habitaclia, Fotocasa) se enriquecen sin límite de créditos.
+        2. Idealista consume de la bolsa exclusiva de 300 créditos/mes (estrictamente <= 10 créditos/día).
+           Prioriza oportunidades con 0-1 foto y mayor descuento/score.
         """
         if not os.path.exists(self.catalog_path):
             return {"error": "Catalog not found", "enriched": 0}
@@ -249,33 +306,65 @@ class PhotosBackfillWorker:
         except Exception as e:
             return {"error": f"Failed reading catalog: {e}", "enriched": 0}
 
-        # Seleccionar candidatos que tengan <= 1 foto o < 10 fotos
-        candidates = []
-        for idx, it in enumerate(items):
-            portal = it.get("primary_portal") or "Desconocido"
-            if target_portal and portal.lower() != target_portal.lower():
-                continue
+        free_candidates = []
+        idealista_candidates = []
 
-            # Si no se permiten créditos Supadata en este lote, omitir Idealista
-            if portal.lower() == "idealista" and not allow_idealista_credits:
+        for idx, it in enumerate(items):
+            portal = (it.get("primary_portal") or "Desconocido").lower()
+            if target_portal and portal != target_portal.lower():
                 continue
 
             imgs = it.get("images", [])
             if len(imgs) < 10:
-                candidates.append((idx, it, len(imgs)))
+                if "idealista" in portal:
+                    idealista_candidates.append((idx, it, len(imgs)))
+                else:
+                    free_candidates.append((idx, it, len(imgs)))
 
-        # Priorizar aquellos con 0 o 1 foto primero
-        candidates.sort(key=lambda x: x[2])
+        # Ordenar candidatos gratuitos: menos fotos primero
+        free_candidates.sort(key=lambda x: x[2])
 
-        total_candidates = len(candidates)
-        batch = candidates[:max_items]
+        # Ordenar candidatos Idealista:
+        # 1. Sin fotos (0 o 1) primero
+        # 2. Mayor descuento / score general
+        idealista_candidates.sort(
+            key=lambda x: (
+                0 if x[2] <= 1 else 1,
+                -float(x[1].get("overall_score") or x[1].get("discount_score") or 0.0),
+                -float(x[1].get("discount_percentage") or 0.0)
+            )
+        )
 
-        logger.info(f"[PhotosBackfill] Iniciando pase sobre {len(batch)} de {total_candidates} candidatos incompletos...")
+        quota = self.get_daily_quota()
+        credits_remaining_today = quota.get("credits_remaining_today", 10)
+
+        batch_to_process = []
+        # Añadir candidatos gratuitos hasta max_items
+        batch_to_process.extend([(*c, False) for c in free_candidates[:max_items]])
+
+        # Si se autoriza Idealista y quedan créditos hoy:
+        if allow_idealista_credits:
+            if credits_remaining_today > 0:
+                slots_left = max(0, max_items - len(batch_to_process))
+                idealista_to_take = min(credits_remaining_today, slots_left if slots_left > 0 else 5)
+                batch_to_process.extend([(*c, True) for c in idealista_candidates[:idealista_to_take]])
+            else:
+                logger.info(
+                    f"[PhotosBackfill] Cupo diario de 10 créditos Supadata alcanzado hoy ({quota['date']}). "
+                    f"Idealista en pausa hasta mañana para preservar los 300 créditos mensuales."
+                )
+
+        logger.info(
+            f"[PhotosBackfill] Procesando lote de {len(batch_to_process)} inmuebles "
+            f"(Gratuitos: {len(free_candidates)}, Idealista pendientes: {len(idealista_candidates)}, "
+            f"Créditos Idealista disponibles hoy: {credits_remaining_today}/10)..."
+        )
 
         enriched_count = 0
         enriched_details = []
+        idealista_credits_consumed = 0
 
-        for idx, it, initial_count in batch:
+        for idx, it, initial_count, is_idealista in batch_to_process:
             portal = (it.get("primary_portal") or "").lower()
             portal_url = it.get("portal_url") or (it.get("publications", [{}])[0].get("url") if it.get("publications") else None)
 
@@ -285,7 +374,6 @@ class PhotosBackfillWorker:
             new_imgs = []
             if "pisos.com" in portal or "pisos" in portal:
                 new_imgs = self.fetch_pisos_gallery(portal_url)
-                # Pausa ligera de cortesía (300ms)
                 time.sleep(0.3)
             elif "habitaclia" in portal:
                 new_imgs = self.fetch_habitaclia_gallery(portal_url)
@@ -293,12 +381,19 @@ class PhotosBackfillWorker:
             elif "fotocasa" in portal:
                 new_imgs = self.fetch_habitaclia_gallery(portal_url)
                 time.sleep(0.3)
-            elif "idealista" in portal and allow_idealista_credits:
+            elif "idealista" in portal and is_idealista:
+                # Comprobar antes de gastar que no hayamos superado los 10 créditos
+                current_quota = self.get_daily_quota()
+                if current_quota.get("credits_remaining_today", 0) <= 0:
+                    logger.info("[PhotosBackfill] Cupo diario completado en mitad del lote. Deteniendo Idealista.")
+                    break
+
                 new_imgs = self.fetch_idealista_gallery(portal_url)
+                self.record_idealista_credit_used()
+                idealista_credits_consumed += 1
                 time.sleep(1.5)
 
             if new_imgs and len(new_imgs) > initial_count:
-                # Actualizar item
                 items[idx]["images"] = new_imgs
                 enriched_count += 1
                 enriched_details.append({
@@ -315,10 +410,14 @@ class PhotosBackfillWorker:
             self._save_catalog(items)
             logger.info(f"[PhotosBackfill] Catálogo persistido con éxito ({enriched_count} oportunidades enriquecidas).")
 
+        updated_quota = self.get_daily_quota()
         return {
-            "processed": len(batch),
+            "processed": len(batch_to_process),
             "enriched": enriched_count,
-            "remaining_candidates": total_candidates - enriched_count,
+            "idealista_credits_used_batch": idealista_credits_consumed,
+            "supadata_quota": updated_quota,
+            "remaining_free_candidates": max(0, len(free_candidates) - enriched_count),
+            "remaining_idealista_candidates": len(idealista_candidates) - idealista_credits_consumed,
             "details": enriched_details
         }
 
@@ -349,11 +448,12 @@ _backfill_running = False
 
 def start_periodic_backfill_worker(
     interval_seconds: int = 1800,
-    batch_size: int = 30
+    batch_size: int = 25
 ):
     """
     Inicia un worker daemon autónomo en segundo plano que enriquece silenciosamente
     el catálogo de fotos cada `interval_seconds` (por defecto cada 30 minutos).
+    Aplica rigurosamente la cuota de máximo 10 créditos Supadata diarios para Idealista.
     """
     global _backfill_thread, _backfill_running
     if _backfill_running:
@@ -368,20 +468,17 @@ def start_periodic_backfill_worker(
 
         while _backfill_running:
             try:
-                # 1. Pase de coste cero (Pisos.com, Habitaclia, Fotocasa)
-                res_free = worker.run_backfill_batch(
+                # Ejecutar lote respetando la bolsa diaria de 10 créditos Supadata para Idealista
+                res = worker.run_backfill_batch(
                     max_items=batch_size,
-                    allow_idealista_credits=False
+                    allow_idealista_credits=True
                 )
-                if res_free.get("enriched", 0) > 0:
+                if res.get("enriched", 0) > 0:
                     logger.info(
-                        f"[PhotosBackfill Daemon] Pase gratuito completado: "
-                        f"{res_free.get('enriched')} inmuebles enriquecidos. Restantes: {res_free.get('remaining_candidates')}"
+                        f"[PhotosBackfill Daemon] Ciclo completado: "
+                        f"{res.get('enriched')} enriquecidos (Idealista créditos hoy: "
+                        f"{res.get('supadata_quota', {}).get('credits_used_today')}/10)."
                     )
-
-                # 2. Pase dosificado de Idealista (máximo 3 peticiones por ciclo para no agotar créditos mensuales)
-                # 3 peticiones cada 30 min = solo si quedan créditos y espaciadas
-                # Omitir si ya no quedan candidatos gratuitos
             except Exception as e:
                 logger.error(f"[PhotosBackfill Daemon] Error en ciclo programado: {e}")
 
