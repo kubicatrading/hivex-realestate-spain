@@ -7,7 +7,7 @@ Transforma texto y enlaces Markdown en objetos de oportunidad estructurados para
 import re
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from app.engine.rental_reference import RentalReferenceEngine
 from app.engine.kpi_calculator import KPICalculator
