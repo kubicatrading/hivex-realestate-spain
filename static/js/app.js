@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tabButtons = document.querySelectorAll('.tab-btn');
     const viewDeals = document.getElementById('view-deals');
     const viewSources = document.getElementById('view-sources');
+    const viewAssistant = document.getElementById('view-assistant');
 
     // DOM Elements - Deals View
     const dealsContainer = document.getElementById('deals-container');
@@ -272,11 +273,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetTab === 'deals') {
                 viewDeals.classList.remove('hidden');
                 viewSources.classList.add('hidden');
+                if (viewAssistant) viewAssistant.classList.add('hidden');
                 setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 80);
             } else if (targetTab === 'sources') {
                 viewDeals.classList.add('hidden');
                 viewSources.classList.remove('hidden');
+                if (viewAssistant) viewAssistant.classList.add('hidden');
                 fetchSourcesStatus();
+            } else if (targetTab === 'assistant') {
+                viewDeals.classList.add('hidden');
+                viewSources.classList.add('hidden');
+                if (viewAssistant) viewAssistant.classList.remove('hidden');
+                fetchSavedConsultations();
+                fetchTelegramBotStatus();
             }
         });
     });
@@ -3321,6 +3330,388 @@ document.addEventListener('DOMContentLoaded', () => {
             toast.remove();
         }, 4000);
     }
+
+    // ==============================================================================
+    // ASESOR INMOBILIARIO CONVERSACIONAL & REPOSITORIO DE CONSULTAS TELEGRAM
+    // ==============================================================================
+
+    window._savedConsultations = [];
+
+    async function fetchSavedConsultations() {
+        const repoList = document.getElementById('consultations-repository-list');
+        const countBadge = document.getElementById('repository-count-badge');
+        if (!repoList) return;
+
+        try {
+            const resp = await fetch('/api/v1/consultations', {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+            if (!resp.ok) {
+                repoList.innerHTML = '<div class="empty-repo-state"><p>No se pudo cargar el repositorio de consultas.</p></div>';
+                return;
+            }
+
+            const data = await resp.json();
+            const consultations = data.consultations || [];
+            window._savedConsultations = consultations;
+
+            if (countBadge) {
+                countBadge.textContent = `${consultations.length} consulta${consultations.length !== 1 ? 's' : ''}`;
+            }
+
+            if (consultations.length === 0) {
+                repoList.innerHTML = `
+                    <div class="empty-repo-state">
+                        <i data-lucide="inbox"></i>
+                        <p>Aún no hay consultas o alertas guardadas en el repositorio.</p>
+                        <span style="font-size: 0.8rem; color: #64748b;">Envía una consulta desde Telegram o usa el simulador superior para crear tu primer grupo de oportunidades.</span>
+                    </div>
+                `;
+                if (window.lucide) lucide.createIcons();
+                return;
+            }
+
+            const favsSet = getFavoritesSet();
+
+            repoList.innerHTML = consultations.map(c => {
+                const isAlert = Boolean(c.is_alert);
+                const queryTypeLabel = isAlert ? 'Alerta Programada' : (
+                    c.query_type === 'DISTRICT_ANALYSIS' ? 'Análisis de Distrito' :
+                    c.query_type === 'ROI_BTL_CALC' ? 'Rentabilidad BTL' :
+                    c.query_type === 'SCORING_CROSSREF' ? 'Scoring & Top' : 'Búsqueda de Oportunidades'
+                );
+
+                const dateStr = c.created_at ? new Date(c.created_at).toLocaleString('es-ES', {
+                    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                }) : '';
+
+                const opps = c.opportunities || [];
+
+                const oppsHtml = opps.length > 0 ? `
+                    <div class="group-opportunities-grid">
+                        ${opps.map(opp => {
+                            const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+                            const isFav = favsSet.has(oppIdUpper);
+                            const price = opp.listing_price || 0;
+                            const mktVal = opp.estimated_reference_value || price;
+                            const discRaw = parseFloat(opp.discount_percentage || 0);
+
+                            // Formato de porcentaje vs mercado: (-15%) si está por debajo, (+15%) si está por encima
+                            let pctLabel = '';
+                            let pctClass = '';
+                            if (!isNaN(discRaw) && Math.abs(discRaw) > 0.01) {
+                                if (discRaw > 0) {
+                                    pctLabel = `(-${discRaw.toFixed(1)}%)`;
+                                    pctClass = 'discount-negative';
+                                } else {
+                                    pctLabel = `(+${Math.abs(discRaw).toFixed(1)}%)`;
+                                    pctClass = 'discount-positive';
+                                }
+                            }
+
+                            const imgSrc = (opp.images && opp.images.length > 0) ? opp.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80';
+                            const yieldVal = parseFloat(opp.rental_yield || 0);
+                            const scoreVal = parseFloat(opp.overall_score || 80);
+
+                            return `
+                                <div class="mini-opp-card" data-id="${escapeHtml(opp.id)}">
+                                    <button class="btn-fav-card ${isFav ? 'is-favorite' : ''}" data-id="${escapeHtml(opp.id)}" title="${isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}">
+                                        <svg class="heart-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="${isFav ? 'currentColor' : 'none'}">
+                                            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+                                        </svg>
+                                    </button>
+                                    <div class="mini-opp-thumb-wrapper">
+                                        <img src="${escapeHtml(imgSrc)}" class="mini-opp-thumb" alt="${escapeHtml(opp.title)}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80'">
+                                    </div>
+                                    <div class="mini-opp-content">
+                                        <h4 class="mini-opp-title" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h4>
+                                        <span class="mini-opp-location">
+                                            <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> ${escapeHtml(opp.locality || opp.province || 'España')}
+                                        </span>
+                                        <div class="mini-opp-pricing">
+                                            <div class="mini-opp-price-row">
+                                                <span class="mini-opp-price">${price.toLocaleString('es-ES')} €</span>
+                                                <span class="mini-opp-discount ${pctClass}">${pctLabel}</span>
+                                            </div>
+                                            <div class="mini-opp-market-val">Ref. Mercado: ${mktVal.toLocaleString('es-ES')} €</div>
+                                        </div>
+                                        <div class="mini-opp-metrics-chips">
+                                            ${yieldVal > 0 ? `<span class="mini-chip yield">Yield ${yieldVal.toFixed(1)}%</span>` : ''}
+                                            <span class="mini-chip score">Score ${scoreVal.toFixed(0)}/100</span>
+                                        </div>
+                                        <div class="mini-opp-footer">
+                                            <button class="btn btn-secondary btn-sm btn-view-consultation-opp" data-id="${escapeHtml(opp.id)}" style="width: 100%; justify-content: center;">
+                                                <i data-lucide="external-link" style="width: 14px; height: 14px;"></i> Ver Ficha
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : `
+                    <div style="background: rgba(15, 23, 42, 0.4); border-radius: 6px; padding: 12px; font-size: 0.82rem; color: #94a3b8; text-align: center;">
+                        <i data-lucide="clock" style="width: 14px; height: 14px; vertical-align: middle;"></i> Alerta monitorizando en segundo plano. Notificará a Telegram en cuanto ingrese un nuevo activo que cumpla con los filtros.
+                    </div>
+                `;
+
+                return `
+                    <div class="consultation-group-card ${isAlert ? 'is-alert-group' : 'is-search-group'}" data-consultation-id="${c.id}">
+                        <div class="group-header">
+                            <div class="group-title-area">
+                                <h3 class="group-title">
+                                    <i data-lucide="${isAlert ? 'bell-ring' : 'search'}" style="color: ${isAlert ? '#fbbf24' : '#60a5fa'};"></i>
+                                    ${escapeHtml(c.title)}
+                                </h3>
+                                <div class="group-meta-badges">
+                                    <span class="meta-badge author"><i data-lucide="user" style="width: 12px; height: 12px;"></i> ${escapeHtml(c.user_name || 'Usuario')}</span>
+                                    <span class="meta-badge date"><i data-lucide="calendar" style="width: 12px; height: 12px;"></i> ${dateStr}</span>
+                                    <span class="meta-badge ${isAlert ? 'type-alert' : 'type-search'}">${queryTypeLabel}</span>
+                                    <span class="meta-badge count">${c.matched_count || opps.length} activos</span>
+                                </div>
+                            </div>
+                            <div class="group-actions">
+                                <button class="btn-group-action btn-refresh-group" data-id="${c.id}" title="Re-evaluar mercado">
+                                    <i data-lucide="refresh-cw" style="width: 14px; height: 14px;"></i> Re-evaluar
+                                </button>
+                                <button class="btn-group-action btn-delete btn-delete-group" data-id="${c.id}" title="Eliminar consulta">
+                                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i> Eliminar
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="group-prompt-box">
+                            <i data-lucide="message-square"></i>
+                            <div>
+                                <strong>Prompt / Consulta recibida:</strong> «${escapeHtml(c.description)}»
+                            </div>
+                        </div>
+
+                        ${c.ai_summary ? `
+                            <div class="group-summary-box">
+                                <strong><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: -2px;"></i> Diagnóstico del Asesor HIVEX:</strong>
+                                ${escapeHtml(c.ai_summary)}
+                            </div>
+                        ` : ''}
+
+                        ${oppsHtml}
+                    </div>
+                `;
+            }).join('');
+
+            if (window.lucide) lucide.createIcons();
+
+            // Bind listeners inside repository
+            repoList.querySelectorAll('.btn-view-consultation-opp').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const oppId = btn.dataset.id;
+                    if (window.openPropertyDetailModal) {
+                        window.openPropertyDetailModal(oppId);
+                    }
+                });
+            });
+
+            repoList.querySelectorAll('.btn-fav-card').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const oppId = btn.dataset.id;
+                    if (window.toggleFavorite) {
+                        window.toggleFavorite(oppId);
+                        const isFavNow = isOpportunityFavorite(oppId);
+                        btn.classList.toggle('is-favorite', isFavNow);
+                        const svg = btn.querySelector('svg');
+                        if (svg) svg.setAttribute('fill', isFavNow ? 'currentColor' : 'none');
+                    }
+                });
+            });
+
+            repoList.querySelectorAll('.btn-refresh-group').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const cid = btn.dataset.id;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Evaluando...';
+                    if (window.lucide) lucide.createIcons();
+                    await refreshConsultation(cid);
+                });
+            });
+
+            repoList.querySelectorAll('.btn-delete-group').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const cid = btn.dataset.id;
+                    if (confirm('¿Deseas eliminar esta consulta del repositorio?')) {
+                        await deleteConsultation(cid);
+                    }
+                });
+            });
+
+        } catch (err) {
+            console.error('Error fetching consultations:', err);
+            repoList.innerHTML = '<div class="empty-repo-state"><p>Error al cargar el repositorio de consultas.</p></div>';
+        }
+    }
+
+    async function fetchTelegramBotStatus() {
+        try {
+            const resp = await fetch('/api/v1/telegram/status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            const badgeStatus = document.getElementById('tg-bot-status-text');
+            if (badgeStatus) {
+                badgeStatus.textContent = data.bot_configured ? 'Bot Conectado' : 'Token Pendiente';
+            }
+
+            const metricAlerts = document.getElementById('asst-metric-alerts');
+            if (metricAlerts) metricAlerts.textContent = data.active_alerts || 0;
+
+            const metricCons = document.getElementById('asst-metric-consultations');
+            if (metricCons) metricCons.textContent = data.total_consultations || 0;
+
+            const metricUsers = document.getElementById('asst-metric-users');
+            if (metricUsers) metricUsers.textContent = data.linked_users || 0;
+
+        } catch (e) {
+            console.warn('Error fetching telegram bot status:', e);
+        }
+    }
+
+    async function refreshConsultation(id) {
+        try {
+            const resp = await fetch(`/api/v1/consultations/${id}/refresh`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+            if (resp.ok) {
+                showToast('Consulta re-evaluada contra el mercado en tiempo real');
+                await fetchSavedConsultations();
+            } else {
+                showToast('Error al re-evaluar la consulta', 'error');
+            }
+        } catch (e) {
+            showToast('Error de conexión al re-evaluar', 'error');
+        }
+    }
+
+    async function deleteConsultation(id) {
+        try {
+            const resp = await fetch(`/api/v1/consultations/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+            if (resp.ok) {
+                showToast('Consulta eliminada del repositorio');
+                await fetchSavedConsultations();
+                await fetchTelegramBotStatus();
+            } else {
+                showToast('No se pudo eliminar la consulta', 'error');
+            }
+        } catch (e) {
+            showToast('Error al conectar para eliminar', 'error');
+        }
+    }
+
+    function setupAdvisorSimulator() {
+        const btnSubmit = document.getElementById('btn-submit-advisor-query');
+        const promptInput = document.getElementById('advisor-prompt-input');
+        const statusBox = document.getElementById('advisor-query-status');
+        const btnRefresh = document.getElementById('btn-refresh-consultations');
+
+        if (btnRefresh) {
+            btnRefresh.addEventListener('click', () => {
+                fetchSavedConsultations();
+                fetchTelegramBotStatus();
+                showToast('Repositorio de consultas actualizado');
+            });
+        }
+
+        // Quick prompt tags
+        document.querySelectorAll('.prompt-tag').forEach(tag => {
+            tag.addEventListener('click', () => {
+                if (promptInput) {
+                    promptInput.value = tag.dataset.prompt;
+                    promptInput.focus();
+                }
+            });
+        });
+
+        // Submit query
+        async function doSubmit() {
+            if (!promptInput) return;
+            const promptText = promptInput.value.trim();
+            if (!promptText) {
+                showToast('Por favor escribe un prompt o selecciona una sugerencia', 'error');
+                return;
+            }
+
+            if (btnSubmit) btnSubmit.disabled = true;
+            if (statusBox) {
+                statusBox.classList.remove('hidden');
+                statusBox.className = 'advisor-query-status loading';
+                statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Procesando consulta con el Asesor Inmobiliario HIVEX...';
+                if (window.lucide) lucide.createIcons();
+            }
+
+            try {
+                const resp = await fetch('/api/v1/telegram/simulate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify({
+                        prompt: promptText,
+                        user_name: 'jsaavedra'
+                    })
+                });
+
+                if (resp.ok) {
+                    const result = await resp.json();
+                    if (statusBox) {
+                        statusBox.className = 'advisor-query-status';
+                        statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
+                        statusBox.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+                        statusBox.style.color = '#34d399';
+                        statusBox.innerHTML = `✅ <strong>${escapeHtml(result.title)}</strong> generada con éxito (${result.matched_count} activos encontrados).`;
+                    }
+                    promptInput.value = '';
+                    showToast('Consulta guardada en el repositorio');
+                    await fetchSavedConsultations();
+                    await fetchTelegramBotStatus();
+                } else {
+                    throw new Error('Error en el servidor');
+                }
+            } catch (err) {
+                if (statusBox) {
+                    statusBox.className = 'advisor-query-status';
+                    statusBox.style.background = 'rgba(239, 68, 68, 0.15)';
+                    statusBox.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+                    statusBox.style.color = '#f87171';
+                    statusBox.textContent = '❌ Error al procesar la consulta con el Asesor.';
+                }
+            } finally {
+                if (btnSubmit) btnSubmit.disabled = false;
+            }
+        }
+
+        if (btnSubmit) {
+            btnSubmit.addEventListener('click', doSubmit);
+        }
+
+        if (promptInput) {
+            promptInput.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    doSubmit();
+                }
+            });
+        }
+    }
+
+    // Initialize Advisor Simulator
+    setupAdvisorSimulator();
 
     // Initial Auth Check
     checkAuthSession();

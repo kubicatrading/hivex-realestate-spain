@@ -37,8 +37,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
-    # Google Maps API Key for Street View Static Facade Photos
-    GOOGLE_MAPS_API_KEY: str = ""
+    # AI & Speech-to-Text Keys (Optional, fallback built-in engine active if empty)
+    OPENAI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    TELEGRAM_AUTHORIZED_USERS: str = ""  # Comma-separated list of usernames or telegram user IDs allowed
 
     model_config = ConfigDict(env_file=".env", extra="ignore")
 

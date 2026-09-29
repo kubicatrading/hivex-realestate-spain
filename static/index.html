@@ -73,6 +73,9 @@
                 <button class="tab-btn" data-tab="sources">
                     <i data-lucide="activity"></i> Monitor de Fuentes & Ingesta
                 </button>
+                <button class="tab-btn" data-tab="assistant">
+                    <i data-lucide="bot"></i> Consultas & Asesor Telegram
+                </button>
             </div>
 
             <div class="kpi-bar">
@@ -236,6 +239,93 @@
             <div id="sources-grid" class="sources-grid">
                 <!-- Rendered dynamically by app.js -->
             </div>
+        </main>
+
+        <!-- VIEW 3: Asesor Inmobiliario Conversacional & Repositorio de Consultas Telegram -->
+        <main id="view-assistant" class="main-content hidden">
+            <!-- Header Banner -->
+            <section class="sources-banner glass-panel">
+                <div class="banner-title">
+                    <h2><i data-lucide="bot"></i> Asesor Inmobiliario Conversacional &amp; Repositorio</h2>
+                    <p>Banco de memoria persistente, inteligencia de mercado y repositorio de consultas agrupadas creadas desde Telegram y plataforma.</p>
+                </div>
+                <div class="assistant-header-actions">
+                    <button id="btn-refresh-consultations" class="btn btn-secondary">
+                        <i data-lucide="refresh-cw"></i> Actualizar Repositorio
+                    </button>
+                </div>
+            </section>
+
+            <!-- Telegram Bot Status Bar & Simulator -->
+            <section class="assistant-cockpit-grid">
+                <!-- Status & Instructions Card -->
+                <div class="glass-panel assistant-status-card">
+                    <div class="assistant-status-header">
+                        <div class="status-indicator-badge active" id="tg-bot-status-badge">
+                            <span class="pulse-dot"></span>
+                            <span id="tg-bot-status-text">Bot Conectado</span>
+                        </div>
+                        <span class="tg-bot-handle">@HivexRealEstateBot</span>
+                    </div>
+                    <div class="assistant-metrics-row">
+                        <div class="asst-metric">
+                            <span class="asst-metric-label">Alertas Activas</span>
+                            <span class="asst-metric-val" id="asst-metric-alerts">0</span>
+                        </div>
+                        <div class="asst-metric">
+                            <span class="asst-metric-label">Consultas Guardadas</span>
+                            <span class="asst-metric-val" id="asst-metric-consultations">0</span>
+                        </div>
+                        <div class="asst-metric">
+                            <span class="asst-metric-label">Usuarios Vinculados</span>
+                            <span class="asst-metric-val" id="asst-metric-users">0</span>
+                        </div>
+                    </div>
+                    <div class="tg-instructions-box">
+                        <p class="tg-instructions-title"><i data-lucide="info"></i> <strong>Instrucciones Asesor Telegram:</strong></p>
+                        <p>1. Vincula tu cuenta de Telegram enviando: <code>/vincular &lt;tu_usuario_hivex&gt;</code>.</p>
+                        <p>2. Escribe preguntas o <strong>graba notas de voz</strong> con tus criterios (precio, zona, ROI, scoring, alertas).</p>
+                        <p>3. Todas las consultas y oportunidades quedan agrupadas en este repositorio.</p>
+                    </div>
+                </div>
+
+                <!-- Interactive Prompt / Voice Simulator -->
+                <div class="glass-panel assistant-prompt-card">
+                    <div class="prompt-card-header">
+                        <h3><i data-lucide="sparkles"></i> Simular Consulta / Prompt al Asesor</h3>
+                        <span class="prompt-hint">Prueba prompts directos y genera grupos de oportunidades</span>
+                    </div>
+                    <div class="prompt-input-wrapper">
+                        <textarea id="advisor-prompt-input" class="advisor-textarea" rows="3" placeholder="Ej: Busca oportunidades en Valencia con descuento superior al 15% y precio menor a 180.000€... o 'Avísame cuando haya pisos en Madrid con rentabilidad mayor al 8%'"></textarea>
+                        <div class="prompt-actions-bar">
+                            <div class="quick-prompts-tags">
+                                <span class="prompt-tag" data-prompt="Busca oportunidades en Valencia con descuento superior al 15% y precio menor a 180.000€">Valencia dto &gt; 15%</span>
+                                <span class="prompt-tag" data-prompt="Avísame de oportunidades en Madrid con rentabilidad mayor al 8% y precio menor a 200.000€">Alerta Madrid Yield &gt; 8%</span>
+                                <span class="prompt-tag" data-prompt="Cuáles son las 3 mejores oportunidades en Alicante por score">Top Alicante Score</span>
+                                <span class="prompt-tag" data-prompt="Busca solares o terrenos urbanizables en Barcelona">Solares Barcelona</span>
+                            </div>
+                            <button id="btn-submit-advisor-query" class="btn btn-primary">
+                                <i data-lucide="send"></i> Consultar Asesor
+                            </button>
+                        </div>
+                    </div>
+                    <div id="advisor-query-status" class="advisor-query-status hidden"></div>
+                </div>
+            </section>
+
+            <!-- Repositorio de Grupos de Consultas -->
+            <section class="consultations-repository-section">
+                <div class="repository-section-header">
+                    <h3><i data-lucide="folder-git-2"></i> Repositorio de Consultas &amp; Alertas Guardadas</h3>
+                    <span id="repository-count-badge" class="badge-count">0 consultas</span>
+                </div>
+                <div id="consultations-repository-list" class="consultations-repository-list">
+                    <div class="empty-repo-state">
+                        <i data-lucide="loader-2" class="spin"></i>
+                        <p>Cargando repositorio de consultas...</p>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 

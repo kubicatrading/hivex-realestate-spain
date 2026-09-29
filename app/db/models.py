@@ -157,7 +157,51 @@ class User(Base):
     salt = Column(String(64), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     is_admin = Column(Boolean, default=True, nullable=False)
+    telegram_id = Column(String(50), unique=True, index=True, nullable=True)
+    telegram_username = Column(String(100), index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    messages = relationship("TelegramConversationMessage", back_populates="user")
+    consultations = relationship("SavedConsultation", back_populates="user")
+
+class TelegramConversationMessage(Base):
+    __tablename__ = "telegram_conversation_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_chat_id = Column(String(50), index=True, nullable=False)
+    telegram_user_id = Column(String(50), index=True, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    role = Column(String(20), nullable=False)  # "user", "assistant", "system"
+    content_type = Column(String(20), default="text")  # "text", "voice", "audio", "query_result"
+    content = Column(Text, nullable=False)
+    transcription = Column(Text, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="messages")
+
+class SavedConsultation(Base):
+    __tablename__ = "saved_consultations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_name = Column(String(100), nullable=False, default="Usuario Telegram")
+    telegram_chat_id = Column(String(50), nullable=True)
+    title = Column(String(255), nullable=False)  # Nombre de la alerta / consulta
+    description = Column(Text, nullable=False)    # Prompt o texto original del mensaje/audio
+    query_type = Column(String(50), default="SEARCH_OPPORTUNITIES") # SEARCH_OPPORTUNITIES, DISTRICT_ANALYSIS, ROI_BTL_CALC, SCORING_CROSSREF, SCHEDULED_ALERT, ADVISORY
+    criteria_json = Column(Text, default="{}")    # JSON con criterios parseados
+    matched_opportunity_ids_json = Column(Text, default="[]") # IDs de oportunidades encontradas
+    matched_count = Column(Integer, default=0)
+    ai_summary = Column(Text, nullable=True)      # Resumen / respuesta del asesor inmobiliario
+    is_alert = Column(Boolean, default=False)
+    alert_frequency = Column(String(20), default="DAILY") # INSTANT, DAILY, WEEKLY
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="consultations")
+
 
 

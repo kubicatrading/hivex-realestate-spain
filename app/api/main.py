@@ -29,7 +29,15 @@ import json
 
 from sqlalchemy import text
 from app.db.session import get_db, Base, engine
-from app.db.models import Opportunity, Auction, StrategyType, PipelineSyncState
+from app.db.models import (
+    Opportunity,
+    Auction,
+    StrategyType,
+    PipelineSyncState,
+    SavedConsultation,
+    TelegramConversationMessage,
+    User
+)
 from app.connectors.boe_scraper import BOESubastasScraper
 from app.connectors.catastro_client import CatastroClient
 from app.connectors.ine_client import INEClient
@@ -329,6 +337,14 @@ def startup_event():
         start_periodic_backfill_worker(interval_seconds=1800, batch_size=25)
     except Exception as e_backfill:
         print(f"Advertencia al iniciar Worker de Backfill de Fotos: {e_backfill}")
+
+    # 3. Iniciar el Polling del Asesor de Telegram en segundo plano (si hay token configurado)
+    try:
+        import asyncio
+        from app.services.telegram_advisor_bot import telegram_advisor_bot
+        asyncio.create_task(telegram_advisor_bot.start_polling())
+    except Exception as e_tg:
+        print(f"Advertencia al iniciar Polling de Telegram: {e_tg}")
 
 @app.get("/")
 @app.get("/api/index.py")
@@ -808,6 +824,165 @@ async def trigger_cockpit_health_alert(
     return {
         "status": "success" if result.get("status") == "sent" else "error",
         "health_result": result
+    }
+
+# ==============================================================================
+# TELEGRAM ADVISOR & SAVED CONSULTATIONS REPOSITORY ENDPOINTS
+# ==============================================================================
+
+class TelegramSimulationRequest(BaseModel):
+    prompt: str
+    user_name: Optional[str] = "jsaavedra"
+    telegram_chat_id: Optional[str] = "web-simulation"
+
+@app.post("/api/v1/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Endpoint Webhook para recibir updates de la API de Telegram en tiempo real.
+    Procesa mensajes de texto y notas de voz para el Asesor Inmobiliario HIVEX.
+    """
+    try:
+        data = await request.json()
+        from app.services.telegram_advisor_bot import telegram_advisor_bot
+        res = await telegram_advisor_bot.process_update(data)
+        return {"ok": True, "result": res}
+    except Exception as e:
+        print(f"Error en webhook de Telegram: {e}")
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/v1/telegram/simulate")
+async def simulate_telegram_query(
+    req: TelegramSimulationRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Permite enviar una consulta o prompt al Asesor Inmobiliario directamente desde la plataforma web
+    o mediante API de pruebas, ejecutando la misma lógica conversacional y guardándola en el repositorio.
+    """
+    user_name = req.user_name or "jsaavedra"
+    if current_user and current_user.get("sub"):
+        user_name = current_user.get("sub")
+
+    from app.engine.advisor_engine import advisor_engine
+    res = await advisor_engine.process_user_query(
+        user_name=user_name,
+        telegram_chat_id=req.telegram_chat_id or "web-simulation",
+        prompt_text=req.prompt,
+        db=db
+    )
+    return res
+
+@app.get("/api/v1/consultations")
+def get_saved_consultations(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Recupera el repositorio de consultas y alertas creadas desde Telegram o web,
+    enriqueciendo cada registro con las tarjetas completas de las oportunidades encontradas.
+    """
+    from app.engine.advisor_engine import advisor_engine
+    consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc()).all()
+
+    # Pre-cargar catálogo de oportunidades para indexar rápido por ID
+    all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
+    opps_by_id = {str(o.get("id")).strip().upper(): o for o in all_opps}
+
+    result = []
+    for c in consultations:
+        matched_ids = []
+        if c.matched_opportunity_ids_json:
+            try:
+                matched_ids = json.loads(c.matched_opportunity_ids_json)
+            except Exception:
+                pass
+
+        # Obtener las oportunidades completas para renderizar tarjetas en el frontend
+        matched_cards = []
+        for mid in matched_ids[:12]:
+            clean_mid = str(mid).strip().upper()
+            if clean_mid in opps_by_id:
+                matched_cards.append(opps_by_id[clean_mid])
+
+        criteria = {}
+        if c.criteria_json:
+            try:
+                criteria = json.loads(c.criteria_json)
+            except Exception:
+                pass
+
+        result.append({
+            "id": c.id,
+            "title": c.title,
+            "user_name": c.user_name,
+            "description": c.description,
+            "query_type": c.query_type,
+            "criteria": criteria,
+            "matched_count": c.matched_count,
+            "ai_summary": c.ai_summary,
+            "is_alert": c.is_alert,
+            "alert_frequency": c.alert_frequency,
+            "is_active": c.is_active,
+            "created_at": c.created_at.isoformat() if c.created_at else "",
+            "opportunities": matched_cards
+        })
+
+    return {"consultations": result, "total": len(result)}
+
+@app.delete("/api/v1/consultations/{consultation_id}")
+def delete_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Elimina una consulta o alerta del repositorio."""
+    item = db.query(SavedConsultation).filter(SavedConsultation.id == consultation_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Consulta no encontrada")
+    db.delete(item)
+    db.commit()
+    return {"status": "success", "deleted_id": consultation_id}
+
+@app.post("/api/v1/consultations/{consultation_id}/refresh")
+async def refresh_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Re-ejecuta una consulta contra el catálogo en vivo para actualizar oportunidades."""
+    item = db.query(SavedConsultation).filter(SavedConsultation.id == consultation_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Consulta no encontrada")
+
+    from app.engine.advisor_engine import advisor_engine
+    res = await advisor_engine.process_user_query(
+        user_name=item.user_name,
+        telegram_chat_id=item.telegram_chat_id or "web-refresh",
+        prompt_text=item.description,
+        db=db
+    )
+    return res
+
+@app.get("/api/v1/telegram/status")
+def get_telegram_status(db: Session = Depends(get_db)):
+    """Devuelve el estado de conectividad del bot de Telegram y estadísticas de uso."""
+    token = settings.TELEGRAM_BOT_TOKEN or os.getenv("TELEGRAM_BOT_TOKEN", "")
+    bot_configured = bool(token)
+
+    total_consultations = db.query(SavedConsultation).count()
+    active_alerts = db.query(SavedConsultation).filter(SavedConsultation.is_alert == True, SavedConsultation.is_active == True).count()
+    total_messages = db.query(TelegramConversationMessage).count()
+    linked_users = db.query(User).filter(User.telegram_id.isnot(None)).count()
+
+    return {
+        "bot_configured": bot_configured,
+        "token_mask": f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else "No configurado",
+        "total_consultations": total_consultations,
+        "active_alerts": active_alerts,
+        "total_messages": total_messages,
+        "linked_users": linked_users,
+        "webhook_url": f"{settings.PLATFORM_BASE_URL.rstrip('/')}/api/v1/telegram/webhook"
     }
 
 @app.get("/api/v1/opportunities")
