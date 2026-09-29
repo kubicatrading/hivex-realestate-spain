@@ -14,6 +14,8 @@ if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"
     del os.environ["SSL_CERT_DIR"]
 
 import time
+import logging
+logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
