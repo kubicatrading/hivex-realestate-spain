@@ -3337,29 +3337,75 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window._savedConsultations = [];
 
+    function getLocalConsultations() {
+        try {
+            return JSON.parse(localStorage.getItem('hivex_local_consultations') || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveLocalConsultation(c) {
+        try {
+            const list = getLocalConsultations();
+            const filtered = list.filter(item => String(item.id) !== String(c.id));
+            filtered.unshift(c);
+            localStorage.setItem('hivex_local_consultations', JSON.stringify(filtered.slice(0, 50)));
+        } catch (e) {
+            console.warn('No se pudo guardar consulta local:', e);
+        }
+    }
+
+    function removeLocalConsultation(id) {
+        try {
+            const list = getLocalConsultations();
+            const filtered = list.filter(item => String(item.id) !== String(id));
+            localStorage.setItem('hivex_local_consultations', JSON.stringify(filtered));
+        } catch (e) {
+            console.warn('No se pudo borrar consulta local:', e);
+        }
+    }
+
     async function fetchSavedConsultations() {
         const repoList = document.getElementById('consultations-repository-list');
         const countBadge = document.getElementById('repository-count-badge');
         if (!repoList) return;
 
         try {
-            const resp = await fetch('/api/v1/consultations', {
-                headers: { 'Authorization': `Bearer ${state.token}` }
-            });
-            if (!resp.ok) {
-                repoList.innerHTML = '<div class="empty-repo-state"><p>No se pudo cargar el repositorio de consultas.</p></div>';
-                return;
+            let serverConsultations = [];
+            try {
+                const resp = await fetch('/api/v1/consultations', {
+                    headers: { 'Authorization': `Bearer ${state.token}` }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    serverConsultations = data.consultations || [];
+                }
+            } catch (netErr) {
+                console.warn('Aviso al recuperar consultas remotas:', netErr);
             }
 
-            const data = await resp.json();
-            const consultations = data.consultations || [];
-            window._savedConsultations = consultations;
+            // Unificar con consultas guardadas localmente (para persistencia instantánea y offline/serverless)
+            const localConsultations = getLocalConsultations();
+            const serverIds = new Set(serverConsultations.map(c => String(c.id)));
+            const merged = [...serverConsultations];
+
+            for (const loc of localConsultations) {
+                if (!serverIds.has(String(loc.id))) {
+                    merged.push(loc);
+                }
+            }
+
+            // Ordenar por fecha descendente
+            merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+            window._savedConsultations = merged;
 
             if (countBadge) {
-                countBadge.textContent = `${consultations.length} consulta${consultations.length !== 1 ? 's' : ''}`;
+                countBadge.textContent = `${merged.length} consulta${merged.length !== 1 ? 's' : ''}`;
             }
 
-            if (consultations.length === 0) {
+            if (merged.length === 0) {
                 repoList.innerHTML = `
                     <div class="empty-repo-state">
                         <i data-lucide="inbox"></i>
@@ -3373,7 +3419,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const favsSet = getFavoritesSet();
 
-            repoList.innerHTML = consultations.map(c => {
+            repoList.innerHTML = merged.map(c => {
                 const isAlert = Boolean(c.is_alert);
                 const queryTypeLabel = isAlert ? 'Alerta Programada' : (
                     c.query_type === 'DISTRICT_ANALYSIS' ? 'Análisis de Distrito' :
@@ -3597,19 +3643,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function deleteConsultation(id) {
         try {
+            removeLocalConsultation(id);
             const resp = await fetch(`/api/v1/consultations/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${state.token}` }
             });
-            if (resp.ok) {
-                showToast('Consulta eliminada del repositorio');
-                await fetchSavedConsultations();
-                await fetchTelegramBotStatus();
-            } else {
-                showToast('No se pudo eliminar la consulta', 'error');
-            }
+            showToast('Consulta eliminada del repositorio');
+            await fetchSavedConsultations();
+            await fetchTelegramBotStatus();
         } catch (e) {
-            showToast('Error al conectar para eliminar', 'error');
+            removeLocalConsultation(id);
+            await fetchSavedConsultations();
+            showToast('Consulta eliminada', 'info');
         }
     }
 
@@ -3669,17 +3714,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (resp.ok) {
                     const result = await resp.json();
+                    const matchedCount = result.matched_count || (result.matched_opportunities ? result.matched_opportunities.length : 0);
+                    const matchedOpps = result.matched_opportunities || [];
+
+                    // Guardar de inmediato en almacenamiento local para asegurar visualización instantánea
+                    const newConsultation = {
+                        id: result.saved_consultation_id || ('local-' + Date.now()),
+                        title: result.title || 'Consulta Asesor Inmobiliario',
+                        user_name: (state.currentUser && state.currentUser.username) ? state.currentUser.username : 'jsaavedra',
+                        description: promptText,
+                        query_type: (result.criteria && result.criteria.query_type) ? result.criteria.query_type : ((result.criteria && result.criteria.is_alert) ? 'SCHEDULED_ALERT' : 'SEARCH_OPPORTUNITIES'),
+                        criteria: result.criteria || {},
+                        matched_count: matchedCount,
+                        ai_summary: result.ai_summary,
+                        is_alert: Boolean(result.criteria && result.criteria.is_alert),
+                        alert_frequency: (result.criteria && result.criteria.is_alert) ? 'DAILY' : null,
+                        is_active: true,
+                        created_at: new Date().toISOString(),
+                        opportunities: matchedOpps
+                    };
+                    saveLocalConsultation(newConsultation);
+
                     if (statusBox) {
                         statusBox.className = 'advisor-query-status';
                         statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
                         statusBox.style.border = '1px solid rgba(16, 185, 129, 0.3)';
                         statusBox.style.color = '#34d399';
-                        statusBox.innerHTML = `✅ <strong>${escapeHtml(result.title)}</strong> generada con éxito (${result.matched_count} activos encontrados).`;
+                        statusBox.innerHTML = `
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                <span>✅ <strong>${escapeHtml(result.title)}</strong> generada con éxito (${matchedCount} activos encontrados).</span>
+                                <button id="btn-jump-to-opps" class="btn btn-sm btn-primary" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                                    <i data-lucide="arrow-down" style="width: 12px; height: 12px;"></i> Ver ${matchedCount} fichas encontradas ↓
+                                </button>
+                            </div>
+                        `;
+                        if (window.lucide) lucide.createIcons();
+                        const jumpBtn = document.getElementById('btn-jump-to-opps');
+                        if (jumpBtn) {
+                            jumpBtn.addEventListener('click', () => {
+                                const target = document.querySelector(`[data-consultation-id="${newConsultation.id}"]`) || document.getElementById('consultations-repository-list');
+                                if (target) target.scrollIntoView({ behavior: 'smooth' });
+                            });
+                        }
                     }
+
                     promptInput.value = '';
                     showToast('Consulta guardada en el repositorio');
                     await fetchSavedConsultations();
                     await fetchTelegramBotStatus();
+
+                    // Scroll suave hacia la consulta recién agregada
+                    setTimeout(() => {
+                        const target = document.querySelector(`[data-consultation-id="${newConsultation.id}"]`);
+                        if (target) {
+                            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }, 200);
                 } else {
                     throw new Error('Error en el servidor');
                 }

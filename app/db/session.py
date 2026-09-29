@@ -69,6 +69,17 @@ try:
 except Exception as e_conn:
     _root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     _local_db_path = os.path.join(_root_dir, "hivex_local.db")
+    if os.environ.get("VERCEL"):
+        import shutil
+        _tmp_db_path = "/tmp/hivex_local.db"
+        if not os.path.exists(_tmp_db_path) and os.path.exists(_local_db_path):
+            try:
+                shutil.copy2(_local_db_path, _tmp_db_path)
+            except Exception as e_cp:
+                logger.warning(f"No se pudo copiar SQLite a /tmp: {e_cp}")
+        if os.path.exists(_tmp_db_path):
+            _local_db_path = _tmp_db_path
+
     logger.warning(f"PostgreSQL no alcanzable localmente ({e_conn}). Usando fallback SQLite local: sqlite:///{_local_db_path}")
     db_url = f"sqlite:///{_local_db_path}"
     engine = create_engine(
