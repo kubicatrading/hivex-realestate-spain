@@ -882,53 +882,57 @@ def get_saved_consultations(
     Recupera el repositorio de consultas y alertas creadas desde Telegram o web,
     enriqueciendo cada registro con las tarjetas completas de las oportunidades encontradas.
     """
-    from app.engine.advisor_engine import advisor_engine
-    consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc()).all()
+    try:
+        from app.engine.advisor_engine import advisor_engine
+        consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc()).all()
 
-    # Pre-cargar catálogo de oportunidades para indexar rápido por ID
-    all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
-    opps_by_id = {str(o.get("id")).strip().upper(): o for o in all_opps}
+        # Pre-cargar catálogo de oportunidades para indexar rápido por ID
+        all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
+        opps_by_id = {str(o.get("id")).strip().upper(): o for o in all_opps}
 
-    result = []
-    for c in consultations:
-        matched_ids = []
-        if c.matched_opportunity_ids_json:
-            try:
-                matched_ids = json.loads(c.matched_opportunity_ids_json)
-            except Exception:
-                pass
+        result = []
+        for c in consultations:
+            matched_ids = []
+            if c.matched_opportunity_ids_json:
+                try:
+                    matched_ids = json.loads(c.matched_opportunity_ids_json)
+                except Exception:
+                    pass
 
-        # Obtener las oportunidades completas para renderizar tarjetas en el frontend
-        matched_cards = []
-        for mid in matched_ids[:12]:
-            clean_mid = str(mid).strip().upper()
-            if clean_mid in opps_by_id:
-                matched_cards.append(opps_by_id[clean_mid])
+            # Obtener las oportunidades completas para renderizar tarjetas en el frontend
+            matched_cards = []
+            for mid in matched_ids[:12]:
+                clean_mid = str(mid).strip().upper()
+                if clean_mid in opps_by_id:
+                    matched_cards.append(opps_by_id[clean_mid])
 
-        criteria = {}
-        if c.criteria_json:
-            try:
-                criteria = json.loads(c.criteria_json)
-            except Exception:
-                pass
+            criteria = {}
+            if c.criteria_json:
+                try:
+                    criteria = json.loads(c.criteria_json)
+                except Exception:
+                    pass
 
-        result.append({
-            "id": c.id,
-            "title": c.title,
-            "user_name": c.user_name,
-            "description": c.description,
-            "query_type": c.query_type,
-            "criteria": criteria,
-            "matched_count": c.matched_count,
-            "ai_summary": c.ai_summary,
-            "is_alert": c.is_alert,
-            "alert_frequency": c.alert_frequency,
-            "is_active": c.is_active,
-            "created_at": c.created_at.isoformat() if c.created_at else "",
-            "opportunities": matched_cards
-        })
+            result.append({
+                "id": c.id,
+                "title": c.title,
+                "user_name": c.user_name,
+                "description": c.description,
+                "query_type": c.query_type,
+                "criteria": criteria,
+                "matched_count": c.matched_count,
+                "ai_summary": c.ai_summary,
+                "is_alert": c.is_alert,
+                "alert_frequency": c.alert_frequency,
+                "is_active": c.is_active,
+                "created_at": c.created_at.isoformat() if c.created_at else "",
+                "opportunities": matched_cards
+            })
 
-    return {"consultations": result, "total": len(result)}
+        return {"consultations": result, "total": len(result)}
+    except Exception as e:
+        logger.error(f"Error en get_saved_consultations: {e}")
+        return {"consultations": [], "total": 0, "error": str(e)}
 
 @app.delete("/api/v1/consultations/{consultation_id}")
 def delete_consultation(
@@ -970,14 +974,21 @@ def get_telegram_status(db: Session = Depends(get_db)):
     token = settings.TELEGRAM_BOT_TOKEN or os.getenv("TELEGRAM_BOT_TOKEN", "")
     bot_configured = bool(token)
 
-    total_consultations = db.query(SavedConsultation).count()
-    active_alerts = db.query(SavedConsultation).filter(SavedConsultation.is_alert == True, SavedConsultation.is_active == True).count()
-    total_messages = db.query(TelegramConversationMessage).count()
-    linked_users = db.query(User).filter(User.telegram_id.isnot(None)).count()
+    try:
+        total_consultations = db.query(SavedConsultation).count()
+        active_alerts = db.query(SavedConsultation).filter(SavedConsultation.is_alert == True, SavedConsultation.is_active == True).count()
+        total_messages = db.query(TelegramConversationMessage).count()
+        linked_users = db.query(User).filter(User.telegram_id.isnot(None)).count()
+    except Exception as e:
+        logger.warning(f"Aviso consultando métricas de Telegram: {e}")
+        total_consultations = 0
+        active_alerts = 0
+        total_messages = 0
+        linked_users = 0
 
     return {
         "bot_configured": bot_configured,
-        "token_mask": f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else "No configurado",
+        "token_mask": f"{token[:6]}...{token[-4:]}" if token and len(token) > 10 else ("Configurado" if bot_configured else "No configurado"),
         "total_consultations": total_consultations,
         "active_alerts": active_alerts,
         "total_messages": total_messages,
