@@ -49,17 +49,18 @@ class TelegramAdvisorBot:
     ) -> Tuple[bool, Optional[User], str]:
         """
         Verifica si el usuario de Telegram está autorizado en la plataforma HIVEX.
-        Si incluye comando de vinculación (/vincular <usuario>), asocia la cuenta.
+        La autorización se gestiona exclusivamente por el administrador en la plataforma
+        (mediante User.telegram_id, User.telegram_username o lista autorizada en variables de entorno).
         """
         str_tg_id = str(telegram_user_id)
         tg_user_clean = (telegram_username or "").lower().lstrip("@")
 
-        # 1. Búsqueda por telegram_id ya registrado en BD
+        # 1. Búsqueda por telegram_id ya registrado en BD por el administrador
         user = db.query(User).filter(User.telegram_id == str_tg_id).first()
         if user and user.is_active:
             return True, user, f"Usuario autenticado por ID de Telegram ({user.username})"
 
-        # 2. Búsqueda por username coincidente en BD
+        # 2. Búsqueda por username coincidente en BD registrado por el administrador
         if tg_user_clean:
             user = db.query(User).filter(
                 (User.telegram_username.ilike(tg_user_clean)) |
@@ -74,23 +75,12 @@ class TelegramAdvisorBot:
 
         # 3. Comprobación en lista autorizada de variables de entorno
         if (str_tg_id in self.authorized_env_users) or (tg_user_clean and tg_user_clean in self.authorized_env_users):
-            # Asignar al primer usuario admin o crear vínculo
             admin_user = db.query(User).filter(User.is_active == True).first()
             if admin_user:
                 admin_user.telegram_id = str_tg_id
                 admin_user.telegram_username = tg_user_clean
                 db.commit()
                 return True, admin_user, "Usuario autorizado por configuración de entorno"
-
-        # 4. Procesar comando explícito /vincular <usuario>
-        if command_args:
-            target_username = command_args.strip().split()[0]
-            candidate = db.query(User).filter(User.username.ilike(target_username)).first()
-            if candidate and candidate.is_active:
-                candidate.telegram_id = str_tg_id
-                candidate.telegram_username = tg_user_clean
-                db.commit()
-                return True, candidate, f"Cuenta '{candidate.username}' vinculada exitosamente con tu Telegram."
 
         return False, None, "Usuario no identificado en HIVEX"
 
@@ -132,7 +122,8 @@ class TelegramAdvisorBot:
         chat_id: int,
         text: str,
         parse_mode: str = "Markdown",
-        reply_to_message_id: Optional[int] = None
+        reply_to_message_id: Optional[int] = None,
+        reply_markup: Optional[Dict[str, Any]] = None
     ) -> bool:
         """Envía un mensaje de texto a un chat o grupo de Telegram."""
         if not self.token:
@@ -148,6 +139,8 @@ class TelegramAdvisorBot:
         }
         if reply_to_message_id:
             payload["reply_to_message_id"] = reply_to_message_id
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -162,6 +155,67 @@ class TelegramAdvisorBot:
         except Exception as e:
             logger.error(f"Error al enviar mensaje a Telegram: {e}")
             return False
+
+    async def send_photo_card(
+        self,
+        chat_id: int,
+        opp: Dict[str, Any],
+        reply_to_message_id: Optional[int] = None
+    ) -> bool:
+        """
+        Envía una ficha visual formateada con estilos y foto a Telegram,
+        replicando la estética del modal de preview de mapas de HIVEX.
+        """
+        if not self.token:
+            return False
+
+        opp_id = opp.get("id", "")
+        web_link = f"{self.platform_url}/?opp_id={opp_id}"
+        portal_url = opp.get("url") or web_link
+        card_html = advisor_engine.generate_telegram_card_html(opp)
+
+        inline_keyboard = [
+            [
+                {"text": "🔍 Ver Ficha Completa", "url": web_link},
+                {"text": "🌐 Portal Fuente", "url": portal_url}
+            ]
+        ]
+        reply_markup = {"inline_keyboard": inline_keyboard}
+
+        # Intentar enviar con foto si tiene imágenes
+        images = opp.get("images") or []
+        first_photo = images[0] if (images and isinstance(images, list) and images[0]) else None
+
+        if first_photo and str(first_photo).startswith("http"):
+            photo_url = f"{self.api_base}/sendPhoto"
+            payload = {
+                "chat_id": chat_id,
+                "photo": first_photo,
+                "caption": card_html,
+                "parse_mode": "HTML",
+                "reply_markup": reply_markup
+            }
+            if reply_to_message_id:
+                payload["reply_to_message_id"] = reply_to_message_id
+
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    res = await client.post(photo_url, json=payload)
+                    if res.status_code == 200:
+                        return True
+                    else:
+                        logger.warning(f"sendPhoto falló ({res.status_code}: {res.text}). Reintentando como mensaje HTML...")
+            except Exception as e_photo:
+                logger.warning(f"Excepción en sendPhoto: {e_photo}")
+
+        # Fallback a send_message con HTML y botones interactivos
+        return await self.send_message(
+            chat_id=chat_id,
+            text=card_html,
+            parse_mode="HTML",
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=reply_markup
+        )
 
     # --------------------------------------------------------------------------
     # 4. GESTIÓN Y PROCESAMIENTO DE UPDATES
@@ -199,32 +253,21 @@ class TelegramAdvisorBot:
                 command_args=link_args
             )
 
-            # Si es el comando /vincular y se completó exitosamente
+            # Si el usuario intenta auto-vincularse, indicar que debe gestionarse por el administrador
             if is_link_cmd:
-                if is_authorized and db_user:
-                    reply = (
-                        f"✅ **¡VINCULACIÓN EXITOSA!**\n\n"
-                        f"Bienvenido **{db_user.username}** al Asesor Inmobiliario HIVEX.\n"
-                        f"Tu cuenta de Telegram ha quedado autorizada permanentemente.\n\n"
-                        f"Ya puedes preguntarme por oportunidades, enviar audios de voz, "
-                        f"solicitar análisis de rentabilidad (ROI/BTL) o crear alertas programadas."
-                    )
-                else:
-                    reply = (
-                        f"❌ **No se pudo vincular la cuenta.**\n\n"
-                        f"El usuario indicado no existe o no está activo en HIVEX.\n"
-                        f"Uso: `/vincular <tu_usuario_en_hivex>`"
-                    )
+                reply = (
+                    "ℹ️ **Gestión de Accesos HIVEX**\n\n"
+                    "La vinculación y activación de cuentas se gestiona exclusivamente por el administrador de la plataforma.\n\n"
+                    "Por favor, contacta con tu administrador para dar de alta tu cuenta o asociar tu ID de Telegram en el portal HIVEX."
+                )
                 await self.send_message(chat_id, reply, reply_to_message_id=message_id)
-                return {"status": "linked" if is_authorized else "link_failed", "user": username}
+                return {"status": "admin_managed_only", "user": username}
 
-            # Si el usuario NO está autorizado, responder con el mensaje requerido
+            # Si el usuario NO está autorizado, responder con advertencia indicando contactar al administrador
             if not is_authorized:
                 unauth_reply = (
                     "⚠️ El usuario que realiza la solicitud no ha sido identificado como un usuario con acceso en el portal inmobiliario de HIVEX.\n\n"
-                    "Para vincular tu cuenta autorizada, por favor envía:\n"
-                    "`/vincular <tu_usuario_hivex>`\n\n"
-                    "O contacta con el administrador de la plataforma para obtener acceso."
+                    "Por favor, contacta con el administrador de la plataforma para obtener acceso."
                 )
                 await self.send_message(chat_id, unauth_reply, reply_to_message_id=message_id)
                 return {"status": "unauthorized", "user_id": user_id, "username": username}
@@ -273,8 +316,31 @@ class TelegramAdvisorBot:
                 db=db
             )
 
-            # Enviar la respuesta del Asesor a Telegram
-            await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
+            # Enviar la respuesta del Asesor a Telegram con fichas visuales
+            matched_opps = res.get("matched_opportunities") or []
+            intro_text = res.get("intro_text")
+
+            if matched_opps:
+                # 1. Enviar resumen diagnóstico introductorio
+                if intro_text:
+                    await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
+                else:
+                    await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
+
+                # 2. Despachar fichas fotográficas visuales con foto y botones de acción
+                target_count = int(res.get("criteria", {}).get("target_count") or 5)
+                for opp in matched_opps[:target_count]:
+                    await self.send_photo_card(chat_id=chat_id, opp=opp)
+
+                # 3. Mensaje de cierre confirmando persistencia
+                closing_msg = (
+                    f"💾 <i>Las fichas han sido registradas de forma persistente en tu base de datos y repositorio de conocimiento HIVEX.</i>\n"
+                    f"🔗 <i>Puedes explorarlas interactivamente en la pestaña 'Consultas & Asesor Telegram' del dashboard web.</i>"
+                )
+                await self.send_message(chat_id, closing_msg, parse_mode="HTML")
+            else:
+                # Si no hubo matches, despachar el texto de respuesta del asesor
+                await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
 
             return {
                 "status": "success",
