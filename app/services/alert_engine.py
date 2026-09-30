@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import html
 import time
 import httpx
 import logging
@@ -376,6 +377,152 @@ class RealEstateAlertEngine:
 
         return "\n".join(lines)
 
+    def generate_alert_card_html(
+        self,
+        alert_title: str,
+        icon: str,
+        opp: Dict[str, Any]
+    ) -> str:
+        """
+        Construye la ficha visual formateada en HTML para el despacho de alertas de Telegram:
+        - Badge de alerta destacada
+        - Título, dirección amigable y superficie
+        - Precio actual y comparativa de descuento vs mercado
+        - Bajada en portal (si aplica)
+        - Rentabilidad BTL y alquiler mensual estimado
+        - Sinergia PGOU (si aplica)
+        - Score global HIVEX y margen bruto estimado
+        - Portal fuente
+        """
+        friendly_address = html.escape(self._format_address_with_province(opp))
+        title = html.escape(str(opp.get("title") or friendly_address or "Inmueble Destacado"))
+        price = float(opp.get("min_price") or opp.get("listing_price") or opp.get("original_listing_price") or 0.0)
+        ref_val = float(opp.get("estimated_reference_value") or opp.get("cadastral_market_value") or price)
+        dto = float(opp.get("discount_vs_market") or opp.get("discount_percentage") or 0.0)
+        disc_str = f"-{dto:.1f}%" if dto > 0 else f"+{abs(dto):.1f}%"
+        profit = opp.get("potential_gross_profit") or max(0.0, ref_val - price)
+
+        surf = float(opp.get("surface_m2") or 75.0)
+        portal_name = html.escape(str(opp.get("primary_portal") or "Idealista"))
+
+        lines = [
+            f"🚨 <b>{icon} {html.escape(alert_title)}</b>\n",
+            f"🏡 <b>{title}</b>",
+            f"📍 <i>{friendly_address} • {surf:.0f} m²</i>\n",
+            f"💰 <b>Precio Actual:</b> {price:,.0f} €  <code>({disc_str} s/ Ref: {ref_val:,.0f} €)</code>"
+        ]
+
+        # Bajada en portal (si aplica)
+        price_drop = float(opp.get("price_drop_amount") or opp.get("price_drop") or 0.0)
+        drop_pct = float(opp.get("price_drop_percentage") or 0.0)
+        if price_drop > 0:
+            lines.append(f"🔻 <b>Bajada reciente:</b> -{price_drop:,.0f} € (-{drop_pct:.1f}%)")
+
+        # Rentabilidad BTL (si aplica)
+        prop_type = (opp.get("property_type") or "").lower()
+        is_solar = (opp.get("strategy") == "LAND_DEVELOPMENT" or any(k in prop_type for k in ["solar", "terreno", "suelo", "parcela"]))
+        if not is_solar:
+            monthly_rent = float(opp.get("monthly_rent") or opp.get("estimated_monthly_rent") or opp.get("estimated_rent") or 0.0)
+            yield_val = float(opp.get("rental_yield") or 0.0)
+            if monthly_rent > 0 or yield_val > 0:
+                lines.append(f"📈 <b>Rentabilidad BTL:</b> <b>{yield_val:.1f}% Yield</b> (Est. <b>{monthly_rent:,.0f} €/mes</b>)")
+
+        # Sinergia PGOU (si aplica)
+        if opp.get("has_pgou_synergy") or "PGOU" in alert_title:
+            pgou_title = html.escape(str(opp.get("pgou_title") or "Ámbito de Planeamiento PGOU"))
+            lines.append(f"🏛️ <b>Sinergia PGOU:</b> <i>{pgou_title}</i>")
+
+        score = float(opp.get("overall_score") or 85.0)
+        lines.append(f"⭐ <b>HIVEX Score:</b> <b>{score:.0f}/100</b> | 💶 <b>Margen:</b> <b>+{profit:,.0f} €</b>")
+        lines.append(f"🛒 <b>Fuente:</b> {portal_name}")
+
+        return "\n".join(lines)
+
+    def send_photo_alert(
+        self,
+        alert_title: str,
+        icon: str,
+        opp: Dict[str, Any]
+    ) -> bool:
+        """
+        Envía una alerta individual a Telegram como ficha visual con foto y botones interactivos.
+        Si la foto no carga o falla el envío multimedia, realiza fallback automático a mensaje HTML.
+        """
+        if not self.bot_token or not self.chat_id:
+            logger.warning("TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Alerta mostrada en logs.")
+            self.last_error = "Credenciales Telegram no configuradas"
+            return False
+
+        opp_id = opp.get("id")
+        deep_link = f"{self.base_url}/?opp_id={opp_id}"
+        portal_url = opp.get("portal_url") or opp.get("url") or opp.get("boe_url") or deep_link
+        portal_name = opp.get("primary_portal") or "Portal Fuente"
+
+        card_html = self.generate_alert_card_html(alert_title, icon, opp)
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔍 Ver Ficha Completa", "url": deep_link},
+                    {"text": f"🌐 {portal_name}", "url": portal_url}
+                ]
+            ]
+        }
+
+        # Extraer imagen principal (de la oportunidad, galería o CDN residencial)
+        images = opp.get("images") or opp.get("gallery") or []
+        first_photo = None
+        if images and isinstance(images, list) and images[0]:
+            first_photo = str(images[0])
+        elif opp.get("image_url"):
+            first_photo = str(opp.get("image_url"))
+        elif MarketScraper.RESIDENTIAL_CDN_GALLERY:
+            first_photo = MarketScraper.RESIDENTIAL_CDN_GALLERY[0]
+
+        if first_photo and str(first_photo).startswith("http"):
+            photo_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+            payload = {
+                "chat_id": self.chat_id,
+                "photo": first_photo,
+                "caption": card_html,
+                "parse_mode": "HTML",
+                "reply_markup": reply_markup
+            }
+            try:
+                resp = httpx.post(photo_url, json=payload, timeout=20.0)
+                if resp.status_code == 200:
+                    logger.info(f"Ficha visual con foto enviada exitosamente para alerta '{alert_title}'.")
+                    self.last_error = None
+                    return True
+                else:
+                    logger.warning(f"sendPhoto de alerta falló ({resp.status_code}: {resp.text}). Reintentando como mensaje HTML...")
+            except Exception as e_photo:
+                logger.warning(f"Excepción en sendPhoto de alerta: {e_photo}")
+
+        # Fallback a sendMessage con formato HTML y botones
+        msg_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        payload = {
+            "chat_id": self.chat_id,
+            "text": card_html,
+            "parse_mode": "HTML",
+            "reply_markup": reply_markup,
+            "disable_web_page_preview": False
+        }
+        try:
+            resp = httpx.post(msg_url, json=payload, timeout=15.0)
+            if resp.status_code == 200:
+                logger.info(f"Alerta HTML enviada exitosamente para '{alert_title}'.")
+                self.last_error = None
+                return True
+            else:
+                err = f"HTTP {resp.status_code}: {resp.text}"
+                logger.error(f"Error enviando alerta HTML: {err}")
+                self.last_error = err
+                return False
+        except Exception as e:
+            self.last_error = f"Exception: {type(e).__name__} - {e}"
+            logger.error(f"Excepción enviando alerta: {self.last_error}")
+            return False
+
     def send_alert(self, message: str) -> bool:
         """Envía un mensaje individual Markdown a través de la API oficial de Telegram."""
         if not message.strip():
@@ -427,7 +574,7 @@ class RealEstateAlertEngine:
     ) -> Dict[str, Any]:
         """
         Ejecución orquestada del servicio de alertas de las 9:00 AM (07:00 UTC).
-        Envía 4 alertas individuales, una por cada tipo de oportunidad solicitada:
+        Envía 4 alertas individuales con fichas visuales con foto y botones interactivos:
         1. ALERTA PRECIO BTL MADRID
         2. ALERTA DTO. MADRID
         3. ALERTA INMUEBLE PGOU
@@ -459,8 +606,8 @@ class RealEstateAlertEngine:
         alerted_ids = []
 
         for title, icon, opp in quad_opps:
-            msg = self.build_single_opportunity_alert(title, icon, opp)
-            sent = self.send_alert(msg)
+            # Despachar ficha visual con foto y botones interactivos
+            sent = self.send_photo_alert(title, icon, opp)
             if sent:
                 sent_messages.append(title)
                 alerted_ids.append(opp["id"])

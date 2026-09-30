@@ -328,9 +328,10 @@ class TelegramAdvisorBot:
                     await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
 
                 # 2. Despachar fichas fotográficas visuales con foto y botones de acción
-                target_count = int(res.get("criteria", {}).get("target_count") or 5)
+                target_count = int(res.get("criteria", {}).get("target_count") or 20)
                 for opp in matched_opps[:target_count]:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
+                    await asyncio.sleep(0.3)
 
                 # 3. Mensaje de cierre confirmando persistencia
                 closing_msg = (
