@@ -253,17 +253,7 @@ class TelegramAdvisorBot:
                 command_args=link_args
             )
 
-            # Si el usuario intenta auto-vincularse, indicar que debe gestionarse por el administrador
-            if is_link_cmd:
-                reply = (
-                    "ℹ️ **Gestión de Accesos HIVEX**\n\n"
-                    "La vinculación y activación de cuentas se gestiona exclusivamente por el administrador de la plataforma.\n\n"
-                    "Por favor, contacta con tu administrador para dar de alta tu cuenta o asociar tu ID de Telegram en el portal HIVEX."
-                )
-                await self.send_message(chat_id, reply, reply_to_message_id=message_id)
-                return {"status": "admin_managed_only", "user": username}
-
-            # Si el usuario NO está autorizado, responder con advertencia indicando contactar al administrador
+            # 1. Si el usuario NO está autorizado, responder con advertencia indicando contactar al administrador
             if not is_authorized:
                 unauth_reply = (
                     "⚠️ El usuario que realiza la solicitud no ha sido identificado como un usuario con acceso en el portal inmobiliario de HIVEX.\n\n"
@@ -271,6 +261,15 @@ class TelegramAdvisorBot:
                 )
                 await self.send_message(chat_id, unauth_reply, reply_to_message_id=message_id)
                 return {"status": "unauthorized", "user_id": user_id, "username": username}
+
+            # Si el usuario está autorizado pero envía /vincular, informar que ya tiene acceso
+            if is_link_cmd:
+                reply = (
+                    f"✅ Tu cuenta ya está autorizada en HIVEX como <b>{db_user.username if db_user else 'usuario válido'}</b>.\n"
+                    f"Puedes hacerme cualquier consulta directamente."
+                )
+                await self.send_message(chat_id, reply, parse_mode="HTML", reply_to_message_id=message_id)
+                return {"status": "already_authorized", "user": username}
 
             # 2. PROCESAR MENSAJE (TEXTO O AUDIO)
             audio_bytes = None
