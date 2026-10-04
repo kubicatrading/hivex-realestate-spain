@@ -118,28 +118,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Carga directa de ficha de oportunidad desde enlace de alerta de Telegram (?opp_id=...)
     async function loadAndDisplayDirectOpportunity(oppId) {
-        if (!oppId || window._openedDeepLinkOpp) return;
-        window._openedDeepLinkOpp = true;
+        if (!oppId) return;
+        const cleanId = String(oppId).trim().toUpperCase();
+        const normId = cleanId.replace(/^SUB-SUB-/, 'SUB-');
 
         try {
-            // 1. Si ya se habían cargado oportunidades en memoria, abrirla directamente
+            // 1. Si ya se habían cargado oportunidades en memoria, abrirla y fijar el filtro
             if (state.allOpportunities && state.allOpportunities.length > 0) {
-                const found = state.allOpportunities.find(o => String(o.id) === String(oppId) || String(o.id_subasta) === String(oppId));
+                const found = state.allOpportunities.find(o => {
+                    const idStr = String(o.id || '').trim().toUpperCase();
+                    const subStr = String(o.id_subasta || '').trim().toUpperCase();
+                    return idStr === cleanId || idStr === normId || subStr === cleanId || subStr === normId || ('SUB-' + subStr) === cleanId || ('SUB-' + subStr) === normId;
+                });
                 if (found) {
-                    window.openPropertyDetailModal(found);
+                    if (found.source_type && state.activeSource !== found.source_type) {
+                        state.activeSource = found.source_type;
+                        document.querySelectorAll('.tab-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.dataset.source === found.source_type);
+                        });
+                    }
+                    state.filteredOpportunities = [found];
+                    renderOpportunities([found]);
+                    updateDashboardMetrics([found]);
+                    const searchInput = document.getElementById('search-input');
+                    if (searchInput) searchInput.value = found.title || found.id_subasta || found.id;
+                    setTimeout(() => window.openPropertyDetailModal(found), 150);
                     return;
                 }
             }
 
             // 2. Si no está en memoria, consultar endpoint específico
             const headers = state.token ? { 'Authorization': `Bearer ${state.token}` } : {};
-            const res = await fetch(`/api/v1/opportunities/${encodeURIComponent(oppId)}`, { headers });
+            const res = await fetch(`/api/v1/opportunities/${encodeURIComponent(cleanId)}`, { headers });
             if (res.ok) {
                 const opp = await res.json();
                 if (opp && (opp.id || opp.title)) {
                     const loginOverlay = document.getElementById('login-overlay');
                     if (loginOverlay) loginOverlay.classList.add('hidden');
-                    window.openPropertyDetailModal(opp);
+                    
+                    if (opp.source_type && state.activeSource !== opp.source_type) {
+                        state.activeSource = opp.source_type;
+                        document.querySelectorAll('.tab-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.dataset.source === opp.source_type);
+                        });
+                    }
+
+                    // Posicionar y filtrar el dashboard exclusivamente en esta oportunidad
+                    state.filteredOpportunities = [opp];
+                    renderOpportunities([opp]);
+                    updateDashboardMetrics([opp]);
+                    const searchInput = document.getElementById('search-input');
+                    if (searchInput) searchInput.value = opp.title || opp.id_subasta || opp.id;
+
+                    setTimeout(() => window.openPropertyDetailModal(opp), 150);
                 }
             }
         } catch (err) {
@@ -169,6 +200,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 state.user = data.user;
                 showDashboard();
+                if (typeof syncFavoritesWithBackend === 'function') {
+                    syncFavoritesWithBackend();
+                }
             } else {
                 logout();
             }
@@ -176,6 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
             logout();
         }
     }
+
 
     // Login Form Submit Handler
     formLogin.addEventListener('submit', async (e) => {
@@ -209,7 +244,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 sessionStorage.setItem('hivex_token', data.access_token);
                 localStorage.setItem('hivex_token', data.access_token);
                 showDashboard();
+                if (typeof syncFavoritesWithBackend === 'function') {
+                    syncFavoritesWithBackend();
+                }
                 showToast(`¡Bienvenido ${data.user.username}!`, 'success');
+
             } else {
                 loginError.textContent = data.detail || 'Credenciales no válidas. Verifique usuario y contraseña.';
                 loginError.classList.remove('hidden');
@@ -606,6 +645,54 @@ document.addEventListener('DOMContentLoaded', () => {
         badge.textContent = favs.size;
     }
 
+    function isOpportunityFavorite(opp, favoriteIds) {
+        if (!opp || !favoriteIds || favoriteIds.size === 0) return false;
+        const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+        const subIdUpper = opp.id_subasta ? String(opp.id_subasta).trim().toUpperCase() : '';
+        
+        if (oppIdUpper && (favoriteIds.has(oppIdUpper) || favoriteIds.has('SUB-' + oppIdUpper) || favoriteIds.has('SUB-SUB-' + oppIdUpper))) {
+            return true;
+        }
+        if (subIdUpper) {
+            if (favoriteIds.has(subIdUpper) ||
+                favoriteIds.has('SUB-' + subIdUpper) ||
+                favoriteIds.has('SUB-SUB-' + subIdUpper) ||
+                favoriteIds.has(subIdUpper.replace(/^SUB-/, '')) ||
+                favoriteIds.has(subIdUpper.replace(/^SUB-SUB-/, ''))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    async function syncFavoritesWithBackend() {
+        if (!state.token) return;
+        try {
+            const res = await fetch('/api/v1/user/favorites', {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && Array.isArray(data.favorites)) {
+                    const localFavs = getFavoritesSet();
+                    data.favorites.forEach(rawId => {
+                        const idStr = String(rawId).trim().toUpperCase();
+                        localFavs.add(idStr);
+                        const norm = idStr.replace(/^SUB-SUB-/, 'SUB-');
+                        localFavs.add(norm);
+                    });
+                    saveFavoritesSet(localFavs);
+                    updateFavoritesCountBadge();
+                    if (state.allOpportunities && state.allOpportunities.length > 0) {
+                        applyFilters();
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Aviso sincronizando favoritos con backend:', e);
+        }
+    }
+
     function renderHeartSvg(isFav, size = 16) {
         return `<svg class="heart-icon" viewBox="0 0 24 24" width="${size}" height="${size}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="${isFav ? 'currentColor' : 'none'}"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`;
     }
@@ -617,17 +704,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!oppId) return;
         const idStr = String(oppId).trim().toUpperCase();
+        const normId = idStr.replace(/^SUB-SUB-/, 'SUB-');
         const favs = getFavoritesSet();
-        const isNowFav = !favs.has(idStr);
+        const hasIt = favs.has(idStr) || favs.has(normId);
+        const isNowFav = !hasIt;
 
         if (isNowFav) {
+            favs.add(normId);
             favs.add(idStr);
         } else {
             favs.delete(idStr);
+            favs.delete(normId);
+            favs.delete('SUB-' + normId);
+            if (normId.startsWith('SUB-')) favs.delete(normId.replace(/^SUB-/, ''));
         }
         saveFavoritesSet(favs);
         updateFavoritesCountBadge();
+        updateFavoriteDomElements(normId, isNowFav);
         updateFavoriteDomElements(idStr, isNowFav);
+
+        // Sincronización instantánea con base de datos del usuario (compartida con bot de Telegram)
+        if (state.token) {
+            fetch('/api/v1/user/favorites/toggle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${state.token}`
+                },
+                body: JSON.stringify({ opp_id: normId })
+            }).catch(err => console.warn('Error sincronizando toggle favorito con backend:', err));
+        }
 
         if (isNowFav) {
             showToast('❤️ Oportunidad guardada en tus favoritos', 'success');
@@ -642,31 +748,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateFavoriteDomElements(oppId, isFav) {
         const idStr = String(oppId).trim().toUpperCase();
+        const normId = idStr.replace(/^SUB-SUB-/, 'SUB-');
+        const altId = idStr.startsWith('SUB-') ? idStr.replace(/^SUB-/, '') : ('SUB-' + idStr);
+        const candidates = [idStr, normId, altId];
 
-        // Card button
-        const cardBtn = document.getElementById(`fav-btn-${idStr}`);
-        if (cardBtn) {
-            cardBtn.classList.toggle('is-favorite', isFav);
-            cardBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
-            cardBtn.innerHTML = renderHeartSvg(isFav, 16);
-        }
+        candidates.forEach(cand => {
+            // Card button
+            const cardBtn = document.getElementById(`fav-btn-${cand}`);
+            if (cardBtn) {
+                cardBtn.classList.toggle('is-favorite', isFav);
+                cardBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
+                cardBtn.innerHTML = renderHeartSvg(isFav, 16);
+            }
 
-        // Modal button
-        const modalBtn = document.getElementById(`fav-modal-btn-${idStr}`);
-        if (modalBtn) {
-            modalBtn.classList.toggle('is-favorite', isFav);
-            modalBtn.title = isFav ? 'Eliminar de favoritos' : 'Guardar en favoritos';
-            modalBtn.innerHTML = `${renderHeartSvg(isFav, 16)} <span id="fav-modal-label-${idStr}" style="font-size: 0.82rem; font-weight: 700;">${isFav ? 'Favorito' : 'Guardar'}</span>`;
-        }
+            // Modal button
+            const modalBtn = document.getElementById(`fav-modal-btn-${cand}`);
+            if (modalBtn) {
+                modalBtn.classList.toggle('is-favorite', isFav);
+                modalBtn.title = isFav ? 'Eliminar de favoritos' : 'Guardar en favoritos';
+                modalBtn.innerHTML = `${renderHeartSvg(isFav, 16)} <span id="fav-modal-label-${cand}" style="font-size: 0.82rem; font-weight: 700;">${isFav ? 'Favorito' : 'Guardar'}</span>`;
+            }
 
-        // Popup button
-        const popupBtn = document.getElementById(`fav-popup-btn-${idStr}`);
-        if (popupBtn) {
-            popupBtn.classList.toggle('is-favorite', isFav);
-            popupBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
-            popupBtn.innerHTML = renderHeartSvg(isFav, 14);
-        }
+            // Popup button
+            const popupBtn = document.getElementById(`fav-popup-btn-${cand}`);
+            if (popupBtn) {
+                popupBtn.classList.toggle('is-favorite', isFav);
+                popupBtn.title = isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos';
+                popupBtn.innerHTML = renderHeartSvg(isFav, 14);
+            }
+        });
     }
+
 
     window.toggleFavoritesFilter = function() {
         state.onlyFavorites = !state.onlyFavorites;
@@ -785,9 +897,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             // Favorites Filter
-            if (state.onlyFavorites && !favoriteIds.has(String(opp.id || '').trim().toUpperCase())) {
+            if (state.onlyFavorites && !isOpportunityFavorite(opp, favoriteIds)) {
                 return false;
             }
+
             // Sinergia PGOU Filter (for Market)
             if (state.activeSource === 'market' && state.onlySynergyPGOU && !opp.has_pgou_synergy) {
                 return false;
@@ -1078,7 +1191,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dealsContainer.innerHTML = opps.map((opp, idx) => {
             const oppIdUpper = String(opp.id || '').trim().toUpperCase();
-            const isFav = favoriteIds.has(oppIdUpper);
+            const isFav = isOpportunityFavorite(opp, favoriteIds);
+
             const isFlipping = opp.strategy === 'HOUSE_FLIPPING';
             const stratLabel = isFlipping ? 'House Flipping' : 'Suelo / Desarrollo';
             const stratClass = isFlipping ? 'strat-flipping' : 'strat-land';
@@ -1492,9 +1606,15 @@ document.addEventListener('DOMContentLoaded', () => {
             opp = index;
         } else if (typeof index === 'string') {
             const cleanId = String(index).trim().toUpperCase();
-            opp = (window._lastOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId)
-               || (state.allOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId)
-               || (state.filteredOpportunities || []).find(o => String(o.id || '').trim().toUpperCase() === cleanId);
+            const normId = cleanId.replace(/^SUB-SUB-/, 'SUB-');
+            const matchFn = o => {
+                const sId = String(o.id || '').trim().toUpperCase();
+                const subId = String(o.id_subasta || '').trim().toUpperCase();
+                return sId === cleanId || sId === normId || subId === cleanId || subId === normId || ('SUB-' + subId) === cleanId || ('SUB-' + subId) === normId;
+            };
+            opp = (window._lastOpportunities || []).find(matchFn)
+               || (state.allOpportunities || []).find(matchFn)
+               || (state.filteredOpportunities || []).find(matchFn);
         } else if (typeof index === 'number') {
             if (state.filteredOpportunities && state.filteredOpportunities[index]) {
                 opp = state.filteredOpportunities[index];
@@ -1510,7 +1630,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const oppIdUpper = String(opp.id || '').trim().toUpperCase();
         const favsSetModal = getFavoritesSet();
-        const isFav = favsSetModal.has(oppIdUpper);
+        const isFav = isOpportunityFavorite(opp, favsSetModal);
+
 
         const modal = document.getElementById('modal-property-detail');
         const body = document.getElementById('modal-prop-body');

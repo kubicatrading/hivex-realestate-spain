@@ -226,8 +226,9 @@ class AdvisorEngine:
                 "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT), "
                 "province (nombre de la provincia o null), "
                 "zone_or_neighborhood (barrio, zona, calle o subdistrito concreto, ej: 'Madrid Río - Avenida de Portugal' o null), "
-                "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 3 para '3 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 3), "
+                "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 10 para '10 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 20), "
                 "sort_by ('rental_yield', 'overall_score', 'discount' o 'price'), "
+
                 "strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD' o null), "
                 "min_price (float o null), max_price (float o null), "
                 "min_discount (float o null), min_yield (float o null), is_alert (bool)."
@@ -308,8 +309,9 @@ class AdvisorEngine:
             if not matched_province: matched_province = "Barcelona"
 
         # Detección de Número de Fichas (ej: "top five", "top 5", "las 3 mejores", "10 pisos")
-        # Si el prompt no da un límite numérico, por defecto son 3 oportunidades
-        target_count = 3
+        # Si el prompt no da un límite numérico, por defecto son hasta 20 oportunidades
+        target_count = 20
+
         num_map = {
             "uno": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "five": 5,
             "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "ten": 10,
@@ -472,8 +474,24 @@ class AdvisorEngine:
                     disc_pct = round(opp.discount_percentage * 100, 1)
                     profit = max(0.0, round(opp.estimated_reference_value - opp.listing_price, 2))
 
+                    sub_id = auc.id_subasta if auc.id_subasta.startswith("SUB-") else f"SUB-{auc.id_subasta}"
+                    raw_imgs = []
+                    if getattr(auc, "images_json", None):
+                        try:
+                            parsed_imgs = json.loads(auc.images_json)
+                            if isinstance(parsed_imgs, str):
+                                raw_imgs = [parsed_imgs]
+                            elif isinstance(parsed_imgs, list):
+                                raw_imgs = [str(x) for x in parsed_imgs if x]
+                        except Exception:
+                            raw_imgs = []
+
+                    if not raw_imgs and getattr(auc, "latitude", None) and getattr(auc, "longitude", None) and settings.GOOGLE_MAPS_API_KEY:
+                        raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={auc.latitude},{auc.longitude}&fov=90&heading=235&pitch=10&key={settings.GOOGLE_MAPS_API_KEY}"]
+
                     all_opps.append({
-                        "id": f"SUB-{auc.id_subasta}",
+                        "id": sub_id,
+                        "id_subasta": sub_id,
                         "source_type": "subastas",
                         "primary_portal": auc.source or "BOE",
                         "strategy": opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy),
@@ -492,13 +510,14 @@ class AdvisorEngine:
                         "poi_score": opp.poi_score or 70.0,
                         "surface_m2": getattr(auc, "surface_m2", None) or 90.0,
                         "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
-                        "images": [
-                            img for img in (json.loads(auc.images_json) if getattr(auc, "images_json", None) else [])
-                            if isinstance(img, str) and "catastro" not in img.lower() and "cartografia/wms" not in img.lower()
-                        ] or ([f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={auc.latitude},{auc.longitude}&fov=90&heading=235&pitch=10&key={settings.GOOGLE_MAPS_API_KEY}"] if getattr(auc, "latitude", None) and getattr(auc, "longitude", None) and settings.GOOGLE_MAPS_API_KEY else [])
+                        "images": raw_imgs,
+                        "latitude": getattr(auc, "latitude", None),
+                        "longitude": getattr(auc, "longitude", None),
+                        "refcat": getattr(auc, "refcat", None) or ""
                     })
             except Exception as e_db:
                 logger.warning(f"Aviso cargando subastas en Asesor: {e_db}")
+
 
         # 2. Carga de Catálogo Market Verificado
         catalog_path = "app/data/verified_market_catalog.json"
@@ -1134,9 +1153,9 @@ class AdvisorEngine:
             if avg_yield > 0:
                 lines.append(f"• **Rentabilidad media estimada (BTL):** {avg_yield:.1f}%")
 
-            # Destacar las mejores oportunidades (Top 3)
-            lines.append(f"\n🏆 **Principales Oportunidades Seleccionadas:**\n")
-            for idx, opp in enumerate(matched_opps[:3], start=1):
+            # Destacar las oportunidades seleccionadas
+            lines.append(f"\n🏆 **Principales Oportunidades Seleccionadas ({count}):**\n")
+            for idx, opp in enumerate(matched_opps, start=1):
                 p = opp.get("listing_price", 0)
                 mkt = opp.get("estimated_reference_value", p)
                 disc = opp.get("discount_percentage", 0)
@@ -1155,13 +1174,10 @@ class AdvisorEngine:
                 lines.append(f"   ⭐ **Score HIVEX:** {score:.0f}/100 | Margen: {opp.get('potential_gross_profit', 0):,.0f} €")
                 lines.append(f"   🔗 [Abrir Ficha en HIVEX Plataforma]({web_link})\n")
 
-            if count > 3:
-                lines.append(f"➕ *Hay {count - 3} oportunidades más disponibles en este grupo dentro de la plataforma.*")
-
         else:
             lines.append(f"\n🔍 No he encontrado activos activos que cumplan con todos los filtros exactos en este instante.")
             lines.append(f"💡 **Recomendación del Asesor:**")
-            lines.append(f"He registrado la búsqueda en tu repositorio de HIVEX para notificarte en cuanto aparezca una oportunidad en {prov}.")
+            lines.append(f"He registrado la búsqueda en tu repositorio de HIVEX para notificarte en tiempo real en cuanto aparezca una oportunidad en {prov}.")
 
         lines.append(f"\n📂 *Consulta guardada en la pestaña 'Consultas & Asesor Telegram' del dashboard web.*")
 
@@ -1180,13 +1196,12 @@ class AdvisorEngine:
             intro_lines.append(f"• <b>Descuento medio vs Ref. MIVAU:</b> -{avg_disc:.1f}%")
             if avg_yield > 0:
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{avg_yield:.1f}% Yield</b>")
-            if is_relaxed and criteria.get("zone_or_neighborhood"):
-                intro_lines.append(f"\nℹ️ <i>No constan activos directos activos en '{html.escape(criteria.get('zone_or_neighborhood'))}'. Mostrando las mejores oportunidades reales verificadas en {html.escape(prov)}:</i>")
-            else:
-                intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
+            intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
         else:
-            intro_lines.append(f"• No se localizaron inmuebles con los criterios solicitados.")
+            intro_lines.append(f"• <i>No constan activos disponibles actualmente con los criterios exactos solicitados.</i>")
+            intro_lines.append(f"🔔 <i>He registrado tu alerta para notificarte tan pronto como ingrese un nuevo activo en esta zona.</i>")
         intro_text = "\n".join(intro_lines)
+
 
         # Resumen ejecutivo para almacenar en la ficha
         ai_summary = (
@@ -1232,7 +1247,8 @@ class AdvisorEngine:
 
         # 1. Parse de criterios con Cascada Descendente Gemini Flash
         criteria = await self.parse_query_intent(final_prompt)
-        target_count = int(criteria.get("target_count") or 3)
+        # Límite por defecto es hasta 20 fichas si no se especifica explícitamente en la consulta
+        target_count = int(criteria.get("target_count") or 20)
 
         # Detectar si la intención es asesoría de mercado / análisis estratégico de zonas vs búsqueda de inmuebles
         is_listing_request = any(w in final_prompt.lower() for w in [
@@ -1258,11 +1274,11 @@ class AdvisorEngine:
             matched_opps = []
             is_relaxed = False
         else:
-            # 2B. Búsqueda de Inmuebles: Obtener catálogo y filtrar
+            # 2B. Búsqueda de Inmuebles: Obtener catálogo y filtrar rigurosamente según lo solicitado
             all_opps = self.get_live_catalog_opportunities(db=db)
             matched_opps = self.filter_opportunities(all_opps, criteria)
 
-            # Si los resultados no son suficientes (< target_count), activar parseadores y sincronizadores en vivo
+            # Si los resultados no son suficientes (< target_count), activar sincronizadores bajo demanda si aplican
             if len(matched_opps) < target_count:
                 logger.info(
                     f"[Advisor Process] Resultados existentes ({len(matched_opps)}) < solicitados ({target_count}). "
@@ -1278,15 +1294,12 @@ class AdvisorEngine:
                     all_opps = self.get_live_catalog_opportunities(db=db)
                     matched_opps = self.filter_opportunities(all_opps, criteria)
 
-            # Si aún no hay resultados y hay provincia, aplicar filtro relajado
+            # NUNCA servir inmuebles desconectados de la pregunta ni inventar: si no hay coincidencias exactas, matched_opps queda vacío
             is_relaxed = False
-            if not matched_opps and criteria.get("province"):
-                relaxed_criteria = {"province": criteria["province"]}
-                matched_opps = self.filter_opportunities(all_opps, relaxed_criteria)
-                is_relaxed = True
 
-            # Recortar al top solicitado
+            # Recortar al top solicitado (hasta target_count, máximo 20)
             matched_opps = matched_opps[:target_count]
+
 
             # Generar respuesta de presentación de fichas
             response_text, title, ai_summary, intro_text = self.generate_advisor_response(

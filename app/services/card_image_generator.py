@@ -32,13 +32,41 @@ COLOR_RED = (220, 38, 38)             # red-600 #dc2626
 COLOR_FAV_BG = (15, 23, 42, 175)      # Fondo translúcido botón favorito
 COLOR_CLOSE_X = (100, 116, 139)       # Color icono 'x'
 
-VERIFIED_BACKUP_PHOTOS = [
-    "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&q=80",
-    "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&q=80",
-    "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&q=80",
-    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80",
-    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&q=80"
-]
+def create_technical_banner(width: int, height: int, opp: Dict[str, Any]) -> Image.Image:
+    """Genera una cabecera gráfica técnica oficial para activos sin fotografía o en edicto judicial."""
+    banner = Image.new("RGBA", (width, height), (15, 23, 42, 255))  # Slate 900
+    draw = ImageDraw.Draw(banner)
+
+    # Cuadrícula técnica de fondo
+    grid_color = (30, 41, 59, 255)  # Slate 800
+    for x in range(0, width, 24):
+        draw.line([(x, 0), (x, height)], fill=grid_color, width=1)
+    for y in range(0, height, 24):
+        draw.line([(0, y), (width, y)], fill=grid_color, width=1)
+
+    font_badge = get_font(12, bold=True)
+    font_main = get_font(16, bold=True)
+    font_sub = get_font(13, bold=False)
+
+    # Badge de cabecera
+    source_type = str(opp.get("source_type") or "subastas").upper()
+    badge_label = "EXPEDIENTE JUDICIAL BOE" if "SUB" in source_type else "FICHA TÉCNICA HIVEX"
+    draw.rounded_rectangle([(16, 16), (220, 42)], radius=6, fill=(37, 99, 235, 230))
+    draw.text((24, 22), badge_label, fill=(255, 255, 255, 255), font=font_badge)
+
+    ptype = str(opp.get("property_type") or "INMUEBLE").upper()
+    loc = str(opp.get("locality") or opp.get("province") or "ESPAÑA").upper()
+    draw.text((20, 60), f"{ptype} · {loc}", fill=(248, 250, 252, 255), font=font_main)
+
+    ref_val = opp.get("refcat") or opp.get("id_subasta") or opp.get("id") or ""
+    if ref_val:
+        draw.text((20, 90), f"ID / REF: {ref_val}", fill=(148, 163, 184, 255), font=font_sub)
+
+    notice_txt = "Fotografía no provista en edicto oficial · Verificación registral activa"
+    draw.text((20, 118), notice_txt, fill=(148, 163, 184, 200), font=font_sub)
+
+    return banner
+
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """Carga fuente TrueType del sistema con fallback seguro."""
@@ -147,14 +175,14 @@ def generate_opportunity_card_image(
     padding = 22
     content_w = card_w - (padding * 2)
 
-    # 1. Resolver fotos de la oportunidad
+    # 1. Resolver fotos de la oportunidad (incluyendo fotos de subastas y catastro oficiales)
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
 
     valid_images = [
         str(img) for img in raw_images
-        if img and "catastro.meh.es" not in str(img).lower() and str(img).startswith("http")
+        if img and str(img).startswith("http")
     ]
     total_photos = len(valid_images)
 
@@ -164,27 +192,26 @@ def generate_opportunity_card_image(
         curr_idx = photo_index % total_photos
         main_img_url = valid_images[curr_idx]
 
-    # Si no hay imagen de portal pero hay coordenadas, usar Street View Static
+    # Si no hay imagen pero hay coordenadas y clave Maps, usar Street View Static
     lat = opp.get("latitude")
     lon = opp.get("longitude")
     if not main_img_url and lat and lon and gmaps_api_key:
         main_img_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_api_key}"
 
-    if not main_img_url:
-        opp_id = str(opp.get("id") or "1")
-        photo_idx = abs(hash(opp_id)) % len(VERIFIED_BACKUP_PHOTOS)
-        main_img_url = VERIFIED_BACKUP_PHOTOS[photo_idx]
-
-    # 2. Descargar y preparar la foto
-    prop_img = fetch_image(main_img_url, timeout=4)
-    if not prop_img:
-        photo_idx = abs(hash(str(opp.get("id")))) % len(VERIFIED_BACKUP_PHOTOS)
-        prop_img = fetch_image(VERIFIED_BACKUP_PHOTOS[photo_idx], timeout=4)
+    # 2. Descargar y preparar la foto real del inmueble
+    prop_img = None
+    if main_img_url:
+        prop_img = fetch_image(main_img_url, timeout=4)
 
     img_h = 220
     if prop_img:
         prop_img = prop_img.resize((content_w, img_h), Image.Resampling.LANCZOS)
         prop_img = round_corners(prop_img, radius=12)
+    else:
+        # En ningún caso servir imágenes mockeadas o de stock: generar cabecera técnica oficial
+        prop_img = create_technical_banner(content_w, img_h, opp)
+        prop_img = round_corners(prop_img, radius=12)
+
 
     # 3. Preparar textos y medir alturas
     dummy_img = Image.new("RGBA", (card_w, 800), (255, 255, 255, 255))
@@ -393,31 +420,38 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     BODY_H = 300
     TOTAL_H = PHOTO_H + BODY_H
 
-    # 1. Obtener fotos válidas (descartando ortofotos y catastro)
+    # 1. Obtener fotos válidas reales de la oportunidad
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
     valid_images = [
-        i for i in raw_images
-        if i and "catastro.meh.es" not in str(i).lower() and str(i).startswith("http")
+        str(i) for i in raw_images
+        if i and str(i).startswith("http")
     ]
     if not valid_images:
-        valid_images = VERIFIED_BACKUP_PHOTOS[:3]
+        lat = opp.get("latitude")
+        lon = opp.get("longitude")
+        gmaps_key = settings.GOOGLE_MAPS_API_KEY if hasattr(settings, "GOOGLE_MAPS_API_KEY") else ""
+        if lat and lon and gmaps_key:
+            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_key}"]
 
-    # Descargar hasta 3 fotos
+    # Descargar hasta 3 fotos reales
     loaded_imgs = []
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
     for img_url in valid_images[:3]:
         try:
             req = urllib.request.Request(img_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
                 im = Image.open(io.BytesIO(resp.read())).convert("RGB")
                 loaded_imgs.append(im)
         except Exception:
             pass
 
     if not loaded_imgs:
-        loaded_imgs.append(Image.new("RGB", (W, PHOTO_H), color=(226, 232, 240)))
+        # Generar cabecera técnica oficial; nunca imágenes mockeadas
+        tech_banner = create_technical_banner(W, PHOTO_H, opp).convert("RGB")
+        loaded_imgs.append(tech_banner)
+
 
     # Fuentes
     font_title = get_font(23, bold=True)

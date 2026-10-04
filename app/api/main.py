@@ -16,7 +16,7 @@ if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"
 import time
 import logging
 logger = logging.getLogger(__name__)
-from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request, Header
+from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request, Header, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import urllib.request
@@ -422,9 +422,62 @@ def login(request: Optional[LoginRequest] = None, db: Session = Depends(get_db))
     }
 
 @app.get("/api/v1/auth/me")
-def get_me(current_user: dict = Depends(get_current_user)):
-    """Verifica el estado de la sesión activa."""
-    return {"status": "authenticated", "user": current_user}
+def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Verifica el estado de la sesión activa y devuelve los datos del usuario incluyendo favoritos."""
+    favs = []
+    try:
+        user_db = db.query(User).filter(User.username == current_user.get("username")).first()
+        if user_db and user_db.favorites_json:
+            favs = json.loads(user_db.favorites_json)
+    except Exception:
+        favs = []
+    user_data = dict(current_user)
+    user_data["favorites"] = favs
+    return {"status": "authenticated", "user": user_data}
+
+@app.get("/api/v1/user/favorites")
+def get_user_favorites(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Devuelve la lista de IDs favoritos del usuario autenticado."""
+    user_db = db.query(User).filter(User.username == current_user.get("username")).first()
+    if not user_db:
+        return {"favorites": []}
+    try:
+        favs = json.loads(user_db.favorites_json or "[]")
+    except Exception:
+        favs = []
+    return {"favorites": favs}
+
+@app.post("/api/v1/user/favorites/toggle")
+def toggle_user_favorite(payload: Dict[str, Any] = Body(...), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Añade o quita una oportunidad de los favoritos del usuario sincronizando plataforma web, Telegram y base de datos."""
+    opp_id = str(payload.get("opp_id") or "").strip().upper()
+    if not opp_id:
+        raise HTTPException(status_code=400, detail="opp_id es obligatorio")
+    user_db = db.query(User).filter(User.username == current_user.get("username")).first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    try:
+        favs = json.loads(user_db.favorites_json or "[]")
+    except Exception:
+        favs = []
+
+    # Normalizar id (remover SUB-SUB-)
+    clean_id = opp_id.replace("SUB-SUB-", "SUB-")
+    
+    # Comprobar si existe bajo cualquier variante
+    matches = [f for f in favs if f == clean_id or f == opp_id or f == clean_id.replace("SUB-", "")]
+    if matches:
+        for m in matches:
+            favs.remove(m)
+        is_fav = False
+    else:
+        favs.append(clean_id)
+        is_fav = True
+
+    user_db.favorites_json = json.dumps(favs)
+    db.commit()
+    return {"status": "success", "opp_id": clean_id, "is_favorite": is_fav, "favorites": favs}
+
 
 @app.get("/api/v1/sources/status")
 def get_sources_status(current_user: dict = Depends(get_current_user)):
@@ -1736,22 +1789,33 @@ def get_opportunity_by_id(
 ):
     """
     Recupera una oportunidad individual por su identificador único (ID de Market, PGOU, Edicto o Subasta BOE).
-    Permite acceso directo para Deep-Links procedentes del bot de alertas de Telegram.
+    Permite acceso directo para Deep-Links procedentes del bot de alertas de Telegram y enlaces externos.
     """
+    from app.core.geo_utils import get_spanish_province_coords
     clean_id = opp_id.strip()
     errors = []
 
-    # 1. Búsqueda directa en catálogo verificado de mercado (inmediata, sin llamadas externas)
+    # Generar variantes normalizadas de identificador (ej: SUB-SUB-JA-... -> SUB-JA-... y viceversa)
+    norm_id = clean_id
+    while norm_id.startswith("SUB-SUB-"):
+        norm_id = norm_id[4:]
+    candidates = {clean_id, norm_id, clean_id.upper(), norm_id.upper()}
+    if norm_id.startswith("SUB-"):
+        candidates.add(norm_id[4:])
+    else:
+        candidates.add(f"SUB-{norm_id}")
+
+    # 1. Búsqueda directa en catálogo verificado de mercado
     try:
         from app.connectors.market_scraper import MarketScraper
         ms = MarketScraper()
         catalog = ms._build_verified_market_catalog()
         for raw in catalog:
-            if str(raw.get("id", "")).strip().upper() == clean_id.upper():
+            raw_id = str(raw.get("id", "")).strip().upper()
+            if any(raw_id == c.upper() for c in candidates):
                 return ms._process_market_listing(dict(raw))
     except Exception as e_cat:
-        import traceback
-        errors.append(f"cat: {e_cat} [{traceback.format_exc()[-150:]}]")
+        errors.append(f"cat: {e_cat}")
 
     # 2. Búsqueda en Oportunidades de Mercado completas
     try:
@@ -1759,7 +1823,8 @@ def get_opportunity_by_id(
         ms = MarketScraper()
         m_items = ms.fetch_market_opportunities(live_scrape=False)
         for m in m_items:
-            if str(m.get("id")) == clean_id:
+            m_id = str(m.get("id", "")).strip().upper()
+            if any(m_id == c.upper() for c in candidates):
                 return m
     except Exception as e_m:
         errors.append(f"market: {e_m}")
@@ -1769,7 +1834,9 @@ def get_opportunity_by_id(
         from app.connectors.pgou_scraper import PGOUScraper
         p_items = PGOUScraper().fetch_pgou_opportunities()
         for p in p_items:
-            if str(p.get("id")) == clean_id or str(p.get("gazette_code")) == clean_id:
+            p_id = str(p.get("id", "")).strip().upper()
+            g_code = str(p.get("gazette_code", "")).strip().upper()
+            if any(c.upper() in (p_id, g_code) for c in candidates):
                 return p
     except Exception as e_p:
         errors.append(f"pgou: {e_p}")
@@ -1779,7 +1846,8 @@ def get_opportunity_by_id(
         from app.connectors.edictos_scraper import EdictosScraper
         e_items = EdictosScraper().fetch_edictos_opportunities()
         for e in e_items:
-            if str(e.get("id")) == clean_id:
+            e_id = str(e.get("id", "")).strip().upper()
+            if any(e_id == c.upper() for c in candidates):
                 return e
     except Exception as e_e:
         errors.append(f"edictos: {e_e}")
@@ -1788,53 +1856,92 @@ def get_opportunity_by_id(
     try:
         from sqlalchemy.orm import joinedload
         from sqlalchemy import or_
-        filters = [Auction.id_subasta == clean_id]
-        if clean_id.isdigit():
-            filters.append(Opportunity.id == int(clean_id))
+
+        filters = []
+        for c in candidates:
+            filters.append(Auction.id_subasta == c)
+            c_int = c.replace("SUB-", "")
+            if c_int.isdigit():
+                filters.append(Opportunity.id == int(c_int))
+                filters.append(Auction.id == int(c_int))
+
         opp = db.query(Opportunity).options(
             joinedload(Opportunity.auction).joinedload(Auction.parcel)
         ).outerjoin(Auction).filter(
             or_(*filters)
         ).first()
 
+        auc = None
         if opp:
-            # Reutilizar extractor normalizado de subastas
-            res_list = []
             auc = opp.auction
-            if auc:
-                strategy_val = opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy)
-                base_lat, base_lon = get_spanish_province_coords(auc.province, auc.locality)
-                lat = auc.lat or base_lat
-                lon = auc.lon or base_lon
-                return {
-                    "id": opp.id,
-                    "id_subasta": auc.id_subasta,
-                    "title": auc.title,
-                    "description": auc.description,
-                    "address": auc.address,
-                    "locality": auc.locality,
-                    "province": auc.province,
-                    "postal_code": auc.postal_code,
-                    "lat": lat,
-                    "lon": lon,
-                    "strategy": strategy_val,
-                    "property_type": auc.property_type or "VIVIENDA",
-                    "listing_price": opp.listing_price,
-                    "appraisal_value": auc.appraisal_value or opp.estimated_reference_value,
-                    "estimated_reference_value": opp.estimated_reference_value,
-                    "discount_percentage": opp.discount_percentage,
-                    "overall_score": opp.overall_score,
-                    "discount_score": opp.discount_score if hasattr(opp, "discount_score") else 80.0,
-                    "poi_score": opp.poi_score,
-                    "income_score": opp.income_score,
-                    "rental_yield": opp.rental_yield,
-                    "estimated_monthly_rent": opp.estimated_monthly_rent,
-                    "yield_score": opp.yield_score,
-                    "yield_color": opp.yield_color,
-                    "btl_score": opp.btl_score,
-                    "source_type": "subastas",
-                    "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}"
-                }
+        else:
+            # Buscar directamente en Auction si la oportunidad aún no se hubiera relacionado
+            auc = db.query(Auction).filter(
+                or_(*[Auction.id_subasta == c for c in candidates])
+            ).first()
+
+        if auc:
+            from app.connectors.boe_scraper import BOESubastasScraper
+            scraper = BOESubastasScraper()
+            strategy_val = opp.strategy.value if (opp and hasattr(opp.strategy, "value")) else (str(opp.strategy) if opp else "HOUSE_FLIPPING")
+            base_lat, base_lon = get_spanish_province_coords(auc.province, auc.locality)
+            lat = auc.lat or base_lat
+            lon = auc.lon or base_lon
+            
+            # Cargar imágenes oficiales (incluyendo ortofoto y parcela Catastro)
+            images_list = []
+            if auc.images_json:
+                try:
+                    raw_images = json.loads(auc.images_json)
+                    if isinstance(raw_images, list):
+                        images_list = [img for img in raw_images if img]
+                except Exception:
+                    images_list = []
+            
+            if not images_list and lat and lon and settings.GOOGLE_MAPS_API_KEY:
+                images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={settings.GOOGLE_MAPS_API_KEY}"]
+
+            full_address = f"{auc.address or ''}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
+            ref_val = (opp.estimated_reference_value if opp else 0.0) or (auc.appraisal_value or 0.0)
+            list_price = (opp.listing_price if opp else 0.0) or (auc.starting_bid or auc.appraisal_value or 0.0)
+            disc_pct = opp.discount_percentage if opp else (round(((ref_val - list_price) / ref_val) * 100, 1) if ref_val > list_price and ref_val > 0 else 0.0)
+
+            return {
+                "id": opp.id if opp else f"SUB-{auc.id_subasta}",
+                "id_subasta": auc.id_subasta,
+                "title": auc.title or "Inmueble en Subasta Pública",
+                "description": auc.description or "",
+                "address": auc.address or "",
+                "locality": auc.locality or "España",
+                "province": auc.province or "España",
+                "postal_code": getattr(auc, "postal_code", "") or "",
+                "full_address": full_address,
+                "lat": lat,
+                "lon": lon,
+                "strategy": strategy_val,
+                "property_type": auc.property_type or "VIVIENDA",
+                "listing_price": list_price,
+                "appraisal_value": auc.appraisal_value or ref_val,
+                "starting_bid": auc.starting_bid or list_price,
+                "property_ref_value": ref_val,
+                "estimated_reference_value": ref_val,
+                "discount_percentage": disc_pct,
+                "potential_gross_profit": max(0.0, round(ref_val - list_price, 2)),
+                "surface_m2": getattr(auc, "surface_m2", 90.0) or 90.0,
+                "overall_score": opp.overall_score if opp else 80.0,
+                "discount_score": getattr(opp, "discount_score", 80.0) if opp else 80.0,
+                "poi_score": getattr(opp, "poi_score", 70.0) if opp else 70.0,
+                "income_score": getattr(opp, "income_score", 75.0) if opp else 75.0,
+                "rental_yield": getattr(opp, "rental_yield", 0.0) if opp else 0.0,
+                "estimated_monthly_rent": getattr(opp, "estimated_monthly_rent", 0.0) if opp else 0.0,
+                "yield_score": getattr(opp, "yield_score", 0.0) if opp else 0.0,
+                "yield_color": getattr(opp, "yield_color", "#10b981") if opp else "#10b981",
+                "btl_score": getattr(opp, "btl_score", 75.0) if opp else 75.0,
+                "source_type": "subastas",
+                "images": images_list,
+                "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
+                "liens": scraper.extract_liens_info(auc.description or "", auc.id_subasta)
+            }
     except Exception as e_db:
         errors.append(f"db: {e_db}")
 
@@ -1842,6 +1949,7 @@ def get_opportunity_by_id(
     if errors:
         detail_msg += f" [Diag: {' ; '.join(errors)}]"
     raise HTTPException(status_code=404, detail=detail_msg)
+
 
 @app.get("/api/v1/opportunities/{opp_id}/enrich_gallery")
 def enrich_opportunity_gallery(

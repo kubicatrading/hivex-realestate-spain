@@ -215,7 +215,8 @@ class TelegramAdvisorBot:
         - Fila 3: [ 🤍 Guardar en Favoritos ] / [ ❤️ Guardado en Favoritos ] (Pulsable e interactivo)
         """
         opp_id_clean = str(opp_id).strip()
-        web_link = f"{self.platform_url}/?opp_id={opp_id_clean}"
+        norm_id = re.sub(r'^(SUB-)+', 'SUB-', opp_id_clean) if ('JA-' in opp_id_clean or 'SUB-' in opp_id_clean) else opp_id_clean
+        web_link = f"{self.platform_url}/?opp_id={norm_id}"
         if not portal_url:
             portal_url = web_link
 
@@ -224,10 +225,11 @@ class TelegramAdvisorBot:
         keyboard = [
             [{"text": "🔍 Ver Ficha en HIVEX", "url": web_link}],
             [{"text": "🌐 Visitar Portal", "url": portal_url}],
-            [{"text": fav_text, "callback_data": f"fav:{opp_id_clean}"}]
+            [{"text": fav_text, "callback_data": f"fav:{norm_id}"}]
         ]
 
         return {"inline_keyboard": keyboard}
+
 
 
     async def answer_callback_query(
@@ -681,12 +683,13 @@ class TelegramAdvisorBot:
                 else:
                     await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
 
-                target_count = int(res.get("criteria", {}).get("target_count") or 5)
-                # Enviar exactamente las oportunidades solicitadas
+                target_count = int(res.get("criteria", {}).get("target_count") or 20)
+                # Enviar exactamente las oportunidades solicitadas (hasta target_count, si no hay más NO se inventan)
                 cards_to_send = matched_opps[:target_count]
                 for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.4)
+                    await asyncio.sleep(0.35)
+
             else:
                 # Si no hubo fichas (p.ej. respuesta analítica de mercado o no hay matches), despachar el texto de respuesta del asesor
                 await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
