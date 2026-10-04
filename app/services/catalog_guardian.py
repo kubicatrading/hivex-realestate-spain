@@ -281,11 +281,13 @@ class CatalogGuardian:
 _guardian_thread = None
 _guardian_running = False
 
-def start_periodic_guardian_worker(interval_seconds: int = 43200, batch_size: int = 25):
+def start_periodic_guardian_worker(interval_seconds: int = 43200, batch_size: int = 25, max_items_per_run: Optional[int] = None):
     """
     Inicia un worker en segundo plano que ejecuta el Guardián de forma proactiva y programada
-    cada `interval_seconds` (por defecto cada 12 horas) procesando lotes de `batch_size`.
+    cada `interval_seconds` (por defecto cada 12 horas) procesando lotes de `batch_size` / `max_items_per_run`.
     """
+    if max_items_per_run is not None:
+        batch_size = max_items_per_run
     global _guardian_thread, _guardian_running
     if _guardian_running:
         return
