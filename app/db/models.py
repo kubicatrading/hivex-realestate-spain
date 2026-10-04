@@ -159,6 +159,7 @@ class User(Base):
     is_admin = Column(Boolean, default=True, nullable=False)
     telegram_id = Column(String(50), unique=True, index=True, nullable=True)
     telegram_username = Column(String(100), index=True, nullable=True)
+    favorites_json = Column(Text, default="[]")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

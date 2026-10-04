@@ -20,8 +20,11 @@ POSTAL_CODE_RENTAL_PRICES: Dict[str, float] = {
     "28015": 20.5, "28005": 19.5, "28008": 20.0, "28045": 18.5, # Arganzuela / Moncloa
     "28028": 18.0, "28020": 19.0, "28033": 17.0, "28043": 16.5, # Tetuán / Hortaleza
     "28019": 15.5, "28025": 15.0, "28047": 14.5, "28044": 14.0, # Carabanchel / Latina
+    "28011": 16.0, # Latina - Puerta del Ángel / Madrid Río
     "28018": 14.5, "28038": 14.0, "28053": 13.5, "28031": 14.5, # Vallecas / Villa de Vallecas
     "28032": 14.0, "28052": 14.5, # Vicálvaro / El Cañaveral
+    "28320": 12.2, "28340": 11.5, # Pinto / Valdemoro
+    "28801": 12.5, "28802": 12.0, "28803": 12.8, "28806": 13.5, # Alcalá de Henares
     "28": 17.5, # Resto provincia Madrid media
 
     # BARCELONA (08)
@@ -45,8 +48,8 @@ POSTAL_CODE_RENTAL_PRICES: Dict[str, float] = {
     "29": 14.5, # Resto provincia Málaga
 
     # ALICANTE (03)
-    "03001": 13.0, "03002": 12.5, "03003": 12.0, "03005": 11.5, # Alicante Centro / Ensanche
-    "03540": 14.5, "03501": 14.0, "03502": 13.5, # Playa San Juan / Benidorm
+    "03001": 13.0, "03002": 12.5, "03003": 12.0, "03004": 12.2, "03005": 11.5, # Alicante Centro / Ensanche / Mercado
+    "03540": 14.5, "03501": 14.0, "03502": 13.5, "03550": 11.0, # Playa San Juan / Benidorm / Sant Joan
     "03": 11.2, # Resto provincia Alicante
 
     # TARRAGONA (43)

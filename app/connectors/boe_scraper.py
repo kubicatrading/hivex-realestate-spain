@@ -875,13 +875,13 @@ class BOESubastasScraper:
                     # Detección de estructura por lotes
                     lotes_info = self.extract_lotes_info(html_ver1 + " " + html_ver3, desc)
 
-                    # Geolocalización y ortofoto
+                    # Geolocalización y Street View (preferir fotografía a nivel de calle antes que ortofoto aérea)
                     lat, lon = self.geocode_address(address, locality, province, refcat=refcat)
                     images = []
-                    if lat and lon:
-                        d = 0.0015
-                        cat_url = f"https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx?SERVICE=WMS&SRS=EPSG:4326&REQUEST=GetMap&LAYERS=Catastro,PARCELA&STYLES=default&FORMAT=image/png&TRANSPARENT=FALSE&BBOX={lon-d},{lat-d},{lon+d},{lat+d}&WIDTH=800&HEIGHT=600"
-                        images.append(cat_url)
+                    gmaps_key = settings.GOOGLE_MAPS_API_KEY
+                    if lat and lon and gmaps_key:
+                        sv_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={lat},{lon}&fov=90&heading=235&pitch=10&key={gmaps_key}"
+                        images.append(sv_url)
 
                     desc_lower = desc.lower()
                     ptype = "Solar" if any(w in desc_lower for w in ["solar", "terreno", "parcela", "finca rústica", "rustica", "suelo"]) else "Vivienda"

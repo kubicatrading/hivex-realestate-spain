@@ -247,7 +247,19 @@ CP_DISTRICT_MARKET_2X2: Dict[str, Tuple[Dict[str, Dict[str, float]], str]] = {
     "28053": ({"URBANO": {"INMUEBLE": 2200.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 14.0}}, "Puente de Vallecas - Entrevías / San Diego"),
     "28054": ({"URBANO": {"INMUEBLE": 2700.0, "SOLAR": 950.0}, "RÚSTICO": {"INMUEBLE": 380.0, "SOLAR": 16.0}}, "Carabanchel - PAU / La Peseta"),
     "28055": ({"URBANO": {"INMUEBLE": 4700.0, "SOLAR": 1650.0}, "RÚSTICO": {"INMUEBLE": 550.0, "SOLAR": 22.0}}, "Fuencarral - Las Tablas"),
+    "28320": ({"URBANO": {"INMUEBLE": 2050.0, "SOLAR": 700.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Pinto (Madrid)"),
+    "28340": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 680.0}, "RÚSTICO": {"INMUEBLE": 310.0, "SOLAR": 13.0}}, "Valdemoro (Madrid)"),
+    "28801": ({"URBANO": {"INMUEBLE": 2150.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 14.0}}, "Alcalá de Henares - Centro"),
+    "28802": ({"URBANO": {"INMUEBLE": 2000.0, "SOLAR": 700.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Alcalá de Henares - Puerta de Madrid / El Juncal"),
+    "28803": ({"URBANO": {"INMUEBLE": 2250.0, "SOLAR": 780.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 15.0}}, "Alcalá de Henares - Ensanche / Espartales"),
+    "28804": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 680.0}, "RÚSTICO": {"INMUEBLE": 310.0, "SOLAR": 13.0}}, "Alcalá de Henares - Chorrillo"),
+    "28805": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 720.0}, "RÚSTICO": {"INMUEBLE": 325.0, "SOLAR": 14.0}}, "Alcalá de Henares - Val"),
+    "28806": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "Alcalá de Henares - La Garena"),
     "28814": ({"URBANO": {"INMUEBLE": 1450.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 12.0}}, "Daganzo de Arriba"),
+    "03001": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 15.0}}, "Alicante - Centro Tradicional"),
+    "03002": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 720.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Alicante - Casco Antiguo"),
+    "03004": ({"URBANO": {"INMUEBLE": 2200.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 14.0}}, "Alicante - Mercado"),
+    "03550": ({"URBANO": {"INMUEBLE": 1850.0, "SOLAR": 650.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 12.0}}, "Sant Joan d'Alacant"),
 
     # === BARCELONA CAPITAL (Todos los CPs y Distritos) ===
     "08001": ({"URBANO": {"INMUEBLE": 3800.0, "SOLAR": 1300.0}, "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 20.0}}, "Ciutat Vella - El Raval"),
@@ -780,7 +792,42 @@ DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX: Dict[str, Dict[str, str]] = {
         "barajas": "28042",
         "moratalaz": "28030",
         "vicalvaro": "28032",
-        "vicálvaro": "28032"
+        "vicálvaro": "28032",
+        "puerta del angel": "28011",
+        "puerta del ángel": "28011",
+        "madrid rio": "28011",
+        "madrid río": "28011",
+        "avenida de portugal": "28011",
+        "pinto": "28320",
+        "valdemoro": "28340",
+        "alcala de henares": "28802",
+        "alcalá de henares": "28802",
+        "puerta de madrid": "28802",
+        "el juncal": "28802",
+        "reyes catolicos": "28802",
+        "reyes católicos": "28802",
+        "la garena": "28806",
+        "getafe": "28901",
+        "leganes": "28911",
+        "leganés": "28911",
+        "alcorcon": "28921",
+        "alcorcón": "28921",
+        "mostoles": "28931",
+        "móstoles": "28931",
+        "fuenlabrada": "28941"
+    },
+    # Alicante (03)
+    "03": {
+        "alicante": "03001",
+        "alacant": "03001",
+        "centro tradicional": "03001",
+        "mercado": "03004",
+        "casco antiguo": "03002",
+        "san blas": "03005",
+        "playa san juan": "03540",
+        "sant joan d'alacant": "03550",
+        "sant joan": "03550",
+        "san juan de alicante": "03550"
     },
     # Barcelona (08)
     "08": {
@@ -821,13 +868,21 @@ DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX: Dict[str, Dict[str, str]] = {
 }
 
 def extract_postal_code(text: str) -> Optional[str]:
-    """Extrae un código postal español válido (5 dígitos, 01000 - 52999) del texto."""
+    """Extrae un código postal español válido (5 dígitos, 01000 - 52999) del texto o URLs."""
     if not text:
         return None
+    # 1. Búsqueda estándar por delimitador de palabra
     matches = re.findall(r'\b(0[1-9]|[1-4][0-9]|5[0-2])\d{3}\b', text)
     if matches:
-        m = re.search(r'\b(0[1-9]|[1-4][0-9]|5[0-2])\d{3}\b', text)
-        return m.group(0) if m else None
+        for cp in matches:
+            if cp not in ("2023", "2024", "2025", "2026"):
+                return cp
+    # 2. Búsqueda en URLs o concatenaciones sin espacio (ej: 'el_juncal28802-666' de pisos.com)
+    m_concat = re.findall(r'(?:^|[^0-9])((?:0[1-9]|[1-4][0-9]|5[0-2])\d{3})(?:[^0-9]|$)', text)
+    if m_concat:
+        for cp in m_concat:
+            if cp not in ("2023", "2024", "2025", "2026"):
+                return cp
     return None
 
 def resolve_meso_market_price_2x2(
