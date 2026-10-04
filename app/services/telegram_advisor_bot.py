@@ -365,7 +365,7 @@ class TelegramAdvisorBot:
         # 1. Intentar renderizar la ficha gráfica estilo WhatsApp con fotos agrupadas y cuerpo blanco
         try:
             from app.services.card_image_generator import generate_whatsapp_style_card
-            card_bytes = generate_whatsapp_style_card(opp)
+            card_bytes = await asyncio.to_thread(generate_whatsapp_style_card, opp)
             if card_bytes:
                 photo_url = f"{self.api_base}/sendPhoto"
                 files = {"photo": ("hivex_card.png", card_bytes, "image/png")}
@@ -376,7 +376,7 @@ class TelegramAdvisorBot:
                 if reply_to_message_id:
                     data["reply_to_message_id"] = str(reply_to_message_id)
 
-                async with httpx.AsyncClient(timeout=25.0) as client:
+                async with httpx.AsyncClient(timeout=45.0) as client:
                     res = await client.post(photo_url, data=data, files=files)
                     if res.status_code == 200:
                         res_data = res.json().get("result", {})
@@ -388,7 +388,7 @@ class TelegramAdvisorBot:
                     else:
                         logger.warning(f"sendPhoto devolvió {res.status_code}: {res.text}. Intentando fallback...")
         except Exception as e_card:
-            logger.warning(f"Excepción renderizando tarjeta gráfica WhatsApp: {e_card}")
+            logger.warning(f"Excepción renderizando tarjeta gráfica WhatsApp: {repr(e_card)}", exc_info=True)
 
         # 2. Fallback a mensaje HTML si el upload o render de imagen fallase
         card_html = advisor_engine.generate_telegram_card_html(opp)
@@ -682,36 +682,14 @@ class TelegramAdvisorBot:
                     await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
 
                 target_count = int(res.get("criteria", {}).get("target_count") or 5)
-                is_group = int(chat_id) < 0
-                max_visual_cards = min(5 if is_group else min(target_count, 5), len(matched_opps))
-                for opp in matched_opps[:max_visual_cards]:
+                # Enviar exactamente las oportunidades solicitadas
+                cards_to_send = matched_opps[:target_count]
+                for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.5)
-
-                # Si hay más oportunidades que las mostradas en fichas visuales, ofrecer enlace directo al dashboard
-                if len(matched_opps) > max_visual_cards:
-                    remaining_count = len(matched_opps) - max_visual_cards
-                    zone_label = res.get("criteria", {}).get("zone_or_neighborhood") or res.get("criteria", {}).get("province") or "España"
-                    explore_markup = {
-                        "inline_keyboard": [
-                            [{"text": f"🔍 Ver las {len(matched_opps)} Oportunidades en HIVEX", "url": f"{self.platform_url}/#catalog"}]
-                        ]
-                    }
-                    extra_msg = (
-                        f"📊 <i>He generado {max_visual_cards} fichas visuales interactivas para {zone_label}. "
-                        f"Dispones de {remaining_count} oportunidades verificadas adicionales en la plataforma HIVEX.</i>"
-                    )
-                    await self.send_message(chat_id, extra_msg, parse_mode="HTML", reply_markup=explore_markup)
-
-                # 3. Mensaje de cierre confirmando persistencia
-                closing_msg = (
-                    f"💾 <i>Las fichas han sido registradas de forma persistente en tu base de datos y repositorio de conocimiento HIVEX.</i>\n"
-                    f"🔗 <i>Puedes explorarlas interactivamente en la pestaña 'Consultas & Asesor Telegram' del dashboard web.</i>"
-                )
-                await self.send_message(chat_id, closing_msg, parse_mode="HTML")
+                    await asyncio.sleep(0.4)
             else:
-                # Si no hubo matches, despachar el texto de respuesta del asesor
-                await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
+                # Si no hubo fichas (p.ej. respuesta analítica de mercado o no hay matches), despachar el texto de respuesta del asesor
+                await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
 
             return {
                 "status": "success",

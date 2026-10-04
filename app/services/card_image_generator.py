@@ -410,7 +410,7 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     for img_url in valid_images[:3]:
         try:
             req = urllib.request.Request(img_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
                 im = Image.open(io.BytesIO(resp.read())).convert("RGB")
                 loaded_imgs.append(im)
         except Exception:
