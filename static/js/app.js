@@ -987,7 +987,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const valid = opp.images
                 .filter(img => img && typeof img === 'string')
                 .map(img => img.replace('?rule=web_listing_440x330', ''))
-                .filter(img => !img.toLowerCase().includes('catastro') && !img.toLowerCase().includes('cartografia/wms'));
+                .filter(img => {
+                    const low = img.toLowerCase();
+                    return !low.includes('catastro') &&
+                           !low.includes('cartografia') &&
+                           !low.includes('wms') &&
+                           !low.includes('ortofoto') &&
+                           !low.includes('pnoa') &&
+                           !low.includes('sedecatastro');
+                });
 
             if (valid.length > 0) {
                 list = [...valid];
@@ -996,7 +1004,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Para subastas y oportunidades sin reportaje de portal comercial: Exclusivamente foto de fachada Street View
         if (list.length === 0) {
-            const locParam = (opp.lat && opp.lon) ? `${opp.lat},${opp.lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
+            const lat = opp.lat || opp.latitude;
+            const lon = opp.lon || opp.longitude;
+            const locParam = (lat && lon) ? `${lat},${lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
             const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
             const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${locParam}&key=${gmapsKey}`;
             list = [streetViewUrl];

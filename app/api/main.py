@@ -1200,7 +1200,10 @@ def get_opportunities(
                                 img for img in raw_images
                                 if isinstance(img, str) and img.strip()
                                 and "catastro" not in img.lower()
-                                and "cartografia/wms" not in img.lower()
+                                and "cartografia" not in img.lower()
+                                and "wms" not in img.lower()
+                                and "ortofoto" not in img.lower()
+                                and "pnoa" not in img.lower()
                             ]
                     except Exception:
                         images_list = []
@@ -1212,6 +1215,15 @@ def get_opportunities(
                 
                 full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
                 full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
+
+                # Prioridad a fotografía de fachada Google Street View si no hay fotos de reportaje comercial (sin ortofotos)
+                if not images_list:
+                    gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
+                    if lat and lon and gmaps_key:
+                        images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={gmaps_key}"]
+                    elif full_address and gmaps_key and full_address != "Dirección no especificada":
+                        images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(full_address)}&key={gmaps_key}"]
+
 
                 # Financial metrics calculation: Strictly take "Valor subasta" literal from BOE
                 starting_bid_val = auc.starting_bid if (auc and auc.starting_bid and auc.starting_bid > 0) else 0.0
@@ -1888,20 +1900,32 @@ def get_opportunity_by_id(
             lat = auc.lat or base_lat
             lon = auc.lon or base_lon
             
-            # Cargar imágenes oficiales (incluyendo ortofoto y parcela Catastro)
+            # Cargar imágenes oficiales (EXCLUYENDO ortofotos satelitales y mapas Catastro/WMS)
             images_list = []
             if auc.images_json:
                 try:
                     raw_images = json.loads(auc.images_json)
                     if isinstance(raw_images, list):
-                        images_list = [img for img in raw_images if img]
+                        images_list = [
+                            img for img in raw_images
+                            if isinstance(img, str) and img.strip()
+                            and "catastro" not in img.lower()
+                            and "cartografia" not in img.lower()
+                            and "wms" not in img.lower()
+                            and "ortofoto" not in img.lower()
+                            and "pnoa" not in img.lower()
+                        ]
                 except Exception:
                     images_list = []
             
-            if not images_list and lat and lon and settings.GOOGLE_MAPS_API_KEY:
-                images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={settings.GOOGLE_MAPS_API_KEY}"]
-
             full_address = f"{auc.address or ''}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
+            gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
+            if not images_list and gmaps_key:
+                if lat and lon:
+                    images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={gmaps_key}"]
+                elif full_address:
+                    images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(full_address)}&key={gmaps_key}"]
+
             ref_val = (opp.estimated_reference_value if opp else 0.0) or (auc.appraisal_value or 0.0)
             list_price = (opp.listing_price if opp else 0.0) or (auc.starting_bid or auc.appraisal_value or 0.0)
             disc_pct = opp.discount_percentage if opp else (round(((ref_val - list_price) / ref_val) * 100, 1) if ref_val > list_price and ref_val > 0 else 0.0)

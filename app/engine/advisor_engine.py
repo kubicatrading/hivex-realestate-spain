@@ -486,8 +486,27 @@ class AdvisorEngine:
                         except Exception:
                             raw_imgs = []
 
-                    if not raw_imgs and getattr(auc, "latitude", None) and getattr(auc, "longitude", None) and settings.GOOGLE_MAPS_API_KEY:
-                        raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={auc.latitude},{auc.longitude}&fov=90&heading=235&pitch=10&key={settings.GOOGLE_MAPS_API_KEY}"]
+                    # Excluir estrictamente ortofotos o mapas de Catastro/WMS/PNOA
+                    raw_imgs = [
+                        img for img in raw_imgs
+                        if "catastro" not in img.lower()
+                        and "cartografia" not in img.lower()
+                        and "wms" not in img.lower()
+                        and "ortofoto" not in img.lower()
+                        and "pnoa" not in img.lower()
+                    ]
+
+                    # Prioridad a fotografía de fachada Google Street View si no hay fotos de reportaje comercial
+                    gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
+                    lat_auc = getattr(auc, "latitude", None)
+                    lon_auc = getattr(auc, "longitude", None)
+                    if not raw_imgs and gmaps_key:
+                        if lat_auc and lon_auc:
+                            raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={lat_auc},{lon_auc}&fov=90&heading=235&pitch=10&key={gmaps_key}"]
+                        elif auc.address:
+                            addr_full = f"{auc.address}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
+                            raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={quote_plus(addr_full)}&fov=90&heading=235&pitch=10&key={gmaps_key}"]
+
 
                     all_opps.append({
                         "id": sub_id,

@@ -11,15 +11,19 @@ Renderiza una ficha visual gráfica idéntica a la preview de Google Maps de HIV
 """
 
 import io
+import os
 import math
 import logging
 import urllib.request
+from urllib.parse import quote_plus
 from typing import Dict, Any, Optional, Tuple, List
 from PIL import Image, ImageDraw, ImageFont
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Paleta de colores oficial Google Maps / HIVEX Light Popup
+
 COLOR_CARD_BG = (255, 255, 255)       # Blanco puro
 COLOR_BORDER = (203, 213, 225)        # slate-300 #cbd5e1
 COLOR_TEXT_TITLE = (15, 23, 42)       # slate-900 #0f172a
@@ -175,7 +179,7 @@ def generate_opportunity_card_image(
     padding = 22
     content_w = card_w - (padding * 2)
 
-    # 1. Resolver fotos de la oportunidad (incluyendo fotos de subastas y catastro oficiales)
+    # 1. Resolver fotos de la oportunidad (EXCLUYENDO estrictamente ortofotos satelitales y mapas Catastro/WMS)
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
@@ -183,20 +187,34 @@ def generate_opportunity_card_image(
     valid_images = [
         str(img) for img in raw_images
         if img and str(img).startswith("http")
+        and "catastro" not in str(img).lower()
+        and "cartografia" not in str(img).lower()
+        and "wms" not in str(img).lower()
+        and "ortofoto" not in str(img).lower()
+        and "pnoa" not in str(img).lower()
     ]
-    total_photos = len(valid_images)
 
+    # Prioridad absoluta a la API de Google Street View para fotografías de fachada/calle
+    if not gmaps_api_key:
+        gmaps_api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+    lat = opp.get("latitude") or opp.get("lat")
+    lon = opp.get("longitude") or opp.get("lon")
+    addr = opp.get("full_address") or opp.get("address")
+
+    if not valid_images and gmaps_api_key:
+        if lat and lon:
+            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_api_key}"]
+        elif addr:
+            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={quote_plus(addr)}&fov=80&heading=70&pitch=0&key={gmaps_api_key}"]
+
+    total_photos = len(valid_images)
     main_img_url = None
     curr_idx = 0
     if valid_images:
         curr_idx = photo_index % total_photos
         main_img_url = valid_images[curr_idx]
 
-    # Si no hay imagen pero hay coordenadas y clave Maps, usar Street View Static
-    lat = opp.get("latitude")
-    lon = opp.get("longitude")
-    if not main_img_url and lat and lon and gmaps_api_key:
-        main_img_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_api_key}"
 
     # 2. Descargar y preparar la foto real del inmueble
     prop_img = None
@@ -420,20 +438,29 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     BODY_H = 300
     TOTAL_H = PHOTO_H + BODY_H
 
-    # 1. Obtener fotos válidas reales de la oportunidad
+    # 1. Obtener fotos válidas reales de la oportunidad (EXCLUYENDO ortofotos satelitales y mapas Catastro/WMS)
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
     valid_images = [
         str(i) for i in raw_images
         if i and str(i).startswith("http")
+        and "catastro" not in str(i).lower()
+        and "cartografia" not in str(i).lower()
+        and "wms" not in str(i).lower()
+        and "ortofoto" not in str(i).lower()
+        and "pnoa" not in str(i).lower()
     ]
     if not valid_images:
-        lat = opp.get("latitude")
-        lon = opp.get("longitude")
-        gmaps_key = settings.GOOGLE_MAPS_API_KEY if hasattr(settings, "GOOGLE_MAPS_API_KEY") else ""
+        lat = opp.get("latitude") or opp.get("lat")
+        lon = opp.get("longitude") or opp.get("lon")
+        addr = opp.get("full_address") or opp.get("address")
+        gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
         if lat and lon and gmaps_key:
             valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_key}"]
+        elif addr and gmaps_key:
+            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={quote_plus(addr)}&fov=80&heading=70&pitch=0&key={gmaps_key}"]
+
 
     # Descargar hasta 3 fotos reales
     loaded_imgs = []
