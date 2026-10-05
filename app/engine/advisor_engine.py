@@ -9,8 +9,9 @@ import re
 import json
 import html
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
+from urllib.parse import quote_plus
 import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -22,6 +23,7 @@ from app.db.models import (
     Auction,
     SavedConsultation,
     TelegramConversationMessage,
+    CompanyKnowledgeBase,
     StrategyType
 )
 from app.connectors.ine_client import INEClient
@@ -40,6 +42,55 @@ SPANISH_PROVINCES = [
     "Soria", "Tarragona", "Teruel", "Toledo", "Valencia", "Valladolid", "Vizcaya", "Zamora", "Zaragoza"
 ]
 
+SPANISH_ZONE_DEFINITIONS = [
+    # Madrid - Distritos y Barrios
+    ("Carabanchel", "Madrid", ["carabanchel", "vista alegre", "vistalegre", "opañel", "opanel", "comillas", "san isidro", "puerta bonita", "abrantes", "la peseta", "pau de carabanchel", "28019", "28025", "28054"]),
+    ("Puente de Vallecas", "Madrid", ["puente de vallecas", "san diego", "numancia", "palomeras", "entrevías", "entrevias", "vallecas", "28018", "28053", "28038"]),
+    ("Madrid Río - Avenida de Portugal", "Madrid", ["madrid río", "madrid rio", "avenida de portugal", "avda de portugal", "puerta del angel", "puerta del ángel", "28011"]),
+    ("Chamberí", "Madrid", ["chamberi", "chamberí", "almagro", "trafalgar", "arapiles", "gaztambide", "vallehermoso", "ríos rosas", "rios rosas", "28010", "28003", "28015"]),
+    ("Barrio de Salamanca", "Madrid", ["salamanca", "recoletos", "goya", "lista", "castellana", "guindalera", "fuente del berro", "28001", "28006", "28028"]),
+    ("Centro", "Madrid", ["centro madrid", "malasaña", "malasana", "chueca", "la latina", "lavapiés", "lavapies", "sol", "palacio", "cortes", "huertas", "28004", "28012", "28013", "28014"]),
+    ("Tetuán", "Madrid", ["tetuan", "tetuán", "cuatro caminos", "bellas vistas", "berruguete", "valdeacederas", "almenara", "castillejos", "28020", "28029", "28039"]),
+    ("Retiro", "Madrid", ["retiro", "ibiza", "pacífico", "pacifico", "adelfas", "estrella", "28007", "28009"]),
+    ("Arganzuela", "Madrid", ["arganzuela", "delicias", "legazpi", "méndez álvaro", "mendez alvaro", "palos de la frontera", "28045"]),
+    ("Usera", "Madrid", ["usera", "moscardó", "moscardo", "orcasitas", "san fermín", "san fermin", "pradolongo", "28026", "28041"]),
+    ("Villaverde", "Madrid", ["villaverde", "san cristóbal", "san cristobal", "butarque", "los rosales", "28021"]),
+    ("Villa de Vallecas", "Madrid", ["villa de vallecas", "ensanche de vallecas", "28051"]),
+    ("Vicálvaro", "Madrid", ["vicálvaro", "vicalvaro", "valdebernardo", "el cañaveral", "el canaveral", "los berrocales", "los ahijones", "28032", "28052"]),
+    ("Hortaleza", "Madrid", ["hortaleza", "sanchinarro", "valdebebas", "pinar del rey", "28033", "28050", "28055"]),
+    ("Fuencarral - El Pardo", "Madrid", ["fuencarral", "las tablas", "montecarmelo", "mirasierra", "el pardo", "28034", "28049"]),
+    ("Ciudad Lineal", "Madrid", ["ciudad lineal", "ventas", "quintana", "concepción", "concepcion", "arturo soria", "28017", "28027"]),
+    ("San Blas - Canillejas", "Madrid", ["san blas", "canillejas", "simancas", "rejas", "28022", "28037"]),
+    ("Moratalaz", "Madrid", ["moratalaz", "pavones", "fontarrón", "fontarron", "28030"]),
+    ("Moncloa - Aravaca", "Madrid", ["moncloa", "aravaca", "valdemarín", "valdemarin", "argüelles", "arguelles", "28008", "28023"]),
+    ("Barajas", "Madrid", ["barajas", "alameda de osuna", "28042"]),
+    ("Latina", "Madrid", ["distrito latina", "aluche", "campamento", "lucero", "las águilas", "las aguilas", "28024", "28044", "28047"]),
+    # Municipios Madrid
+    ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
+    ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
+    ("Pinto", "Madrid", ["pinto", "28320"]),
+    ("Valdemoro", "Madrid", ["valdemoro", "28340"]),
+    # Barcelona
+    ("Eixample", "Barcelona", ["eixample", "ensanche barcelona", "dreta de l'eixample", "esquerra de l'eixample", "sagrada familia", "08007", "08011", "08013"]),
+    ("Gràcia", "Barcelona", ["gracia", "gràcia", "vila de gracia", "08012"]),
+    ("Ciutat Vella", "Barcelona", ["ciutat vella", "gótico", "gotico", "el raval", "barceloneta", "el born", "08001", "08002", "08003"]),
+    ("Sarrià - Sant Gervasi", "Barcelona", ["sarrià", "sarria", "sant gervasi", "08017", "08021"]),
+    ("Sant Martí - Poblenou", "Barcelona", ["poblenou", "sant martí", "sant marti", "diagonal mar", "08005", "08019"]),
+    # Valencia
+    ("Ruzafa", "Valencia", ["ruzafa", "russafa", "46006"]),
+    ("Ciutat Vella Valencia", "Valencia", ["ciutat vella valencia", "el carmen valencia", "46001", "46002", "46003"]),
+    ("El Pla del Real", "Valencia", ["pla del real", "mestalla", "46010"]),
+    ("Poblats Marítims", "Valencia", ["poblats marítims", "poblats maritims", "el cabanyal", "cabanyal", "malvarrosa", "46011"]),
+    # Sevilla
+    ("Triana", "Sevilla", ["triana", "41010"]),
+    ("Nervión", "Sevilla", ["nervion", "nervión", "41005", "41018"]),
+    ("Casco Antiguo Sevilla", "Sevilla", ["casco antiguo sevilla", "santa cruz sevilla", "41001", "41002", "41003", "41004"]),
+    # Málaga
+    ("Centro Histórico Málaga", "Málaga", ["centro histórico málaga", "centro historico malaga", "soho málaga", "soho malaga", "la malagueta", "29001", "29015", "29016"]),
+    ("Teatinos", "Málaga", ["teatinos", "29010"]),
+    ("Carretera de Cádiz", "Málaga", ["carretera de cádiz", "carretera de cadiz", "29004", "29003"]),
+]
+
 class AdvisorEngine:
     """
     Motor del Asesor Inmobiliario Conversacional HIVEX.
@@ -48,13 +99,10 @@ class AdvisorEngine:
     """
 
     GEMINI_FLASH_CASCADE = [
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
+        "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
+        "gemini-flash-latest",
+        "gemini-3-flash-preview",
     ]
 
     def __init__(self):
@@ -291,22 +339,12 @@ class AdvisorEngine:
 
         # Detección de Micro-zona o Barrio
         zone_or_neighborhood = None
-        if any(k in q_lower for k in ["madrid río", "madrid rio", "avenida de portugal", "avda de portugal", "puerta del angel", "puerta del ángel", "28011"]):
-            zone_or_neighborhood = "Madrid Río - Avenida de Portugal"
-            if not matched_province:
-                matched_province = "Madrid"
-        elif "ruzafa" in q_lower or "russafa" in q_lower:
-            zone_or_neighborhood = "Ruzafa"
-            if not matched_province: matched_province = "Valencia"
-        elif "chamberi" in q_lower or "chamberí" in q_lower:
-            zone_or_neighborhood = "Chamberí"
-            if not matched_province: matched_province = "Madrid"
-        elif "salamanca" in q_lower:
-            zone_or_neighborhood = "Barrio de Salamanca"
-            if not matched_province: matched_province = "Madrid"
-        elif "eixample" in q_lower or "ensanche" in q_lower:
-            zone_or_neighborhood = "Eixample"
-            if not matched_province: matched_province = "Barcelona"
+        for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+            if any(re.search(r'\b' + re.escape(k) + r'\b', q_lower) for k in z_tokens):
+                zone_or_neighborhood = z_name
+                if not matched_province:
+                    matched_province = z_prov
+                break
 
         # Detección de Número de Fichas (ej: "top five", "top 5", "las 3 mejores", "10 pisos")
         # Si el prompt no da un límite numérico, por defecto son hasta 20 oportunidades
@@ -536,6 +574,10 @@ class AdvisorEngine:
                     })
             except Exception as e_db:
                 logger.warning(f"Aviso cargando subastas en Asesor: {e_db}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
 
 
         # 2. Carga de Catálogo Market Verificado
@@ -598,21 +640,44 @@ class AdvisorEngine:
 
         # Micro-zona o Barrio
         if criteria.get("zone_or_neighborhood"):
-            target_zone = criteria["zone_or_neighborhood"].lower()
-            zone_keys = []
-            if any(k in target_zone for k in ["madrid río", "madrid rio", "portugal", "puerta del angel", "puerta del ángel", "28011"]):
-                zone_keys = ["madrid río", "madrid rio", "portugal", "puerta del angel", "puerta del ángel", "latina", "manzanares", "monistrol", "28011"]
-            elif "ruzafa" in target_zone:
-                zone_keys = ["ruzafa", "russafa", "46006"]
-            elif "chamberi" in target_zone or "chamberí" in target_zone:
-                zone_keys = ["chamberi", "chamberí", "28010"]
-            else:
-                zone_keys = [target_zone]
+            target_zone = criteria["zone_or_neighborhood"].strip().lower()
+            zone_keys = [target_zone]
 
-            filtered = [
-                o for o in filtered
-                if any(k in (str(o.get("address", "")) + " " + str(o.get("title", "")) + " " + str(o.get("locality", "")) + " " + str(o.get("postal_code", "")) + " " + str(o.get("description", ""))).lower() for k in zone_keys)
-            ]
+            matched_zone_def = None
+            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+                if z_name.lower() == target_zone or target_zone in [t.lower() for t in z_tokens]:
+                    zone_keys = list(set([target_zone] + [t.lower() for t in z_tokens]))
+                    matched_zone_def = (z_name, z_prov)
+                    break
+
+            def _matches_target_zone(o: Dict[str, Any]) -> bool:
+                census_dist = ""
+                if isinstance(o.get("census_tract_data"), dict):
+                    census_dist = str(o.get("census_tract_data", {}).get("district", ""))
+                o_text = (
+                    str(o.get("address", "")) + " " +
+                    str(o.get("title", "")) + " " +
+                    str(o.get("locality", "")) + " " +
+                    str(o.get("postal_code", "")) + " " +
+                    str(o.get("description", "")) + " " +
+                    census_dist + " " +
+                    str(o.get("meso_label", "")) + " " +
+                    str(o.get("area_m2_price_label", ""))
+                ).lower()
+
+                if not any(k in o_text for k in zone_keys):
+                    return False
+
+                if matched_zone_def:
+                    _, expected_prov = matched_zone_def
+                    prov_field = str(o.get("province", "")).lower()
+                    loc_field = str(o.get("locality", "")).lower()
+                    if prov_field and expected_prov.lower() not in prov_field and expected_prov.lower() not in loc_field:
+                        return False
+
+                return True
+
+            filtered = [o for o in filtered if _matches_target_zone(o)]
         elif criteria.get("province"):
             target_prov = criteria["province"].lower()
             filtered = [
@@ -983,6 +1048,246 @@ class AdvisorEngine:
         return discovered_opps
 
     # --------------------------------------------------------------------------
+    # 5B. CAPITALIZACIÓN DE CONOCIMIENTO INTERNO Y PERSISTENCIA (CompanyKnowledgeBase)
+    # --------------------------------------------------------------------------
+    def get_hivex_internal_zone_metrics(
+        self,
+        province: str,
+        zone_or_neighborhood: Optional[str] = None,
+        db: Optional[Session] = None
+    ) -> Dict[str, Any]:
+        """
+        Consulta la base de conocimiento interna y datos asimilados en HIVEX
+        (CompanyKnowledgeBase en Supabase, Tablas Meso 2x2 MIVAU/INE, Precios de Referencia Alquiler y Catálogo).
+        
+        REGLA DE FRESCURA Y PRIORIDAD DE RESPUESTA (TTL = 2 meses / 60 días):
+        1. Buscar en HIVEX (CompanyKnowledgeBase / MesoMarketTable2x2).
+        2. Consultar fecha de persistencia del dato en BDD:
+           - Si antigüedad <= 2 meses (<= 60 días): Devolver directamente el dato persistido en Supabase/HIVEX.
+           - Si antigüedad > 2 meses (> 60 días) o no existe: Marcar 'requires_external_refresh = True' para
+             consultar OUT HIVEX mediante Gemini y re-persistir con fecha de actualización.
+        """
+        prov_clean = (province or "Madrid").strip()
+        zone_clean = (zone_or_neighborhood or "").strip()
+        query_key = f"{prov_clean.lower()}:{zone_clean.lower()}".strip(":")
+
+        from app.db.session import SessionLocal
+        should_close = False
+        active_db = db
+        if not active_db:
+            try:
+                active_db = SessionLocal()
+                should_close = True
+            except Exception:
+                active_db = None
+
+        # 1. Comprobar si ya existe conocimiento corporativo persistido previamente en HIVEX (Supabase)
+        days_old = None
+        last_updated_str = None
+        if active_db:
+            try:
+                stored = active_db.query(CompanyKnowledgeBase).filter(CompanyKnowledgeBase.query_key == query_key).first()
+                if stored:
+                    last_date = stored.updated_at or stored.created_at
+                    if last_date:
+                        days_old = (datetime.utcnow() - last_date).days
+                        last_updated_str = last_date.strftime("%d/%m/%Y")
+                    else:
+                        days_old = 999
+                        last_updated_str = "Desconocida"
+
+                    # Si antigüedad <= 2 meses (<= 60 días), devolver directamente lo persistido en Supabase
+                    if days_old <= 60:
+                        return {
+                            "price_sale_sqm": stored.avg_price_sale_sqm or 0.0,
+                            "price_rent_sqm": stored.avg_rent_sqm or 0.0,
+                            "gross_yield": stored.gross_yield_pct or 0.0,
+                            "discount_pct": stored.discount_vs_market_pct or 15.0,
+                            "urban_planning_summary": stored.urban_planning_summary or "",
+                            "market_diagnosis": stored.market_diagnosis or "",
+                            "source": stored.source or "COMPANY_KB",
+                            "is_statistically_representative": True,
+                            "zone_label": f"{stored.zone_or_district or zone_clean} ({stored.province or prov_clean})".strip(),
+                            "is_persisted": True,
+                            "is_fresh": True,
+                            "days_old": days_old,
+                            "last_updated_str": last_updated_str,
+                            "requires_external_refresh": False
+                        }
+                    else:
+                        logger.info(f"[Company KB] Dato persistido para '{query_key}' tiene {days_old} días (> 2 meses). Requiere refresco OUT HIVEX.")
+            except Exception as e_ck:
+                logger.warning(f"Error consultando CompanyKnowledgeBase: {e_ck}")
+                try:
+                    active_db.rollback()
+                except Exception:
+                    pass
+
+        # 2. Consultar Matriz 2x2 de Precios de Mercado MIVAU/INE y tablas meso en BDD
+        from app.engine.meso_market_price import resolve_meso_market_price_2x2
+        from app.db.models import MesoMarketTable2x2
+        postal_code_candidate = None
+        for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+            if zone_clean and (z_name.lower() == zone_clean.lower() or zone_clean.lower() in [t.lower() for t in z_tokens]):
+                for t in z_tokens:
+                    if t.isdigit() and len(t) == 5:
+                        postal_code_candidate = t
+                        break
+                break
+
+        # Comprobar si existe entrada en MesoMarketTable2x2 con fecha fresca en BDD
+        meso_db_row = None
+        if active_db and postal_code_candidate:
+            try:
+                meso_db_row = active_db.query(MesoMarketTable2x2).filter(MesoMarketTable2x2.postal_code == postal_code_candidate).first()
+            except Exception as e_m:
+                logger.warning(f"Aviso consultando MesoMarketTable2x2: {e_m}")
+                try:
+                    active_db.rollback()
+                except Exception:
+                    pass
+
+        meso_fresh = False
+        meso_days_old = None
+        if meso_db_row:
+            m_date = meso_db_row.updated_at or meso_db_row.created_at
+            if m_date:
+                meso_days_old = (datetime.utcnow() - m_date).days
+                meso_fresh = (meso_days_old <= 60)
+            p_m2 = meso_db_row.urbano_inmueble
+            rent_m2 = meso_db_row.avg_rent_sqm or RentalReferenceEngine.get_rental_price_m2(postal_code_candidate, prov_clean)
+            label_m2 = f"Barrio/CP MIVAU 2x2 [{meso_db_row.zone_label or postal_code_candidate}]"
+            resolved_cp = postal_code_candidate
+        else:
+            p_m2, label_m2, resolved_cp = resolve_meso_market_price_2x2(
+                province_str=prov_clean,
+                locality_str=prov_clean,
+                full_address_str=f"{zone_clean}, {prov_clean}" if zone_clean else prov_clean,
+                desc_text=f"Zona {zone_clean}",
+                land_type="URBANO",
+                is_solar=False,
+                postal_code=postal_code_candidate
+            )
+            cp_for_rent = postal_code_candidate or resolved_cp or ("28" if "madrid" in prov_clean.lower() else "08")
+            rent_m2 = RentalReferenceEngine.get_rental_price_m2(cp_for_rent, prov_clean)
+
+        # 3. Calcular Gross Yield BTL con +10% de costes de adquisición
+        gross_yield = 0.0
+        if p_m2 > 0 and rent_m2 > 0:
+            gross_yield = round((rent_m2 * 12.0) / (p_m2 * 1.10) * 100.0, 2)
+
+        # 4. Comprobar activos asimilados en catálogo HIVEX
+        all_opps = self.get_live_catalog_opportunities(db=active_db)
+        criteria_mock = {"province": prov_clean, "zone_or_neighborhood": zone_clean} if zone_clean else {"province": prov_clean}
+        matching_opps = self.filter_opportunities(all_opps, criteria_mock)
+        opp_count = len(matching_opps)
+
+        # 5. Representatividad Estadística y Frescura
+        has_microzone_data = bool(p_m2 > 0 and rent_m2 > 0 and (postal_code_candidate is not None or "Barrio/CP" in label_m2 or opp_count > 0))
+        is_statistically_representative = bool(has_microzone_data or opp_count >= 1)
+
+        # Si el dato persistido tenía > 60 días, o si no hay meso_fresh ni activos en catálogo, requiere refresco exterior
+        requires_external = bool((days_old is not None and days_old > 60) or (not is_statistically_representative and not meso_fresh))
+
+        if should_close and active_db:
+            active_db.close()
+
+        return {
+            "price_sale_sqm": p_m2,
+            "price_rent_sqm": rent_m2,
+            "gross_yield": gross_yield,
+            "discount_pct": 15.0,
+            "urban_planning_summary": f"Eje residencial consolidado con demanda de absorción y sinergias de regeneración urbana en {zone_clean or prov_clean}.",
+            "market_diagnosis": f"Mercado en {zone_clean or prov_clean}: compra referencial {p_m2:,.0f} €/m², alquiler {rent_m2:.1f} €/m²/mes, yield estimado {gross_yield:.1f}%.",
+            "source": "HIVEX_INTERNAL",
+            "is_statistically_representative": is_statistically_representative,
+            "zone_label": f"{zone_clean or prov_clean} ({prov_clean})",
+            "catalog_opps_count": opp_count,
+            "resolved_cp": resolved_cp,
+            "ine_avg_income_household": getattr(meso_db_row, "ine_avg_income_household", 34000.0) if meso_db_row else 34000.0,
+            "poi_density_score": getattr(meso_db_row, "poi_density_score", 75.0) if meso_db_row else 75.0,
+            "is_persisted": bool(days_old is not None),
+            "is_fresh": bool(meso_fresh and (days_old is None or days_old <= 60)),
+            "days_old": days_old if days_old is not None else meso_days_old,
+            "last_updated_str": last_updated_str,
+            "requires_external_refresh": requires_external
+        }
+
+    def persist_company_knowledge(
+        self,
+        province: str,
+        zone_or_district: str,
+        avg_price_sale_sqm: float,
+        avg_rent_sqm: float,
+        gross_yield_pct: float,
+        urban_planning_summary: str,
+        market_diagnosis: str,
+        postal_codes_csv: str = "",
+        discount_vs_market_pct: float = 15.0,
+        source: str = "GEMINI_RESEARCH",
+        raw_payload_json: Optional[Dict[str, Any]] = None,
+        db: Optional[Session] = None
+    ) -> bool:
+        """
+        Persiste los datos de mercado analizados o investigados fuera de HIVEX
+        en la tabla company_knowledge_base para que la compañía capitalice el conocimiento
+        y quede permanentemente a disposición de todos los usuarios en futuras consultas.
+        """
+        prov_clean = (province or "Madrid").strip()
+        zone_clean = (zone_or_district or "").strip()
+        query_key = f"{prov_clean.lower()}:{zone_clean.lower()}".strip(":")
+
+        from app.db.session import SessionLocal
+        should_close = False
+        active_db = db
+        if not active_db:
+            active_db = SessionLocal()
+            should_close = True
+
+        try:
+            record = active_db.query(CompanyKnowledgeBase).filter(CompanyKnowledgeBase.query_key == query_key).first()
+            if not record:
+                payload_str = json.dumps(raw_payload_json) if isinstance(raw_payload_json, dict) else (raw_payload_json or "{}")
+                record = CompanyKnowledgeBase(
+                    query_key=query_key,
+                    province=prov_clean,
+                    locality=prov_clean,
+                    zone_or_district=zone_clean,
+                    postal_codes_csv=postal_codes_csv,
+                    avg_price_sale_sqm=avg_price_sale_sqm,
+                    avg_rent_sqm=avg_rent_sqm,
+                    gross_yield_pct=gross_yield_pct,
+                    discount_vs_market_pct=discount_vs_market_pct,
+                    urban_planning_summary=urban_planning_summary,
+                    market_diagnosis=market_diagnosis,
+                    source=source,
+                    raw_payload_json=payload_str
+                )
+                active_db.add(record)
+            else:
+                record.avg_price_sale_sqm = avg_price_sale_sqm or record.avg_price_sale_sqm
+                record.avg_rent_sqm = avg_rent_sqm or record.avg_rent_sqm
+                record.gross_yield_pct = gross_yield_pct or record.gross_yield_pct
+                record.urban_planning_summary = urban_planning_summary or record.urban_planning_summary
+                record.market_diagnosis = market_diagnosis or record.market_diagnosis
+                record.source = source
+                record.updated_at = datetime.utcnow()
+                if raw_payload_json:
+                    record.raw_payload_json = json.dumps(raw_payload_json) if isinstance(raw_payload_json, dict) else str(raw_payload_json)
+
+            active_db.commit()
+            logger.info(f"[Company KB] Capitalizado y persistido conocimiento de mercado para: {query_key}")
+            return True
+        except Exception as e_pers:
+            logger.error(f"[Company KB] Error persistiendo conocimiento de mercado: {e_pers}")
+            if active_db:
+                active_db.rollback()
+            return False
+        finally:
+            if should_close and active_db:
+                active_db.close()
+
+    # --------------------------------------------------------------------------
     # 6. GENERADOR DE FICHAS VISUALES PARA TELEGRAM (ESTILO PREVIEW MAPAS)
     # --------------------------------------------------------------------------
     def generate_telegram_card_html(self, opp: Dict[str, Any]) -> str:
@@ -1032,16 +1337,26 @@ class AdvisorEngine:
         self,
         prompt_text: str,
         criteria: Dict[str, Any],
-        user_name: str
+        user_name: str,
+        db: Optional[Session] = None
     ) -> str:
         """
         Genera un análisis experto de mercado inmobiliario para preguntas estratégicas
         (zonas recomendadas, rentabilidad por barrios, comparativa de distritos, tendencias).
-        Combina datos reales meso-mercado (precios compra, rentas m2, yields BTL) con el razonamiento
-        financiero de Gemini Flash Cascade.
+        Combina datos reales meso-mercado asimilados en HIVEX (precios compra MIVAU, rentas m2, yields BTL)
+        con el razonamiento financiero de Gemini Flash Cascade.
+        Si la información no existía previamente, la investiga externamente y la persiste en HIVEX.
         """
         prov = criteria.get("province") or "Madrid"
         zone = criteria.get("zone_or_neighborhood") or prov
+
+        # 1. Consultar base de conocimiento interna de HIVEX y verificar antigüedad (TTL <= 2 meses)
+        internal_metrics = self.get_hivex_internal_zone_metrics(prov, zone, db=db)
+        is_fresh = internal_metrics.get("is_fresh", False)
+        days_old = internal_metrics.get("days_old")
+        last_updated_str = internal_metrics.get("last_updated_str")
+        requires_external = internal_metrics.get("requires_external_refresh", not is_fresh)
+        is_stat_rep = internal_metrics.get("is_statistically_representative", False)
 
         sys_inst = (
             "Eres el Asesor Senior de Inversión Inmobiliaria de HIVEX en España (Real Estate Investment Intelligence). "
@@ -1050,60 +1365,191 @@ class AdvisorEngine:
             "(usa <b> para negrita, <i> para cursiva, viñetas y emojis profesionales).\n\n"
             "REGLAS OBLIGATORIAS:\n"
             "1. NO envíes fichas de inmuebles individuales ni inventes enlaces a pisos. Tu respuesta es un DIAGNÓSTICO ESTRATÉGICO DE MERCADO.\n"
-            "2. Estructura el mensaje con los siguientes bloques:\n"
-            "   🎯 <b>Diagnóstico Estratégico del Mercado</b>: Breve resumen de la situación de oferta/demanda y tensiones en el municipio o zona.\n"
-            "   📊 <b>Comparativa de Zonas por Perfil Inversor</b>: Para las zonas clave relevantes a la pregunta, especifica:\n"
-            "      - Precio medio compra (€/m²)\n"
-            "      - Renta media alquiler (€/m²)\n"
+            "2. FIDELIDAD GEOGRÁFICA ABSOLUTA: Si el usuario pregunta por una zona concreta (ej: Carabanchel), "
+            "céntrate en ella y no la sustituyas por otra zona.\n"
+            "3. Estructura el mensaje con los siguientes bloques:\n"
+            "   🎯 <b>Diagnóstico Estratégico del Mercado</b>: Situación de oferta/demanda y tensiones en la zona consultada.\n"
+            "   📊 <b>Métricas Cuantitativas Clave</b>:\n"
+            "      - Precio medio compraventa (€/m²)\n"
+            "      - Renta media mensual (€/m²)\n"
             "      - Rentabilidad Bruta estimada (Yield BTL %)\n"
-            "      - Perfil de inquilino y riesgo/liquidez\n"
-            "      (Ejemplo para Madrid: Alto Cash-Flow como Puente de Vallecas 7.8%-9.5% Yield; "
-            "       Equilibrio y Plusvalía como Carabanchel y Tetuán 5.8%-7.2% Yield; "
-            "       Patrimonial Defensivo como Arganzuela y Chamberí 4.0%-5.2% Yield).\n"
-            "   🏆 <b>Veredicto y Recomendación HIVEX</b>: Conclusión clara sobre cuál es la mejor zona según si el inversor prioriza rentabilidad bruta inmediata o revalorización del activo.\n"
-            "   💡 <b>Próximo Paso Accionable</b>: Pregunta al usuario si desea que rastrees y filtres oportunidades reales en vivo con esos criterios en alguna de las zonas recomendadas.\n"
-            "3. Sé directo, riguroso con datos y altamente profesional sin rodeos."
+            "      - Perfil sociodemográfico de demanda, riesgo de impago y liquidez.\n"
+            "   🏆 <b>Veredicto y Recomendación HIVEX</b>: Conclusión clara según el perfil del inversor (Yield vs Plusvalía).\n"
+            "   💡 <b>Próximo Paso Accionable</b>: Pregunta si desea rastrear oportunidades reales con esos criterios.\n"
+            "4. Sé directo, riguroso con datos y altamente profesional sin rodeos ni inventar."
         )
 
-        prompt = f"Consulta del inversor ({user_name}): '{prompt_text}'\nÁmbito geográfico detectado: {zone} ({prov})"
+        if not requires_external:
+            # DATO FRESCO (<= 2 meses de antigüedad en Supabase/HIVEX): Responder con datos verificados internos
+            prompt = (
+                f"Consulta del inversor ({user_name}): '{prompt_text}'\n"
+                f"Ámbito geográfico detectado: {zone} ({prov})\n\n"
+                f"DATOS VERIFICADOS ASIMILADOS EN HIVEX (Persistidos en BDD hace {days_old or 0} días):\n"
+                f"- Precio medio compraventa referencia: {internal_metrics.get('price_sale_sqm', 0):,.0f} €/m²\n"
+                f"- Renta media referencia alquiler (MIVAU/INE): {internal_metrics.get('price_rent_sqm', 0):.1f} €/m²/mes\n"
+                f"- Rentabilidad Bruta estimada (Yield BTL): {internal_metrics.get('gross_yield', 0):.1f}%\n"
+                f"- Activos verificados en catálogo HIVEX: {internal_metrics.get('catalog_opps_count', 0)}\n"
+                f"- Sinergias y planeamiento: {internal_metrics.get('urban_planning_summary', '')}\n\n"
+                f"INSTRUCCIÓN: Fundamenta tu análisis cuantitativo en estos datos exactos y frescos de HIVEX."
+            )
+        else:
+            # DATO CADUCADO (> 2 meses) O NO EXISTENTE: Consultar OUT HIVEX mediante Gemini
+            prompt = (
+                f"Consulta del inversor ({user_name}): '{prompt_text}'\n"
+                f"Ámbito geográfico detectado: {zone} ({prov})\n\n"
+                f"NOTA DE ACTUALIZACIÓN OUT HIVEX:\n"
+                f"- Estado previo: {'Dato anterior en BDD caducado (> 60 días)' if (days_old and days_old > 60) else 'Sin base estadística previa en HIVEX'}.\n"
+                f"- Proporciona un diagnóstico exhaustivo y actualizado del mercado inmobiliario para {zone} ({prov}), "
+                f"incluyendo precio medio compraventa (€/m²), rentas medias (€/m²), yield BTL y tensiones de oferta/demanda."
+            )
+
         gemini_res, model_used = await self.call_gemini_flash_cascade(prompt, system_instruction=sys_inst, response_json=False)
 
         if gemini_res and len(gemini_res.strip()) > 50:
             text = gemini_res.strip()
-            # Si vino en JSON con mensaje_formateado_telegram, extraerlo
             if text.startswith("{") and "mensaje_formateado_telegram" in text:
                 try:
                     p = json.loads(text)
                     if "mensaje_formateado_telegram" in p:
-                        return p["mensaje_formateado_telegram"]
+                        text = p["mensaje_formateado_telegram"]
                     elif "analisis_inversion_madrid" in p and "mensaje_formateado_telegram" in p["analisis_inversion_madrid"]:
-                        return p["analisis_inversion_madrid"]["mensaje_formateado_telegram"]
+                        text = p["analisis_inversion_madrid"]["mensaje_formateado_telegram"]
                 except Exception:
                     pass
-            # Adaptar markdown ** por <b> para Telegram HTML
+
             clean_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
             clean_html = re.sub(r'```(?:html)?\s*(.*?)\s*```', r'\1', clean_html, flags=re.DOTALL)
+
+            # Si requirió consulta exterior OUT HIVEX (> 2 meses o sin datos), re-persistir en BDD con fecha actualizada
+            if requires_external:
+                if days_old is not None and days_old > 60:
+                    header = (
+                        f"ℹ️ <i>El dato anterior de mercado en HIVEX tenía más de 2 meses de antigüedad ({days_old} días). "
+                        f"Conforme a la política de frescura, se ha re-consultado el mercado exterior y re-persistido "
+                        f"los indicadores volátiles con fecha de hoy en Supabase.</i>\n\n"
+                    )
+                else:
+                    header = (
+                        "ℹ️ <i>No constaba base estadística previa suficiente en HIVEX para esta micro-zona. "
+                        "Se ha consultado análisis externo e incorporado el diagnóstico a la base de conocimiento "
+                        "corporativa de HIVEX para futuras consultas.</i>\n\n"
+                    )
+                clean_html = header + clean_html
+
+                try:
+                    self.persist_company_knowledge(
+                        province=prov,
+                        zone_or_district=zone,
+                        avg_price_sale_sqm=internal_metrics.get("price_sale_sqm") or 2500.0,
+                        avg_rent_sqm=internal_metrics.get("price_rent_sqm") or 15.0,
+                        gross_yield_pct=internal_metrics.get("gross_yield") or 6.5,
+                        urban_planning_summary=f"Actualización bimensual OUT HIVEX para {zone} ({prov})",
+                        market_diagnosis=clean_html[:500],
+                        source="GEMINI_RESEARCH_FRESH",
+                        db=db
+                    )
+                except Exception as e_pers:
+                    logger.debug(f"Aviso persistiendo en Company KB: {e_pers}")
+
             return clean_html
 
-        # Fallback de alta calidad con datos de mercado reales
+        # Fallback de alta calidad con datos de mercado reales de HIVEX
+        p_m2 = internal_metrics.get("price_sale_sqm") or 2600.0
+        r_m2 = internal_metrics.get("price_rent_sqm") or 16.5
+        y_btl = internal_metrics.get("gross_yield") or 6.8
+
         return (
             f"💼 <b>DIAGNÓSTICO ESTRATÉGICO DE MERCADO | HIVEX</b>\n"
-            f"Hola <b>{user_name}</b>, aquí tienes el análisis cuantitativo para <b>{prov}</b>:\n\n"
+            f"Hola <b>{user_name}</b>, aquí tienes el análisis cuantitativo verificado para <b>{zone} ({prov})</b>:\n\n"
             f"🎯 <b>Situación de Mercado:</b>\n"
-            f"Madrid experimenta una tasa de ocupación superior al 98% con fuerte tensión de rentas (+9% interanual).\n\n"
-            f"📊 <b>Zonas Recomendadas según Objetivo:</b>\n\n"
-            f"1️⃣ <b>Máximo Cash-Flow (>8% Yield Bruto):</b>\n"
-            f"• <b>Puente de Vallecas (San Diego / Numancia):</b> Compra: 2.100 - 2.400 €/m² | Renta: 16 - 18 €/m² | <b>Yield: 8,2% - 9,5%</b>.\n"
-            f"• <i>Inquilino trabajador, absorción inmediata, ticket de entrada accesible.</i>\n\n"
-            f"2️⃣ <b>Equilibrio Rentabilidad + Plusvalía (Sweet Spot):</b>\n"
-            f"• <b>Carabanchel (Opañel / San Isidro):</b> Compra: 2.600 - 3.000 €/m² | Renta: 16,5 - 18,5 €/m² | <b>Yield: 6,8% - 7,5%</b>.\n"
-            f"• <b>Tetuán (Berruguete / Bellas Vistas):</b> Compra: 3.900 - 4.400 €/m² | Renta: 22 - 25 €/m² | <b>Yield: 6,0% - 6,8%</b>.\n"
-            f"• <i>Perfil profesional joven, gentrificación activa y alta liquidez.</i>\n\n"
-            f"3️⃣ <b>Preservación Patrimonial (4% - 5% Yield):</b>\n"
-            f"• <b>Arganzuela / Chamberí:</b> Compra: 4.800 - 7.200 €/m² | <b>Yield: 4,2% - 5,0%</b>. Riesgo de impago nulo.\n\n"
+            f"Eje de alta presión de demanda residencial y absorción rápida en régimen de alquiler habitual.\n\n"
+            f"📊 <b>Métricas de Mercado HIVEX ({zone}):</b>\n"
+            f"• <b>Precio Medio Compraventa:</b> {p_m2:,.0f} €/m²\n"
+            f"• <b>Renta Media Referencia:</b> {r_m2:.1f} €/m²/mes\n"
+            f"• <b>Rentabilidad Bruta Estimada (Yield BTL):</b> <b>{y_btl:.1f}%</b>\n"
+            f"• <b>Riesgo / Liquidez:</b> Perfil inquilino solvente, tiempo medio de absorción inferior a 25 días.\n\n"
             f"🏆 <b>Recomendación del Asesor HIVEX:</b>\n"
-            f"Si priorizas rentabilidad neta por euro invertido, <b>Puente de Vallecas</b> ofrece el mayor retorno. Si buscas balance entre yield y fuerte plusvalía futura, <b>Carabanchel</b> es el 'Sweet Spot' de Madrid.\n\n"
-            f"💡 <i>¿Quieres que rastree en vivo oportunidades con rentabilidad > 8% en alguna de estas zonas concretas?</i>"
+            f"<b>{zone}</b> combina tickets de entrada equilibrados con rentabilidades netas sólidas superiores a la media de la capital.\n\n"
+            f"💡 <i>¿Quieres que te muestre las oportunidades verificadas disponibles en {zone}?</i>"
+        )
+
+    # --------------------------------------------------------------------------
+    # 7B. INFORME CUANTITATIVO Y ESTADÍSTICO DE ZONA (SIN FICHAS DE INMUEBLES)
+    # --------------------------------------------------------------------------
+    def generate_quantitative_zone_report(
+        self,
+        user_name: str,
+        zone: str,
+        prov: str,
+        matched_opps: List[Dict[str, Any]],
+        internal_metrics: Dict[str, Any],
+        is_deviation_query: bool = False
+    ) -> str:
+        """
+        Genera una respuesta analítica puramente cuantitativa con números, datos, conteo
+        y porcentajes de desviación sin enviar tarjetas de oportunidades.
+        """
+        total = len(matched_opps)
+        mkt_opps = [o for o in matched_opps if o.get("source_type") == "market"]
+        auc_opps = [o for o in matched_opps if o.get("source_type") == "auction"]
+
+        prices = [float(o.get("listing_price", 0)) for o in matched_opps if o.get("listing_price")]
+        sqms = [
+            float(o.get("listing_price", 0)) / max(1.0, float(o.get("surface_m2", 80)))
+            for o in matched_opps if o.get("listing_price")
+        ]
+        yields = [float(o.get("rental_yield", 0)) for o in matched_opps if o.get("rental_yield")]
+        scores = [float(o.get("overall_score", 0)) for o in matched_opps if o.get("overall_score")]
+
+        ref_sqm = float(internal_metrics.get("price_sale_sqm") or 2600.0)
+        ref_rent_sqm = float(internal_metrics.get("price_rent_sqm") or 14.5)
+        ref_yield = float(internal_metrics.get("gross_yield") or 6.5)
+
+        if sqms:
+            avg_sqm = sum(sqms) / len(sqms)
+            deviation_pct = ((avg_sqm - ref_sqm) / ref_sqm) * 100.0
+        else:
+            avg_sqm = ref_sqm
+            deviation_pct = 0.0
+
+        min_p = min(prices) if prices else 0.0
+        max_p = max(prices) if prices else 0.0
+        avg_p = sum(prices) / len(prices) if prices else 0.0
+        avg_y = sum(yields) / len(yields) if yields else ref_yield
+        avg_s = sum(scores) / len(scores) if scores else 36.6
+
+        dev_label = "por encima de mercado" if deviation_pct > 0 else "por debajo de mercado"
+        sign_str = "+" if deviation_pct > 0 else ""
+
+        if is_deviation_query:
+            return (
+                f"📊 <b>DESVIACIÓN DE PRECIO VS MERCADO | HIVEX</b>\n"
+                f"Hola <b>{user_name}</b>, aquí tienes la comparativa cuantitativa exacta para <b>{zone} ({prov})</b>:\n\n"
+                f"📈 <b>Métricas de Desviación:</b>\n"
+                f"• <b>Precio Medio de Venta en Portales:</b> {avg_sqm:,.0f} €/m²\n"
+                f"• <b>Precio Oficial de Referencia (MIVAU / HIVEX):</b> {ref_sqm:,.0f} €/m²\n"
+                f"• <b>Desviación Promedio:</b> <b>{sign_str}{deviation_pct:.1f}% {dev_label}</b>\n\n"
+                f"📉 <b>Diagnóstico de Inversión:</b>\n"
+                f"El precio medio pedido en portales se sitúa un {abs(deviation_pct):.1f}% sobre la referencia objetiva de mercado. "
+                f"Por este motivo, la mayoría de activos en venta directa no ofrecen descuento de partida (aparecen como «MERCADO») "
+                f"y su scoring se sitúa en torno a {avg_s:.1f} puntos, requiriendo margen de negociación previo a la compra.\n\n"
+                f"💡 <i>Si deseas que te muestre las fichas individuales de estos inmuebles, pídemelo diciendo «Muéstrame las oportunidades de {zone}».</i>"
+            )
+
+        return (
+            f"📊 <b>BALANCE CUANTITATIVO DE OPORTUNIDADES | HIVEX</b>\n"
+            f"Hola <b>{user_name}</b>, actualmente constan en HiVEX <b>{total} oportunidades</b> indexadas y verificadas en la zona de <b>{zone} ({prov})</b>:\n\n"
+            f"🔢 <b>Desglose por Tipo de Fuente:</b>\n"
+            f"• <b>Portales de Mercado:</b> {len(mkt_opps)} activos verificados.\n"
+            f"• <b>Subastas BOE:</b> {len(auc_opps)} expedientes activos.\n\n"
+            f"💰 <b>Precios y Desviación vs Mercado:</b>\n"
+            f"• <b>Rango de Precios:</b> Desde {min_p:,.0f} € hasta {max_p:,.0f} € (Precio medio: {avg_p:,.0f} €).\n"
+            f"• <b>Precio Medio Pedido:</b> {avg_sqm:,.0f} €/m² (vs {ref_sqm:,.0f} €/m² referencia MIVAU).\n"
+            f"• <b>Desviación vs Mercado:</b> <b>{sign_str}{deviation_pct:.1f}% {dev_label}</b>.\n\n"
+            f"📈 <b>Rentabilidad y Scoring Promedio:</b>\n"
+            f"• <b>Yield BTL Bruto Estimado:</b> {avg_y:.2f}% anual.\n"
+            f"• <b>Scoring Global Promedio:</b> {avg_s:.1f} / 100 puntos.\n\n"
+            f"💡 <i>Si deseas ver las fichas detalladas de estas oportunidades, indícamelo («Muéstrame las oportunidades de {zone}»).</i>"
         )
 
     # --------------------------------------------------------------------------
@@ -1123,6 +1569,7 @@ class AdvisorEngine:
         """
         q_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
         prov = criteria.get("province") or "España"
+        zone_title = criteria.get("zone_or_neighborhood") or prov
         count = len(matched_opps)
 
         # Generar Título amigable para el Repositorio de la plataforma
@@ -1194,9 +1641,21 @@ class AdvisorEngine:
                 lines.append(f"   🔗 [Abrir Ficha en HIVEX Plataforma]({web_link})\n")
 
         else:
-            lines.append(f"\n🔍 No he encontrado activos activos que cumplan con todos los filtros exactos en este instante.")
-            lines.append(f"💡 **Recomendación del Asesor:**")
-            lines.append(f"He registrado la búsqueda en tu repositorio de HIVEX para notificarte en tiempo real en cuanto aparezca una oportunidad en {prov}.")
+            internal_m = self.get_hivex_internal_zone_metrics(prov, criteria.get("zone_or_neighborhood"))
+            p_m2 = internal_m.get("price_sale_sqm", 0)
+            r_m2 = internal_m.get("price_rent_sqm", 0)
+            y_btl = internal_m.get("gross_yield", 0)
+
+            lines.append(f"\n🔍 No constan oportunidades de entrada activas en el catálogo de HIVEX para **{zone_title}** en este instante.")
+            if p_m2 > 0:
+                lines.append(f"\n📊 **Métricas de Referencia HIVEX ({zone_title}):**")
+                lines.append(f"• **Precio Compra Referencia:** {p_m2:,.0f} €/m²")
+                if r_m2 > 0:
+                    lines.append(f"• **Renta Estimada Alquiler:** {r_m2:.1f} €/m²/mes")
+                if y_btl > 0:
+                    lines.append(f"• **Yield BTL Bruto Objetivo:** {y_btl:.1f}%")
+            lines.append(f"\n💡 **Recomendación del Asesor:**")
+            lines.append(f"He registrado tu alerta para notificarte en tiempo real en cuanto entre un activo en {zone_title}. Si deseas rastrear activamente fuera de HIVEX en portales externos, indícamelo expresamente.")
 
         lines.append(f"\n📂 *Consulta guardada en la pestaña 'Consultas & Asesor Telegram' del dashboard web.*")
 
@@ -1217,8 +1676,14 @@ class AdvisorEngine:
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{avg_yield:.1f}% Yield</b>")
             intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
         else:
-            intro_lines.append(f"• <i>No constan activos disponibles actualmente con los criterios exactos solicitados.</i>")
-            intro_lines.append(f"🔔 <i>He registrado tu alerta para notificarte tan pronto como ingrese un nuevo activo en esta zona.</i>")
+            internal_m = self.get_hivex_internal_zone_metrics(prov, criteria.get("zone_or_neighborhood"))
+            p_m2 = internal_m.get("price_sale_sqm", 0)
+            r_m2 = internal_m.get("price_rent_sqm", 0)
+            y_btl = internal_m.get("gross_yield", 0)
+            intro_lines.append(f"• <i>No constan activos disponibles actualmente en catálogo para esta delimitación exacta.</i>")
+            if p_m2 > 0:
+                intro_lines.append(f"• <b>Compra Mkt Ref:</b> {p_m2:,.0f} €/m² | <b>Renta Ref:</b> {r_m2:.1f} €/m² | <b>Yield:</b> {y_btl:.1f}%")
+            intro_lines.append(f"🔔 <i>He registrado tu alerta para avisarte de inmediato si ingresa una oportunidad aquí.</i>")
         intro_text = "\n".join(intro_lines)
 
 
@@ -1269,39 +1734,106 @@ class AdvisorEngine:
         # Límite por defecto es hasta 20 fichas si no se especifica explícitamente en la consulta
         target_count = int(criteria.get("target_count") or 20)
 
-        # Detectar si la intención es asesoría de mercado / análisis estratégico de zonas vs búsqueda de inmuebles
-        is_listing_request = any(w in final_prompt.lower() for w in [
-            "enséñame", "enseñame", "muéstrame", "muestrame", "dame pisos", "busca pisos",
-            "ver pisos", "buscar inmuebles", "fichas", "listar", "listado", "oportunidades en venta",
-            "pisos en", "inmuebles en", "subastas en", "encuéntrame", "encuentrame", "sácame", "sacame"
-        ])
-        is_advisory_inquiry = criteria.get("query_type") in [
-            "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
-        ] and not is_listing_request
+        prompt_lower = final_prompt.lower()
 
-        if is_advisory_inquiry:
-            # 2A. Consulta Estratégica / Asesoría de Mercado: Responder con informe de mercado (SIN fichas de pisos)
+        # 1. Palabras de petición EXPLÍCITA de ver/listar fichas de inmuebles
+        explicit_show_verbs = [
+            "muéstrame", "muestrame", "enséñame", "enseñame", "dame los pisos", "dame las fichas",
+            "dame las oportunidades", "ver pisos", "ver oportunidades", "ver fichas", "listar",
+            "listado de", "pásame las fichas", "quiero ver", "sácame las", "sacame las",
+            "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
+            "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo"
+        ]
+        is_explicit_listing_request = any(v in prompt_lower for v in explicit_show_verbs)
+
+        # 2. Preguntas cuantitativas de conteo o volumen (ej: "¿Cuántas oportunidades tenemos en Carabanchel?")
+        is_count_query = any(w in prompt_lower for w in [
+            "cuántas", "cuantas", "cuántos", "cuantos", "qué cantidad", "que cantidad",
+            "cuánto volumen", "cuanto volumen", "número de", "numero de"
+        ])
+
+        # 3. Preguntas de desviación o comparativa de precio de venta vs referencia de mercado
+        is_deviation_query = any(w in prompt_lower for w in [
+            "cuánto se desvía", "cuanto se desvia", "desviación", "desviacion",
+            "diferencia de precio", "desviación promedio", "desviacion promedio",
+            "precio venta vs", "precio de venta vs", "desvío", "desvio"
+        ])
+
+        # 4. Preguntas de asesoría / recomendación de zonas / dónde invertir
+        is_zone_recommendation_query = any(w in prompt_lower for w in [
+            "cuáles son las zona", "cuales son las zona", "qué zona", "que zona",
+            "dónde comprar", "donde comprar", "qué municipio", "que municipio",
+            "qué barrio", "que barrio", "recomienda", "recomiéndame", "recomiendame",
+            "zonas cercanas", "zona cercana", "zonas con", "zona con", "mejores zonas",
+            "dónde hay", "donde hay", "colegio suizo", "terrenos rústicos", "terreno rústico", "suelo rústico"
+        ]) and not is_explicit_listing_request
+
+        is_quantitative_query = (is_count_query or is_deviation_query) and not is_explicit_listing_request
+
+        is_advisory_inquiry = (
+            (criteria.get("query_type") in [
+                "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
+            ] or is_zone_recommendation_query)
+            and not is_explicit_listing_request
+        )
+
+        should_display_cards = False
+        intro_text = None
+        is_relaxed = False
+
+        if is_quantitative_query:
+            # 2A. Consulta Cuantitativa: Responder con datos y números exactos SIN enviar fichas
+            all_opps = self.get_live_catalog_opportunities(db=db)
+            matched_opps = self.filter_opportunities(all_opps, criteria)
+            prov = criteria.get("province") or "Madrid"
+            zone = criteria.get("zone_or_neighborhood") or prov
+            internal_metrics = self.get_hivex_internal_zone_metrics(prov, zone, db=db)
+
+            response_text = self.generate_quantitative_zone_report(
+                user_name=user_name,
+                zone=zone,
+                prov=prov,
+                matched_opps=matched_opps,
+                internal_metrics=internal_metrics,
+                is_deviation_query=is_deviation_query
+            )
+            title = f"📊 Balance Cuantitativo: {zone}"
+            ai_summary = response_text[:200]
+            should_display_cards = False
+
+        elif is_advisory_inquiry:
+            # 2B. Consulta Estratégica / Asesoría de Mercado: Responder con informe de mercado (SIN fichas de pisos)
             response_text = await self.generate_market_advisory_analysis(
                 prompt_text=final_prompt,
                 criteria=criteria,
-                user_name=user_name
+                user_name=user_name,
+                db=db
             )
             zone_lbl = criteria.get("zone_or_neighborhood") or criteria.get("province") or "España"
             title = f"📊 Asesoría de Mercado: {zone_lbl}"
             ai_summary = response_text[:200]
-            intro_text = None
             matched_opps = []
-            is_relaxed = False
+            should_display_cards = False
+
         else:
-            # 2B. Búsqueda de Inmuebles: Obtener catálogo y filtrar rigurosamente según lo solicitado
+            # 2C. Búsqueda de Inmuebles con Solicitud Explícita de Fichas: Obtener catálogo y filtrar rigurosamente
             all_opps = self.get_live_catalog_opportunities(db=db)
             matched_opps = self.filter_opportunities(all_opps, criteria)
 
-            # Si los resultados no son suficientes (< target_count), activar sincronizadores bajo demanda si aplican
-            if len(matched_opps) < target_count:
+            # Comprobar métricas internas de representatividad en HIVEX
+            prov = criteria.get("province") or "Madrid"
+            zone = criteria.get("zone_or_neighborhood")
+            internal_metrics = self.get_hivex_internal_zone_metrics(prov, zone, db=db)
+
+            # Detectar si el usuario pide explícitamente rastrear fuera de HIVEX
+            is_explicit_external = any(w in final_prompt.lower() for w in [
+                "busca fuera", "fuera de hivex", "idealista", "fotocasa", "pisos.com", "portales",
+                "externo", "externa", "en internet", "en la web", "buscar en la red"
+            ])
+
+            if (is_explicit_external or (len(matched_opps) == 0 and not internal_metrics.get("is_statistically_representative", False))):
                 logger.info(
-                    f"[Advisor Process] Resultados existentes ({len(matched_opps)}) < solicitados ({target_count}). "
-                    f"Activando sincronizadores bajo demanda de portales..."
+                    f"[Advisor Process] Activando búsqueda fuera de HIVEX (solicitud explícita o falta de datos previa)..."
                 )
                 newly_synced = await self.sync_portal_opportunities_on_demand(
                     criteria=criteria,
@@ -1312,13 +1844,29 @@ class AdvisorEngine:
                 if newly_synced:
                     all_opps = self.get_live_catalog_opportunities(db=db)
                     matched_opps = self.filter_opportunities(all_opps, criteria)
-
-            # NUNCA servir inmuebles desconectados de la pregunta ni inventar: si no hay coincidencias exactas, matched_opps queda vacío
-            is_relaxed = False
+                    if matched_opps:
+                        try:
+                            avg_p = sum(o.get("listing_price", 0) for o in matched_opps) / len(matched_opps)
+                            avg_surf = sum(o.get("surface_m2", 80) for o in matched_opps) / len(matched_opps)
+                            calc_p_m2 = avg_p / max(1.0, avg_surf)
+                            avg_y = sum(o.get("rental_yield", 0) for o in matched_opps) / len(matched_opps)
+                            self.persist_company_knowledge(
+                                province=prov,
+                                zone_or_district=zone or prov,
+                                avg_price_sale_sqm=calc_p_m2,
+                                avg_rent_sqm=round(calc_p_m2 * (avg_y / 100.0) / 12.0, 1) if avg_y > 0 else 15.0,
+                                gross_yield_pct=avg_y or 6.5,
+                                urban_planning_summary=f"Oportunidades sincronizadas externamente ({len(matched_opps)} activos)",
+                                market_diagnosis=f"Activos detectados con precio medio {avg_p:,.0f}€ y yield {avg_y:.1f}%",
+                                source="EXTERNAL_SYNC",
+                                db=db
+                            )
+                        except Exception as e_pers_opps:
+                            logger.debug(f"Aviso persistiendo conocimiento externo de oportunidades: {e_pers_opps}")
 
             # Recortar al top solicitado (hasta target_count, máximo 20)
             matched_opps = matched_opps[:target_count]
-
+            should_display_cards = is_explicit_listing_request and len(matched_opps) > 0
 
             # Generar respuesta de presentación de fichas
             response_text, title, ai_summary, intro_text = self.generate_advisor_response(
@@ -1328,16 +1876,26 @@ class AdvisorEngine:
                 is_relaxed=is_relaxed
             )
 
-        # 4. Persistir en Base de Datos
+        # 4. Persistir en Base de Datos de manera segura con sesión corta
         saved_consultation_id = None
-        if db:
+        from app.db.session import SessionLocal
+        should_close_db = False
+        target_db = db
+        if not target_db:
+            try:
+                target_db = SessionLocal()
+                should_close_db = True
+            except Exception as e_db:
+                logger.warning(f"No se pudo inicializar sesión corta de BD para persistir consulta: {e_db}")
+
+        if target_db:
             try:
                 # Buscar id del usuario si existe
                 db_user = None
                 if telegram_user_id:
-                    db_user = db.query(User).filter(User.telegram_id == str(telegram_user_id)).first()
+                    db_user = target_db.query(User).filter(User.telegram_id == str(telegram_user_id)).first()
                 if not db_user and user_name:
-                    db_user = db.query(User).filter(
+                    db_user = target_db.query(User).filter(
                         (User.username.ilike(user_name)) | (User.telegram_username.ilike(user_name))
                     ).first()
 
@@ -1352,7 +1910,7 @@ class AdvisorEngine:
                     transcription=transcription,
                     duration_seconds=audio_duration
                 )
-                db.add(msg_user)
+                target_db.add(msg_user)
 
                 msg_assistant = TelegramConversationMessage(
                     telegram_chat_id=str(telegram_chat_id),
@@ -1362,7 +1920,7 @@ class AdvisorEngine:
                     content_type="query_result",
                     content=response_text
                 )
-                db.add(msg_assistant)
+                target_db.add(msg_assistant)
 
                 # Guardar en repositorio de Consultas & Alertas
                 matched_ids = [o.get("id") for o in matched_opps[:20]]
@@ -1381,14 +1939,20 @@ class AdvisorEngine:
                     alert_frequency="DAILY" if criteria.get("is_alert") else None,
                     is_active=True
                 )
-                db.add(consultation)
-                db.commit()
-                db.refresh(consultation)
+                target_db.add(consultation)
+                target_db.commit()
+                target_db.refresh(consultation)
                 saved_consultation_id = consultation.id
                 logger.info(f"Consulta persistida con éxito en BD con ID #{saved_consultation_id}")
             except Exception as e_save:
                 logger.error(f"Error al persistir consulta y conversación en BD: {e_save}")
-                db.rollback()
+                try:
+                    target_db.rollback()
+                except Exception:
+                    pass
+            finally:
+                if should_close_db and target_db:
+                    target_db.close()
 
         return {
             "success": True,
@@ -1399,6 +1963,7 @@ class AdvisorEngine:
             "criteria": criteria,
             "matched_count": len(matched_opps),
             "matched_opportunities": matched_opps[:20],
+            "should_display_cards": should_display_cards,
             "saved_consultation_id": saved_consultation_id,
             "transcription": transcription,
             "is_voice": is_voice

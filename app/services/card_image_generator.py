@@ -595,10 +595,23 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
 
     # Fila 3: Descuento vs Mercado Badge y Rentabilidad BTL
     draw.text((col1_x, y + 2), "Descuento vs Mkt:", fill=(71, 85, 105), font=font_label)
-    badge_text = f" -{abs(discount):.1f}% DTO " if discount > 0 else " MERCADO "
+    if discount > 0:
+        badge_text = f" -{abs(discount):.1f}% DTO MKT "
+        badge_bg = (220, 252, 231)
+        badge_fg = (21, 128, 61)
+    elif market_val > 0 and price > market_val:
+        over_pct = ((price - market_val) / market_val) * 100.0
+        badge_text = f" +{over_pct:.1f}% SOBRE MKT "
+        badge_bg = (254, 226, 226)
+        badge_fg = (220, 38, 38)
+    else:
+        badge_text = " 0.0% REF. MKT "
+        badge_bg = (241, 245, 249)
+        badge_fg = (71, 85, 105)
+
     badge_w = int(draw.textlength(badge_text, font=font_badge)) + 10
-    draw.rounded_rectangle([col1_x + 130, y - 2, col1_x + 130 + badge_w, y + 24], radius=6, fill=(220, 252, 231))
-    draw.text((col1_x + 135, y + 1), badge_text, fill=(21, 128, 61), font=font_badge)
+    draw.rounded_rectangle([col1_x + 130, y - 2, col1_x + 130 + badge_w, y + 24], radius=6, fill=badge_bg)
+    draw.text((col1_x + 135, y + 1), badge_text, fill=badge_fg, font=font_badge)
 
     draw.text((col2_x, y), "Rentabilidad BTL:", fill=(71, 85, 105), font=font_label)
     rental_yield = float(opp.get("rental_yield") or opp.get("yield") or 0.0)
@@ -611,8 +624,8 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     draw.text((col2_x + 125, y - 1), btl_str, fill=(15, 23, 42), font=font_bold)
     y += 34
 
-    # Fila 4: Scoring Global HIVEX y Margen Estimado
-    overall_score = float(opp.get("overall_score") or opp.get("final_score") or opp.get("yield_score") or 82.0)
+    # Fila 4: Scoring Global HIVEX y Margen Estimado (Yield NO pondera en Overall Score)
+    overall_score = float(opp.get("overall_score") or opp.get("final_score") or 0.0)
     score_text = f" {overall_score:.0f} / 100 "
     draw.text((col1_x, y + 2), "Scoring Global HIVEX:", fill=(71, 85, 105), font=font_label)
     score_w = int(draw.textlength(score_text, font=font_badge)) + 10

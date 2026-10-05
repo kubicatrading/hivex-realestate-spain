@@ -737,6 +737,14 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
             "duration_seconds": elapsed
         }
 
+        # Sincronización y recálculo de tablas meso 2x2, índices MIVAU/INE y KPIs volátiles
+        try:
+            from app.engine.meso_bimonthly_engine import meso_bimonthly_engine
+            meso_res = meso_bimonthly_engine.refresh_meso_2x2_tables(db=db, force=False)
+            summary["meso_bimonthly_sync"] = meso_res.get("status")
+        except Exception as e_m:
+            logger.debug(f"[Pipeline Run] Aviso en sincronización meso bimensual: {e_m}")
+
         # Persistir registro de sincronización en base de datos
         try:
             sync_rec = PipelineSyncState(
@@ -880,6 +888,33 @@ async def trigger_cockpit_health_alert(
         "status": "success" if result.get("status") == "sent" else "error",
         "health_result": result
     }
+
+@app.api_route("/api/v1/cron/bimonthly-meso-refresh", methods=["GET", "POST"])
+async def trigger_bimonthly_meso_refresh(
+    request: Request,
+    force: bool = Query(False, description="Forzar recálculo aunque no hayan transcurrido 2 meses"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para ejecución programada bimensual (cada 2 meses / 60 días en Vercel Cron) o manual
+    del recálculo integral de matrices meso 2x2, índices MIVAU/INE, yields BTL cuantitativos y catálogo.
+    """
+    if not is_authorized_cron_or_admin(request, authorization):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida para disparar el recálculo meso bimensual."
+        )
+
+    from app.engine.meso_bimonthly_engine import meso_bimonthly_engine
+    result = meso_bimonthly_engine.refresh_meso_2x2_tables(db=db, force=force)
+
+    return {
+        "status": "success" if result.get("status") in ["completed", "skipped"] else "error",
+        "cron": "BIMONTHLY_MESO_REFRESH",
+        "result": result
+    }
+
 
 # ==============================================================================
 # TELEGRAM ADVISOR & SAVED CONSULTATIONS REPOSITORY ENDPOINTS

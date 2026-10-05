@@ -205,4 +205,93 @@ class SavedConsultation(Base):
     user = relationship("User", back_populates="consultations")
 
 
+class CompanyKnowledgeBase(Base):
+    """
+    Base de Conocimiento Corporativa de HIVEX.
+    Almacena y capitaliza inteligencia de mercado (precios/m², rentas, yields, planes urbanísticos
+    y diagnósticos) obtenida internamente o mediante prospección exterior con Gemini.
+    Permite responder futuras consultas sin volver a incurrir en costes externos.
+    """
+    __tablename__ = "company_knowledge_base"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_key = Column(String(150), unique=True, index=True, nullable=False) # ej: "madrid:carabanchel", "valencia:ruzafa"
+    province = Column(String(100), index=True, nullable=False)
+    locality = Column(String(100), index=True, nullable=True)
+    zone_or_district = Column(String(100), index=True, nullable=True)
+    postal_codes_csv = Column(String(100), nullable=True) # ej: "28019,28025,28054"
+    avg_price_sale_sqm = Column(Float, nullable=True)
+    avg_rent_sqm = Column(Float, nullable=True)
+    gross_yield_pct = Column(Float, nullable=True)
+    discount_vs_market_pct = Column(Float, nullable=True)
+    urban_planning_summary = Column(Text, nullable=True)
+    market_diagnosis = Column(Text, nullable=True)
+    source = Column(String(50), default="HIVEX_INTERNAL") # "HIVEX_INTERNAL", "GEMINI_RESEARCH", "OFFICIAL_DATA"
+    raw_payload_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MesoMarketTable2x2(Base):
+    """
+    Tabla Meso de Precios de Mercado 2x2 por Código Postal.
+    Eje Y (Clasificación del suelo): [URBANO, RÚSTICO]
+    Eje X (Tipología del bien):       [INMUEBLE, SOLAR]
+    Indicadores por zonas: precio compra/m2, renta/m2, yield BTL (%), variación trimestral.
+    Persistido con fecha de actualización para garantizar ciclo de vida fresco (TTL 2 meses / 60 días).
+    """
+    __tablename__ = "meso_market_table_2x2"
+
+    id = Column(Integer, primary_key=True, index=True)
+    postal_code = Column(String(10), unique=True, index=True, nullable=False)
+    zone_label = Column(String(150), nullable=True) # ej: "Carabanchel - Vista Alegre"
+    province = Column(String(100), index=True, nullable=False)
+    locality = Column(String(100), index=True, nullable=True)
+
+    # Matriz 2x2 (€/m²)
+    urbano_inmueble = Column(Float, nullable=False, default=1800.0)
+    urbano_solar = Column(Float, nullable=False, default=600.0)
+    rustico_inmueble = Column(Float, nullable=False, default=400.0)
+    rustico_solar = Column(Float, nullable=False, default=20.0)
+
+    # Indicadores de mercado por zonas e Índices de Referencia MIVAU / INE
+    mivau_rent_sqm_min = Column(Float, nullable=True) # Rango inferior oficial MIVAU
+    avg_rent_sqm = Column(Float, nullable=True, default=14.0) # Renta media MIVAU/INE
+    mivau_rent_sqm_max = Column(Float, nullable=True) # Rango superior oficial MIVAU
+    gross_yield_pct = Column(Float, nullable=True, default=6.5) # Yield BTL bruto %
+    btl_score = Column(Float, nullable=True, default=80.0) # Score cuantitativo BTL (0-100)
+    yield_rating = Column(String(20), nullable=True, default="naranja") # Semáforo HIVEX (verde, amarillo, naranja, rojo)
+    quarterly_variation_pct = Column(Float, nullable=True, default=0.0)
+    source = Column(String(50), default="MIVAU_INE_2X2")
+
+    # Activos verificados en el catálogo local y representatividad
+    verified_active_assets_count = Column(Integer, default=0) # Número de oportunidades activas verificadas en catálogo
+    avg_catalog_discount_pct = Column(Float, default=0.0) # Descuento medio vs mercado en catálogo
+    is_statistically_representative = Column(Boolean, default=False) # Representatividad estadística verificada
+
+    # Indicadores Sociodemográficos INE (ADREH) y Equipamiento Urbano (POIs) por CP
+    ine_avg_income_household = Column(Float, nullable=True, default=34000.0) # Renta media por hogar anual (€) INE
+    poi_density_score = Column(Float, nullable=True, default=75.0) # Densidad de servicios y POIs OSM (0-100)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CronExecutionLog(Base):
+    """
+    Registro histórico y estado de salud de ejecución de los Crons del sistema.
+    Permite auditar el estado de salud de los crons diarios y bimensuales.
+    """
+    __tablename__ = "cron_execution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cron_name = Column(String(100), index=True, nullable=False) # "BIMONTHLY_MESO_REFRESH", "DAILY_PIPELINE", etc.
+    status = Column(String(50), default="SUCCESS") # "SUCCESS", "FAILED", "RUNNING"
+    details_json = Column(Text, default="{}")
+    duration_seconds = Column(Float, default=0.0)
+    executed_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+
+
 

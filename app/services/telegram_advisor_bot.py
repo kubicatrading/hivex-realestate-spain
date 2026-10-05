@@ -5,16 +5,18 @@ interacción conversacional y ejecución del motor asesor inmobiliario.
 """
 
 import os
+import re
 import json
 import logging
 import asyncio
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.db.models import User
+from app.db.models import User, TelegramConversationMessage
 from app.engine.advisor_engine import advisor_engine
 
 logger = logging.getLogger(__name__)
@@ -147,10 +149,15 @@ class TelegramAdvisorBot:
             logger.warning("TELEGRAM_BOT_TOKEN no configurado. Mensaje no enviado.")
             return False
 
+        # Sanitizar textos para HTML de Telegram evitando que '<' numéricos o entidades rompan el parser
+        clean_text = text
+        if parse_mode == "HTML":
+            clean_text = re.sub(r'<(?!(?:/?(?:b|i|u|s|code|pre|a)\b))', '&lt;', clean_text)
+
         url = f"{self.api_base}/sendMessage"
         payload = {
             "chat_id": chat_id,
-            "text": text,
+            "text": clean_text,
             "parse_mode": parse_mode,
             "disable_web_page_preview": False
         }
@@ -159,18 +166,76 @@ class TelegramAdvisorBot:
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
+        # Si el mensaje supera 3900 caracteres, dividir en bloques inteligentes
+        if len(clean_text) > 3900:
+            chunks = []
+            current = []
+            curr_len = 0
+            for line in clean_text.splitlines(keepends=True):
+                if curr_len + len(line) > 3800:
+                    chunks.append("".join(current))
+                    current = [line]
+                    curr_len = len(line)
+                else:
+                    current.append(line)
+                    curr_len += len(line)
+            if current:
+                chunks.append("".join(current))
+
+            success = True
+            for idx, ch in enumerate(chunks):
+                chunk_payload = {
+                    "chat_id": chat_id,
+                    "text": ch,
+                    "parse_mode": parse_mode,
+                    "disable_web_page_preview": False
+                }
+                if idx == 0 and reply_to_message_id:
+                    chunk_payload["reply_to_message_id"] = reply_to_message_id
+                if idx == len(chunks) - 1 and reply_markup:
+                    chunk_payload["reply_markup"] = reply_markup
+
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        res = await client.post(url, json=chunk_payload)
+                        if res.status_code != 200:
+                            chunk_payload.pop("parse_mode", None)
+                            chunk_payload["text"] = re.sub(r'<[^>]+>', '', ch)
+                            r_fallback = await client.post(url, json=chunk_payload)
+                            if r_fallback.status_code != 200:
+                                success = False
+                except Exception as e:
+                    logger.error(f"Error enviando fragmento de mensaje Telegram: {e}")
+                    success = False
+            return success
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
                     return True
                 else:
-                    # Si falla por markdown parsing de algún caracter especial, reintentar en texto plano
+                    logger.warning(f"Telegram sendMessage error {res.status_code}: {res.text}. Reintentando con texto limpio...")
+                    # Si falla por parseo HTML/Markdown, retirar parse_mode y limpiar etiquetas para no mostrar tags crudos
                     payload.pop("parse_mode", None)
+                    payload["text"] = re.sub(r'<[^>]+>', '', text)
                     res2 = await client.post(url, json=payload)
                     return res2.status_code == 200
         except Exception as e:
             logger.error(f"Error al enviar mensaje a Telegram: {e}")
+            return False
+
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
+        """Envía una acción de chat (ej: typing) a Telegram."""
+        if not self.token:
+            return False
+        url = f"{self.api_base}/sendChatAction"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.post(url, json={"chat_id": chat_id, "action": action})
+                return res.status_code == 200
+        except Exception as e:
+            logger.debug(f"Aviso en send_chat_action: {e}")
             return False
 
     def _load_catalog_cache(self):
@@ -557,6 +622,126 @@ class TelegramAdvisorBot:
         finally:
             db.close()
 
+    def synthesize_conversation_prompt(
+        self,
+        chat_id: Any,
+        user_id: Any,
+        current_text: str,
+        reply_to: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Sintetiza de forma inteligente el prompt cuando el usuario encadena mensajes
+        o responde a una propuesta previa del asistente (ej: el bot propone buscar fincas rústicas en
+        el radio de 15km del Colegio Suizo y el usuario responde 'sí' y luego añade 'busca también los chalets individuales').
+        Garantiza que nunca se pierda el hilo conductor ni los criterios acumulados.
+        """
+        clean_text = (current_text or "").strip()
+        if not clean_text:
+            return clean_text
+
+        # 1. Si el usuario utilizó la función nativa 'Reply' de Telegram
+        if reply_to:
+            prev_text = reply_to.get("text") or reply_to.get("caption") or ""
+            if prev_text:
+                clean_prev = re.sub(r'<[^>]+>', '', prev_text).strip()
+                logger.info(f"Incorporando contexto de mensaje respondido nativamente ({len(clean_prev)} caracteres)")
+                return (
+                    f"[Contexto conversacional: El usuario está respondiendo específicamente a este mensaje previo de HIVEX:\n"
+                    f"'''{clean_prev[:600]}'''\n]\n"
+                    f"Pregunta del usuario sobre el mensaje anterior: {clean_text}"
+                )
+
+        # 2. Consultar historial reciente en BD para este chat y usuario
+        last_assistant_msg = None
+        recent_user_msgs = []
+        try:
+            with SessionLocal() as db_hist:
+                last_assistant_msg = db_hist.query(TelegramConversationMessage).filter(
+                    TelegramConversationMessage.telegram_chat_id == str(chat_id),
+                    TelegramConversationMessage.role == "assistant"
+                ).order_by(TelegramConversationMessage.id.desc()).first()
+
+                five_mins_ago = datetime.utcnow() - timedelta(minutes=5)
+                recent_user_msgs = db_hist.query(TelegramConversationMessage).filter(
+                    TelegramConversationMessage.telegram_chat_id == str(chat_id),
+                    TelegramConversationMessage.telegram_user_id == str(user_id),
+                    TelegramConversationMessage.role == "user",
+                    TelegramConversationMessage.created_at >= five_mins_ago
+                ).order_by(TelegramConversationMessage.id.desc()).limit(3).all()
+        except Exception as e_hist:
+            logger.warning(f"Error recuperando historial para concatenación de prompt: {e_hist}")
+
+        clean_lower = clean_text.lower()
+        affirmation_words = {"sí", "si", "vale", "ok", "adelante", "hazlo", "de acuerdo", "perfecto", "actívalo", "activar", "por favor", "claro"}
+        is_pure_affirmation = any(clean_lower == aff or clean_lower.startswith(aff + " ") or clean_lower.startswith(aff + ",") for aff in affirmation_words)
+
+        extension_triggers = [
+            "busca también", "busca tambien", "también", "tambien", "además", "ademas",
+            "y además", "y ademas", "y busca", "y también", "y tambien", "pero también",
+            "pero tambien", "incluye", "añade", "agrega"
+        ]
+        is_extension = any(clean_lower.startswith(ext) or f" {ext} " in clean_lower for ext in extension_triggers)
+
+        # Extraer propuesta o pregunta del asistente previo si existe
+        assistant_proposal = ""
+        if last_assistant_msg and last_assistant_msg.content:
+            ast_content = last_assistant_msg.content
+            # Buscar preguntas explícitas como "¿Deseas que activemos el radar...?"
+            m_q = re.search(r'¿(?:Deseas?|Quieres?|Te gustaría|Gusta)\s+(?:que\s+)?([^?]+)\?', ast_content, re.IGNORECASE)
+            if m_q:
+                assistant_proposal = m_q.group(1).strip()
+            else:
+                # Buscar en el bloque de Próximo Paso Accionable
+                m_step = re.search(r'(?:Próximo Paso Accionable|💡)[^\n]*\n+([^\n]+(?:\n[^\n]+)?)', ast_content, re.IGNORECASE)
+                if m_step:
+                    raw_p = re.sub(r'<[^>]+>', '', m_step.group(1)).strip()
+                    m_p_q = re.search(r'¿(?:Deseas?|Quieres?|Te gustaría|Gusta)\s+(?:que\s+)?([^?]+)\?', raw_p, re.IGNORECASE)
+                    if m_p_q:
+                        assistant_proposal = m_p_q.group(1).strip()
+                    else:
+                        assistant_proposal = raw_p
+
+        # Comprobar si el usuario había enviado una afirmación previa en los últimos 3 minutos
+        had_recent_affirmation = False
+        for u_msg in recent_user_msgs:
+            u_clean = u_msg.content.strip().lower()
+            if any(u_clean == aff or u_clean.startswith(aff + " ") for aff in affirmation_words):
+                had_recent_affirmation = True
+                break
+
+        # Normalizar propuesta
+        normalized_proposal = assistant_proposal
+        if normalized_proposal.lower().startswith("activemos "):
+            normalized_proposal = "activa " + normalized_proposal[10:]
+        elif normalized_proposal.lower().startswith("nuestro equipo de inteligencia de mercado rastree "):
+            normalized_proposal = "activa el radar para rastrear " + normalized_proposal[50:]
+
+        if normalized_proposal:
+            # Caso 1: El usuario sólo dijo "sí" o "de acuerdo"
+            if is_pure_affirmation and len(clean_text.split()) <= 4:
+                logger.info(f"[Prompt Chaining] Usuario afirmó propuesta previa -> 'Sí, {normalized_proposal}'")
+                return f"Sí, {normalized_proposal}"
+
+            # Caso 2: El usuario añadió una extensión tras decir "sí" previamente, o este mensaje empieza con extensión
+            if had_recent_affirmation and (is_extension or len(clean_text.split()) > 1):
+                logger.info(f"[Prompt Chaining] Encadenando afirmación previa + nuevo requisito -> 'Sí, {normalized_proposal}, y además {clean_text}'")
+                return f"Sí, {normalized_proposal}, y además {clean_text}"
+
+            # Caso 3: El mensaje actual combina afirmación y extensión (ej: "Sí, busca también chalets")
+            if is_pure_affirmation and is_extension:
+                clean_remainder = re.sub(r'^(?:sí|si|vale|ok|adelante|de acuerdo|por favor)[,.\s]+(?:y\s+)?', '', clean_text, flags=re.IGNORECASE).strip()
+                logger.info(f"[Prompt Chaining] Mensaje con afirmación y extensión directa -> 'Sí, {normalized_proposal}, y además {clean_remainder}'")
+                return f"Sí, {normalized_proposal}, y además {clean_remainder}"
+
+        # Caso 4: Encadenamiento directo de mensajes del usuario sin propuesta del asistente
+        if is_extension and recent_user_msgs:
+            prev_u = recent_user_msgs[0].content.strip()
+            if prev_u and not any(prev_u.lower() == aff for aff in affirmation_words):
+                logger.info(f"[Prompt Chaining] Concatenando mensaje previo del usuario: '{prev_u}' + '{clean_text}'")
+                return f"{prev_u} y además {clean_text}"
+
+        return clean_text
+
     # --------------------------------------------------------------------------
     # 4. GESTIÓN Y PROCESAMIENTO DE UPDATES
     # --------------------------------------------------------------------------
@@ -598,18 +783,24 @@ class TelegramAdvisorBot:
         is_link_cmd = text_content.startswith("/vincular") or text_content.startswith("/link")
         link_args = text_content.split(maxsplit=1)[1] if (is_link_cmd and len(text_content.split()) > 1) else None
 
-        db = SessionLocal()
-        try:
-            # 1. VERIFICAR AUTENTICACIÓN DEL USUARIO
-            is_authorized, db_user, auth_reason = self.verify_or_link_user(
-                db=db,
-                telegram_user_id=user_id,
-                telegram_username=username,
-                first_name=first_name,
-                command_args=link_args
-            )
+        # Enviar acción "typing" inmediatamente para feedback en tiempo real
+        asyncio.create_task(self.send_chat_action(chat_id, "typing"))
 
-            # 1. Si el usuario NO está autorizado, responder con advertencia indicando contactar al administrador
+        try:
+            # 1. VERIFICAR AUTENTICACIÓN DEL USUARIO (Sesión DB corta y aislada)
+            user_display_name = username or first_name or "usuario"
+            with SessionLocal() as db_auth:
+                is_authorized, db_user, auth_reason = self.verify_or_link_user(
+                    db=db_auth,
+                    telegram_user_id=user_id,
+                    telegram_username=username,
+                    first_name=first_name,
+                    command_args=link_args
+                )
+                if is_authorized and db_user:
+                    user_display_name = db_user.username
+
+            # Si el usuario NO está autorizado, responder con advertencia indicando contactar al administrador
             if not is_authorized:
                 logger.warning(f"Intento de acceso no autorizado en Telegram: UserID={user_id}, Username={username}, Name={first_name}, ChatID={chat_id}, Text={text_content}")
                 unauth_reply = (
@@ -622,7 +813,7 @@ class TelegramAdvisorBot:
             # Si el usuario está autorizado pero envía /vincular, informar que ya tiene acceso
             if is_link_cmd:
                 reply = (
-                    f"✅ Tu cuenta ya está autorizada en HIVEX como <b>{db_user.username if db_user else 'usuario válido'}</b>.\n"
+                    f"✅ Tu cuenta ya está autorizada en HIVEX como <b>{user_display_name}</b>.\n"
                     f"Puedes hacerme cualquier consulta directamente."
                 )
                 await self.send_message(chat_id, reply, parse_mode="HTML", reply_to_message_id=message_id)
@@ -631,7 +822,14 @@ class TelegramAdvisorBot:
             # 2. PROCESAR MENSAJE (TEXTO O AUDIO)
             audio_bytes = None
             audio_duration = None
-            prompt_to_process = text_content
+            # Sintetizar prompt contextualizado si hay encadenamiento de mensajes o respuesta previa
+            reply_to = message.get("reply_to_message")
+            prompt_to_process = self.synthesize_conversation_prompt(
+                chat_id=chat_id,
+                user_id=user_id,
+                current_text=text_content or "",
+                reply_to=reply_to
+            )
 
             # Si es nota de voz o archivo de audio
             if voice or audio:
@@ -661,37 +859,38 @@ class TelegramAdvisorBot:
                 await self.send_message(chat_id, welcome_msg, reply_to_message_id=message_id)
                 return {"status": "welcomed"}
 
-            # Ejecutar consulta en el Motor Asesor
+            # Ejecutar consulta en el Motor Asesor (process_user_query abre su propia sesión corta al persistir)
             res = await advisor_engine.process_user_query(
-                user_name=db_user.username if db_user else (username or first_name),
+                user_name=user_display_name,
                 telegram_chat_id=str(chat_id),
                 telegram_user_id=str(user_id),
                 prompt_text=prompt_to_process,
                 audio_bytes=audio_bytes,
                 audio_duration=audio_duration,
-                db=db
+                db=None
             )
 
             # Enviar la respuesta del Asesor a Telegram con fichas visuales
             matched_opps = res.get("matched_opportunities") or []
+            should_display_cards = res.get("should_display_cards", False)
             intro_text = res.get("intro_text")
 
-            if matched_opps:
+            if matched_opps and should_display_cards:
                 # 1. Enviar resumen diagnóstico introductorio
                 if intro_text:
                     await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
                 else:
-                    await self.send_message(chat_id, res["response_text"], reply_to_message_id=message_id)
+                    await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
 
                 target_count = int(res.get("criteria", {}).get("target_count") or 20)
-                # Enviar exactamente las oportunidades solicitadas (hasta target_count, si no hay más NO se inventan)
+                # Enviar exactamente las oportunidades solicitadas
                 cards_to_send = matched_opps[:target_count]
                 for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
                     await asyncio.sleep(0.35)
 
             else:
-                # Si no hubo fichas (p.ej. respuesta analítica de mercado o no hay matches), despachar el texto de respuesta del asesor
+                # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
                 await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
 
             return {
@@ -705,8 +904,6 @@ class TelegramAdvisorBot:
             logger.error(f"Error procesando update de Telegram: {e}", exc_info=True)
             await self.send_message(chat_id, f"⚠️ Ocurrió un error al procesar tu solicitud: {str(e)}")
             return {"status": "error", "error": str(e)}
-        finally:
-            db.close()
 
     # --------------------------------------------------------------------------
     # 5. POLLING EN SEGUNDO PLANO (MODO DESARROLLO / LOCAL)
@@ -725,17 +922,6 @@ class TelegramAdvisorBot:
 
         offset = 0
         async with httpx.AsyncClient(timeout=35.0) as client:
-            # Purgar mensajes acumulados mientras el bot estuvo apagado para evitar avalanchas o bucles
-            try:
-                drop_resp = await client.get(f"{self.api_base}/getUpdates?offset=-1")
-                if drop_resp.status_code == 200:
-                    drop_data = drop_resp.json().get("result", [])
-                    if drop_data:
-                        offset = drop_data[-1].get("update_id", 0) + 1
-                        logger.info(f"TelegramAdvisorBot: Cola anterior purgada con éxito. Nuevo offset: {offset}")
-            except Exception as e_drop:
-                logger.debug(f"Aviso purgando cola inicial: {e_drop}")
-
             while self._is_polling:
                 try:
                     url = f"{self.api_base}/getUpdates?offset={offset}&timeout=20"

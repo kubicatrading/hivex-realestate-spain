@@ -121,8 +121,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!oppId) return;
         const cleanId = String(oppId).trim().toUpperCase();
         const normId = cleanId.replace(/^SUB-SUB-/, 'SUB-');
+        window._openedDeepLinkOpp = true;
 
         try {
+            const loginOverlay = document.getElementById('login-overlay');
+            const dashboardApp = document.getElementById('dashboard-app');
+
             // 1. Si ya se habían cargado oportunidades en memoria, abrirla y fijar el filtro
             if (state.allOpportunities && state.allOpportunities.length > 0) {
                 const found = state.allOpportunities.find(o => {
@@ -131,6 +135,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     return idStr === cleanId || idStr === normId || subStr === cleanId || subStr === normId || ('SUB-' + subStr) === cleanId || ('SUB-' + subStr) === normId;
                 });
                 if (found) {
+                    if (loginOverlay) loginOverlay.classList.add('hidden');
+                    if (dashboardApp) dashboardApp.classList.remove('hidden');
+
                     if (found.source_type && state.activeSource !== found.source_type) {
                         state.activeSource = found.source_type;
                         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -138,11 +145,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     }
                     state.filteredOpportunities = [found];
-                    renderOpportunities([found]);
-                    updateDashboardMetrics([found]);
+                    renderDeals([found]);
+                    if (typeof updateKPIs === 'function') updateKPIs([found]);
                     const searchInput = document.getElementById('search-input');
                     if (searchInput) searchInput.value = found.title || found.id_subasta || found.id;
-                    setTimeout(() => window.openPropertyDetailModal(found), 150);
+                    setTimeout(() => window.openPropertyDetailModal(found), 120);
                     return;
                 }
             }
@@ -153,8 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const opp = await res.json();
                 if (opp && (opp.id || opp.title)) {
-                    const loginOverlay = document.getElementById('login-overlay');
                     if (loginOverlay) loginOverlay.classList.add('hidden');
+                    if (dashboardApp) dashboardApp.classList.remove('hidden');
                     
                     if (opp.source_type && state.activeSource !== opp.source_type) {
                         state.activeSource = opp.source_type;
@@ -165,12 +172,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     // Posicionar y filtrar el dashboard exclusivamente en esta oportunidad
                     state.filteredOpportunities = [opp];
-                    renderOpportunities([opp]);
-                    updateDashboardMetrics([opp]);
+                    renderDeals([opp]);
+                    if (typeof updateKPIs === 'function') updateKPIs([opp]);
                     const searchInput = document.getElementById('search-input');
                     if (searchInput) searchInput.value = opp.title || opp.id_subasta || opp.id;
 
-                    setTimeout(() => window.openPropertyDetailModal(opp), 150);
+                    setTimeout(() => window.openPropertyDetailModal(opp), 120);
                 }
             }
         } catch (err) {
@@ -182,9 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function checkAuthSession() {
         const urlParams = new URLSearchParams(window.location.search);
         const directOppId = urlParams.get('opp_id');
-        if (directOppId) {
-            loadAndDisplayDirectOpportunity(directOppId);
-        }
 
         if (!state.token) {
             showLoginOverlay();
@@ -202,6 +206,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 showDashboard();
                 if (typeof syncFavoritesWithBackend === 'function') {
                     syncFavoritesWithBackend();
+                }
+                if (directOppId) {
+                    loadAndDisplayDirectOpportunity(directOppId);
                 }
             } else {
                 logout();
@@ -248,6 +255,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     syncFavoritesWithBackend();
                 }
                 showToast(`¡Bienvenido ${data.user.username}!`, 'success');
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const directOppId = urlParams.get('opp_id');
+                if (directOppId) {
+                    setTimeout(() => loadAndDisplayDirectOpportunity(directOppId), 150);
+                }
 
             } else {
                 loginError.textContent = data.detail || 'Credenciales no válidas. Verifique usuario y contraseña.';
@@ -374,7 +387,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.allOpportunities = newOpps;
                 updateTabBadges(newOpps);
                 updateKPIs(newOpps);
-                applyFilters();
+                const isModalOpen = !document.getElementById('modal-property-detail')?.classList.contains('hidden');
+                if (!window._openedDeepLinkOpp || !isModalOpen) {
+                    applyFilters();
+                }
             }
 
             const urlParams = new URLSearchParams(window.location.search);
@@ -2503,8 +2519,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (state.filteredOpportunities && Array.isArray(state.filteredOpportunities)) {
                             state.filteredOpportunities = state.filteredOpportunities.filter(o => o.id !== opp.id);
                         }
-                        if (typeof renderOpportunities === 'function' && window._lastOpportunities) {
-                            renderOpportunities(window._lastOpportunities);
+                        if (typeof renderDeals === 'function' && window._lastOpportunities) {
+                            renderDeals(window._lastOpportunities);
                         }
                         return;
                     }
