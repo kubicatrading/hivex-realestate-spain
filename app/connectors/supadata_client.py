@@ -85,6 +85,8 @@ class SupadataClient:
         except Exception as e:
             logger.warning(f"Error guardando caché de Supadata para {url}: {e}")
 
+    _quota_exceeded_until: float = 0.0
+
     def scrape_url(self, target_url: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """
         Envía una URL a Supadata para extraer su contenido en Markdown.
@@ -93,6 +95,11 @@ class SupadataClient:
         """
         if not self.api_key:
             logger.error("SUPADATA_API_KEY no está configurada.")
+            return None
+
+        # Circuit breaker para cuota excedida (evita llamadas inútiles y timeouts)
+        if time.time() < SupadataClient._quota_exceeded_until:
+            logger.warning("[Supadata Circuit Breaker] Cuota mensual agotada en Supadata. Omitiendo llamada para no demorar la respuesta.")
             return None
 
         # Comprobar caché previa
@@ -120,6 +127,10 @@ class SupadataClient:
                     logger.info(f"[Supadata Success] {target_url} -> {content_len} caracteres obtenidos.")
                     self._write_cache(target_url, data)
                     return data
+                elif res.status_code == 429:
+                    logger.warning(f"[Supadata Warning] Status 429: Cuota del plan agotada. Activando circuit breaker de 1 hora.")
+                    SupadataClient._quota_exceeded_until = time.time() + 3600
+                    return None
                 elif res.status_code in (401, 403):
                     logger.error(f"[Supadata Auth Error] Código {res.status_code}: {res.text}")
                     return None

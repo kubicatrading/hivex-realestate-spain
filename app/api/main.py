@@ -926,18 +926,17 @@ class TelegramSimulationRequest(BaseModel):
     telegram_chat_id: Optional[str] = "web-simulation"
 
 @app.post("/api/v1/telegram/webhook")
-async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+async def telegram_webhook(request: Request):
     """
     Endpoint Webhook para recibir updates de la API de Telegram en tiempo real.
-    Procesa mensajes de texto y notas de voz para el Asesor Inmobiliario HIVEX de forma asíncrona.
-    Devuelve HTTP 200 de inmediato a Telegram para evitar timeouts de webhook, y delega el análisis
-    profundo con Gemini 3.8 Flash en segundo plano.
+    Procesa de forma directa y asíncrona dentro del ciclo de vida de la petición
+    para que la función serverless de Vercel complete el envío a Telegram sin riesgo de ser congelada.
     """
     try:
         data = await request.json()
         from app.services.telegram_advisor_bot import telegram_advisor_bot
-        background_tasks.add_task(telegram_advisor_bot.process_update, data)
-        return {"ok": True, "status": "processing_in_background"}
+        res = await telegram_advisor_bot.process_update(data)
+        return {"ok": True, "result": res}
     except Exception as e:
         print(f"Error en webhook de Telegram: {e}")
         return {"ok": False, "error": str(e)}

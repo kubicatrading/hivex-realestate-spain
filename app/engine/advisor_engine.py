@@ -926,11 +926,28 @@ class AdvisorEngine:
                     continue
 
                 logger.info(f"[Advisor Sync] Extrayendo contenido en vivo de {target.get('portal')} URL: {target_url}")
+                content = ""
                 scrape_res = supadata.scrape_url(target_url)
-                if not scrape_res or not scrape_res.get("content"):
+                if scrape_res and scrape_res.get("content"):
+                    content = scrape_res.get("content", "")
+                elif any(k in p_name for k in ["fotocasa", "habitaclia", "pisos"]):
+                    # Fallback directo con httpx (0 créditos Supadata)
+                    try:
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                        }
+                        direct_resp = httpx.get(target_url, headers=headers, follow_redirects=True, timeout=8.0)
+                        if direct_resp.status_code == 200 and len(direct_resp.text) > 500:
+                            content = direct_resp.text
+                            logger.info(f"[Advisor Sync] Fetch directo exitoso para {p_name} ({len(content)} bytes)")
+                    except Exception as e_direct:
+                        logger.warning(f"[Advisor Sync] Fetch directo falló para {p_name}: {e_direct}")
+
+                if not content:
                     continue
 
-                content = scrape_res.get("content", "")
                 if "idealista" in p_name:
                     parsed_items = IdealistaMarkdownParser.parse_listings(content, default_province=prov)
                 elif "fotocasa" in p_name:
