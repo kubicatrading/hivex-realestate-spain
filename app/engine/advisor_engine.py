@@ -99,10 +99,12 @@ class AdvisorEngine:
     """
 
     GEMINI_FLASH_CASCADE = [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
         "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
         "gemini-flash-latest",
-        "gemini-3-flash-preview",
     ]
 
     def __init__(self):
@@ -225,7 +227,7 @@ class AdvisorEngine:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
                 logger.info(f"[Gemini Cascade] Evaluando modelo: {model}...")
-                async with httpx.AsyncClient(timeout=12.0) as client:
+                async with httpx.AsyncClient(timeout=25.0) as client:
                     resp = await client.post(url, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()

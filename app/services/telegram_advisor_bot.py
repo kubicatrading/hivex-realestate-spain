@@ -859,6 +859,9 @@ class TelegramAdvisorBot:
                 await self.send_message(chat_id, welcome_msg, reply_to_message_id=message_id)
                 return {"status": "welcomed"}
 
+            # Enviar indicador de 'escribiendo...' a Telegram mientras se ejecuta el razonamiento
+            await self.send_chat_action(chat_id, "typing")
+
             # Ejecutar consulta en el Motor Asesor (process_user_query abre su propia sesión corta al persistir)
             res = await advisor_engine.process_user_query(
                 user_name=user_display_name,
