@@ -10,6 +10,7 @@ import json
 import html
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import quote_plus
 import httpx
@@ -66,6 +67,8 @@ SPANISH_ZONE_DEFINITIONS = [
     ("Barajas", "Madrid", ["barajas", "alameda de osuna", "28042"]),
     ("Latina", "Madrid", ["distrito latina", "aluche", "campamento", "lucero", "las águilas", "las aguilas", "28024", "28044", "28047"]),
     # Municipios Madrid
+    ("La Moraleja - Alcobendas - Colegio Suizo", "Madrid", ["la moraleja", "moraleja", "el soto", "el soto de la moraleja", "el encinar", "el encinar de los reyes", "alcobendas", "colegio suizo", "colegio suizo de madrid", "28109", "28100", "28108"]),
+    ("Ciudalcampo - San Sebastián de los Reyes Norte", "Madrid", ["ciudalcampo", "fuente del fresno", "santo domingo", "la granjilla", "club de campo", "valdelagua", "28707", "28708", "28120"]),
     ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
     ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "valpuercos", "28110", "28140", "28701", "28702", "28703"]),
@@ -443,11 +446,18 @@ class AdvisorEngine:
 
         # Tipo de Activo
         property_type = None
-        if any(w in q_lower for w in ["rústic", "rustic", "finca", "agrario"]):
+        has_rustic = any(w in q_lower for w in ["rústic", "rustic", "finca", "agrario", "terreno rústico", "suelo rústico"])
+        has_chalet = any(w in q_lower for w in ["chalet", "chalets", "casa", "casas", "unifamiliar", "villa", "independiente", "adosado"])
+
+        if has_rustic and has_chalet:
+            property_type = "Rústico y Chalet"
+        elif has_rustic:
             property_type = "Rústico / Terreno"
         elif any(w in q_lower for w in ["solar", "terreno", "suelo", "parcela"]):
             property_type = "Solar"
-        elif any(w in q_lower for w in ["piso", "vivienda", "apartamento", "ático", "atico", "chalet", "casa"]):
+        elif has_chalet:
+            property_type = "Chalet / Casa"
+        elif any(w in q_lower for w in ["piso", "vivienda", "apartamento", "ático", "atico"]):
             property_type = "Vivienda"
         elif any(w in q_lower for w in ["local", "comercial", "nave", "oficina"]):
             property_type = "Local"
@@ -612,8 +622,10 @@ class AdvisorEngine:
 
 
         # 2. Carga de Catálogo Market Verificado
-        catalog_path = "app/data/verified_market_catalog.json"
-        if os.path.exists(catalog_path):
+        catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
+        if not catalog_path.exists():
+            catalog_path = Path("app/data/verified_market_catalog.json")
+        if catalog_path.exists():
             try:
                 with open(catalog_path, "r", encoding="utf-8") as f:
                     market_items = json.load(f)
@@ -676,10 +688,15 @@ class AdvisorEngine:
 
             matched_zone_def = None
             for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
-                if z_name.lower() == target_zone or target_zone in [t.lower() for t in z_tokens]:
+                if z_name.lower() == target_zone or target_zone in [t.lower() for t in z_tokens] or any(t.lower() in target_zone for t in z_tokens):
                     zone_keys = list(set([target_zone] + [t.lower() for t in z_tokens]))
                     matched_zone_def = (z_name, z_prov)
                     break
+
+            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas, ampliar al cinturón rústico contiguo
+            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas"]):
+                zone_keys.extend(["algete", "fuente el saz", "el molar", "talamanca", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno"])
+                zone_keys = list(set(zone_keys))
 
             def _matches_target_zone(o: Dict[str, Any]) -> bool:
                 census_dist = ""
@@ -719,7 +736,20 @@ class AdvisorEngine:
         # Tipo de Propiedad
         if criteria.get("property_type"):
             ptype = str(criteria["property_type"]).lower()
-            if any(w in ptype for w in ["rústic", "rustic", "finca", "solar", "terreno", "suelo", "parcela"]):
+            if "rústico y chalet" in ptype or ("rústic" in ptype and "chalet" in ptype):
+                filtered = [
+                    o for o in filtered
+                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in [
+                        "rústic", "rustic", "solar", "terreno", "suelo", "parcela", "finca", "agrario",
+                        "chalet", "casa", "unifamiliar", "villa", "independiente", "adosado"
+                    ])
+                ]
+            elif any(w in ptype for w in ["chalet", "casa", "unifamiliar", "villa", "independiente", "adosado"]):
+                filtered = [
+                    o for o in filtered
+                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in ["chalet", "casa", "villa", "unifamiliar", "independiente", "adosado", "pareado"])
+                ]
+            elif any(w in ptype for w in ["rústic", "rustic", "finca", "solar", "terreno", "suelo", "parcela"]):
                 filtered = [
                     o for o in filtered
                     if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in ["rústic", "rustic", "solar", "terreno", "suelo", "parcela", "finca", "agrario"])
@@ -1769,7 +1799,9 @@ class AdvisorEngine:
             "dame las oportunidades", "ver pisos", "ver oportunidades", "ver fichas", "listar",
             "listado de", "pásame las fichas", "quiero ver", "sácame las", "sacame las",
             "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
-            "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo"
+            "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
+            "busca también", "busca tambien", "busca", "buscar", "encuentra", "rastrea", "rastrear",
+            "localiza", "dame", "trae", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas"
         ]
         is_explicit_listing_request = any(v in prompt_lower for v in explicit_show_verbs)
 
@@ -1791,8 +1823,7 @@ class AdvisorEngine:
             "cuáles son las zona", "cuales son las zona", "qué zona", "que zona",
             "dónde comprar", "donde comprar", "qué municipio", "que municipio",
             "qué barrio", "que barrio", "recomienda", "recomiéndame", "recomiendame",
-            "zonas cercanas", "zona cercana", "zonas con", "zona con", "mejores zonas",
-            "dónde hay", "donde hay", "colegio suizo", "terrenos rústicos", "terreno rústico", "suelo rústico"
+            "zonas con", "zona con", "mejores zonas", "dónde hay", "donde hay"
         ]) and not is_explicit_listing_request
 
         is_quantitative_query = (is_count_query or is_deviation_query) and not is_explicit_listing_request

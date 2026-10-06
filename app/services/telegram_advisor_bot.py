@@ -660,13 +660,13 @@ class TelegramAdvisorBot:
                     TelegramConversationMessage.role == "assistant"
                 ).order_by(TelegramConversationMessage.id.desc()).first()
 
-                five_mins_ago = datetime.utcnow() - timedelta(minutes=5)
+                window_ago = datetime.utcnow() - timedelta(hours=24)
                 recent_user_msgs = db_hist.query(TelegramConversationMessage).filter(
                     TelegramConversationMessage.telegram_chat_id == str(chat_id),
                     TelegramConversationMessage.telegram_user_id == str(user_id),
                     TelegramConversationMessage.role == "user",
-                    TelegramConversationMessage.created_at >= five_mins_ago
-                ).order_by(TelegramConversationMessage.id.desc()).limit(3).all()
+                    TelegramConversationMessage.created_at >= window_ago
+                ).order_by(TelegramConversationMessage.id.desc()).limit(5).all()
         except Exception as e_hist:
             logger.warning(f"Error recuperando historial para concatenación de prompt: {e_hist}")
 
@@ -700,7 +700,7 @@ class TelegramAdvisorBot:
                     else:
                         assistant_proposal = raw_p
 
-        # Comprobar si el usuario había enviado una afirmación previa en los últimos 3 minutos
+        # Comprobar si el usuario había enviado una afirmación previa en el historial
         had_recent_affirmation = False
         for u_msg in recent_user_msgs:
             u_clean = u_msg.content.strip().lower()
@@ -734,10 +734,11 @@ class TelegramAdvisorBot:
 
         # Caso 4: Encadenamiento directo de mensajes del usuario sin propuesta del asistente
         if is_extension and recent_user_msgs:
-            prev_u = recent_user_msgs[0].content.strip()
-            if prev_u and not any(prev_u.lower() == aff for aff in affirmation_words):
-                logger.info(f"[Prompt Chaining] Concatenando mensaje previo del usuario: '{prev_u}' + '{clean_text}'")
-                return f"{prev_u} y además {clean_text}"
+            for u_m in recent_user_msgs:
+                prev_u = (u_m.content or "").strip()
+                if prev_u and not any(prev_u.lower() == aff for aff in affirmation_words) and len(prev_u) > 10:
+                    logger.info(f"[Prompt Chaining] Concatenando mensaje previo del usuario: '{prev_u}' + '{clean_text}'")
+                    return f"{prev_u}, y además {clean_text}"
 
         return clean_text
 
