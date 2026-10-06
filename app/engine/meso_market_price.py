@@ -889,7 +889,7 @@ def resolve_meso_market_price_2x2(
     province_str: str,
     locality_str: str,
     full_address_str: str,
-    desc_text: str,
+    desc_text: str = "",
     land_type: str = "URBANO",
     is_solar: bool = False,
     postal_code: Optional[str] = None
