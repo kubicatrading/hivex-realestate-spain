@@ -550,6 +550,15 @@ class IdealistaMarkdownParser:
                 elif "con ascensor" in post_snippet:
                     has_elevator = True
 
+                # Baños: Buscar explícitamente en el texto; en su defecto usar tipología residencial estándar en España
+                bathrooms = 1
+                bath_match = re.search(r'(\d+)\s*(?:baño|baños|bñ|ba\b|wc)\b', post_text[:400], re.IGNORECASE)
+                if bath_match:
+                    bathrooms = max(1, min(6, int(bath_match.group(1))))
+                else:
+                    # En vivienda española, pisos < 105 m² o < 4 hab típicamente cuentan con 1 baño completo
+                    bathrooms = 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1
+
                 # 5. Ubicación, Geocodificación y Toponimia
                 location_data = cls._resolve_location_and_kpis(title, default_province)
                 clean_title = location_data.get("title") or title
@@ -582,7 +591,7 @@ class IdealistaMarkdownParser:
                     "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
                     "surface_m2": surface_m2,
                     "rooms": rooms,
-                    "bathrooms": max(1, rooms - 1),
+                    "bathrooms": bathrooms,
                     "floor": floor,
                     "has_elevator": has_elevator,
                     "energy_certificate": "D",
@@ -917,7 +926,7 @@ class HabitacliaMarkdownParser:
                     prop = it.get('property', {}) or {}
                     surface_m2 = float(prop.get('builtSurface') or 80.0)
                     rooms = int(prop.get('rooms') or 2)
-                    bathrooms = int(prop.get('bathrooms') or max(1, rooms - 1))
+                    bathrooms = int(prop.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1))
                     floor = str(prop.get('floor') or "Exterior")
                     features_dict = prop.get('features', {}) or {}
                     has_list = features_dict.get('has', []) or []
@@ -1267,7 +1276,7 @@ class FotocasaMarkdownParser:
                     features = {f.get('key'): f.get('value') for f in it.get('features', []) if isinstance(f, dict)}
                     surface_m2 = float(features.get('surface', 80.0))
                     rooms = int(features.get('rooms', 2))
-                    bathrooms = int(features.get('bathrooms', max(1, rooms - 1)))
+                    bathrooms = int(features.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1))
                     floor = f"{features.get('floor')}ª planta" if features.get('floor') else "Exterior"
                     has_elevator = features.get('elevator', 0) > 0
 
@@ -1496,7 +1505,7 @@ class FotocasaMarkdownParser:
                     "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
                     "surface_m2": surface_m2,
                     "rooms": rooms,
-                    "bathrooms": max(1, rooms - 1),
+                    "bathrooms": 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1,
                     "floor": floor,
                     "has_elevator": has_elevator,
                     "energy_certificate": "E",
@@ -1689,7 +1698,7 @@ class PisosComMarkdownParser:
                     "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
                     "surface_m2": surface_m2,
                     "rooms": rooms,
-                    "bathrooms": max(1, rooms - 1),
+                    "bathrooms": 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1,
                     "floor": floor,
                     "has_elevator": has_elevator,
                     "energy_certificate": "E",

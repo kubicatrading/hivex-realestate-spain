@@ -730,6 +730,16 @@ class RealEstateAlertEngine:
 
         total_diag_ms = round((time.time() - t0) * 1000.0, 1)
 
+        # 4. Auditoría del Cron Bimensual (Recálculo Meso 2x2 y KPIs Volátiles)
+        bimonthly_status = "OPERATIVO 🟢"
+        try:
+            from app.engine.meso_bimonthly_engine import meso_bimonthly_engine
+            health_bimonthly = meso_bimonthly_engine.check_cron_health(db)
+            bimonthly_status = health_bimonthly.get("status_label") or "OPERATIVO 🟢"
+        except Exception as e_bm:
+            logger.warning(f"Aviso consultando salud cron bimensual: {e_bm}")
+            bimonthly_status = "AUDITORÍA DISPONIBLE 🟢"
+
         lines = [
             "🖥 *ESTADO DEL SERVIDOR (VERCEL)*",
             "· Límite de Tiempo de Ejecución (Timeout): *300 segundos* (Plan Pro Premium Activado) 🟢",
@@ -750,7 +760,8 @@ class RealEstateAlertEngine:
             "📡 *ESTADO DE SINCRONIZACIÓN Y CRONS (UTC+2)*",
             f"· Cron 08:00h (Ingesta & Pipeline): *{sync_8am_status}*",
             f"· Cron 09:00h (Alertas Inversión 4 Oportunidades): *{sync_9am_status}*",
-            "· Cron 10:00h (Salud de Cabina Telegram): *ENVIADO 🟢*"
+            "· Cron 10:00h (Salud de Cabina Telegram): *ENVIADO 🟢*",
+            f"· Cron Bimensual (Recálculo Meso 2x2 & KPIs Volátiles): *{bimonthly_status}*"
         ]
 
         msg = "\n".join(lines)

@@ -282,16 +282,15 @@ class TelegramAdvisorBot:
         opp_id_clean = str(opp_id).strip()
         norm_id = re.sub(r'^(SUB-)+', 'SUB-', opp_id_clean) if ('JA-' in opp_id_clean or 'SUB-' in opp_id_clean) else opp_id_clean
         web_link = f"{self.platform_url}/?opp_id={norm_id}"
-        if not portal_url:
-            portal_url = web_link
 
         fav_text = "❤️ Guardado en Favoritos" if is_favorite else "🤍 Guardar en Favoritos"
 
         keyboard = [
-            [{"text": "🔍 Ver Ficha en HIVEX", "url": web_link}],
-            [{"text": "🌐 Visitar Portal", "url": portal_url}],
-            [{"text": fav_text, "callback_data": f"fav:{norm_id}"}]
+            [{"text": "🔍 Ver Ficha en HIVEX", "url": web_link}]
         ]
+        if portal_url and portal_url != web_link and portal_url.startswith("http"):
+            keyboard.append([{"text": "🌐 Visitar Portal", "url": portal_url}])
+        keyboard.append([{"text": fav_text, "callback_data": f"fav:{norm_id}"}])
 
         return {"inline_keyboard": keyboard}
 
@@ -417,7 +416,7 @@ class TelegramAdvisorBot:
         self.cache_opportunity(opp)
 
         web_link = f"{self.platform_url}/?opp_id={opp_id}"
-        portal_url = opp.get("url") or opp.get("portal_url") or web_link
+        portal_url = opp.get("portal_url") or opp.get("url") or opp.get("source_url") or ""
 
         # Comprobar si el chat ya lo tiene en favoritos
         is_favorite = False

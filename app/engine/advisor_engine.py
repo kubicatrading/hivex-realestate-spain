@@ -68,6 +68,7 @@ SPANISH_ZONE_DEFINITIONS = [
     # Municipios Madrid
     ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
+    ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "valpuercos", "28110", "28140", "28701", "28702", "28703"]),
     ("Pinto", "Madrid", ["pinto", "28320"]),
     ("Valdemoro", "Madrid", ["valdemoro", "28340"]),
     # Barcelona
@@ -376,9 +377,31 @@ class AdvisorEngine:
             sort_by = "price"
 
         # Detección de Precio Máximo / Mínimo
+        # Superficie Mínima / Máxima (m2) - Extraer primero para evitar conflicto con precios
+        min_sqm = None
+        max_sqm = None
+        sqm_over = re.search(r'(?:más de|mas de|mayor de|desde|mínimo|minimo|por encima de|>)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)\s*(?:m2|m²|metros)', q_lower)
+        if sqm_over:
+            val_str = sqm_over.group(1).replace(".", "")
+            try:
+                min_sqm = float(val_str)
+            except ValueError:
+                pass
+
+        sqm_under = re.search(r'(?:menos de|menor de|hasta|máximo|maximo|por debajo de|<)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)\s*(?:m2|m²|metros)', q_lower)
+        if sqm_under:
+            val_str = sqm_under.group(1).replace(".", "")
+            try:
+                max_sqm = float(val_str)
+            except ValueError:
+                pass
+
+        # Detección de Precio Máximo / Mínimo (exigiendo moneda o que no sea m2)
         max_price = None
         min_price = None
-        price_under = re.search(r'(?:menos de|menor de|hasta|máximo|maximo|por debajo de|<)\s*(\d+[\d\.]*)\s*(?:k|mil|€|euros)?', q_lower)
+        price_under = re.search(r'(?:menos de|menor de|hasta|máximo|maximo|por debajo de|<)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)\s*(?:k|mil|€|euros)(?!\s*m[²2]|\s*metros)', q_lower)
+        if not price_under and not max_sqm:
+            price_under = re.search(r'(?:menos de|menor de|hasta|máximo|maximo|por debajo de|<)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)(?!\s*m[²2]|\s*metros)', q_lower)
         if price_under:
             val_str = price_under.group(1).replace(".", "")
             try:
@@ -388,7 +411,9 @@ class AdvisorEngine:
             except ValueError:
                 pass
 
-        price_over = re.search(r'(?:más de|mas de|mayor de|desde|mínimo|minimo|por encima de|>)\s*(\d+[\d\.]*)\s*(?:k|mil|€|euros)?', q_lower)
+        price_over = re.search(r'(?:más de|mas de|mayor de|desde|mínimo|minimo|por encima de|>)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)\s*(?:k|mil|€|euros)(?!\s*m[²2]|\s*metros)', q_lower)
+        if not price_over and not min_sqm:
+            price_over = re.search(r'(?:más de|mas de|mayor de|desde|mínimo|minimo|por encima de|>)\s*(?:de\s+)?(?:los\s+)?(\d+[\d\.]*)(?!\s*m[²2]|\s*metros)', q_lower)
         if price_over:
             val_str = price_over.group(1).replace(".", "")
             try:
@@ -418,12 +443,14 @@ class AdvisorEngine:
 
         # Tipo de Activo
         property_type = None
-        if any(w in q_lower for w in ["piso", "vivienda", "apartamento", "ático", "atico", "chalet", "casa"]):
+        if any(w in q_lower for w in ["rústic", "rustic", "finca", "agrario"]):
+            property_type = "Rústico / Terreno"
+        elif any(w in q_lower for w in ["solar", "terreno", "suelo", "parcela"]):
+            property_type = "Solar"
+        elif any(w in q_lower for w in ["piso", "vivienda", "apartamento", "ático", "atico", "chalet", "casa"]):
             property_type = "Vivienda"
         elif any(w in q_lower for w in ["local", "comercial", "nave", "oficina"]):
             property_type = "Local"
-        elif any(w in q_lower for w in ["solar", "terreno", "suelo", "parcela"]):
-            property_type = "Solar"
 
         # Estrategia de Inversión
         strategy = None
@@ -481,6 +508,8 @@ class AdvisorEngine:
             "min_price": min_price,
             "min_discount": min_discount,
             "min_yield": min_yield,
+            "min_sqm": min_sqm,
+            "max_sqm": max_sqm,
             "is_alert": is_alert,
             "raw_text": text_input
         }
@@ -690,7 +719,12 @@ class AdvisorEngine:
         # Tipo de Propiedad
         if criteria.get("property_type"):
             ptype = str(criteria["property_type"]).lower()
-            if ptype in ("vivienda", "piso", "apartamento"):
+            if any(w in ptype for w in ["rústic", "rustic", "finca", "solar", "terreno", "suelo", "parcela"]):
+                filtered = [
+                    o for o in filtered
+                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in ["rústic", "rustic", "solar", "terreno", "suelo", "parcela", "finca", "agrario"])
+                ]
+            elif ptype in ("vivienda", "piso", "apartamento"):
                 filtered = [
                     o for o in filtered
                     if not any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower() for w in ["solar", "terreno", "suelo", "local comercial", "nave"])
@@ -700,11 +734,22 @@ class AdvisorEngine:
                     o for o in filtered
                     if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower() for w in ["local", "comercial", "nave", "oficina"])
                 ]
-            elif ptype in ("solar", "terreno", "suelo"):
-                filtered = [
-                    o for o in filtered
-                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower() for w in ["solar", "terreno", "suelo", "parcela"])
-                ]
+
+        # Superficie Mínima (m2)
+        if criteria.get("min_sqm"):
+            min_s = criteria["min_sqm"]
+            filtered = [
+                o for o in filtered
+                if (float(o.get("plot_area") or o.get("built_area") or o.get("surface_m2") or o.get("sqm") or 0)) >= min_s
+            ]
+
+        # Superficie Máxima (m2)
+        if criteria.get("max_sqm"):
+            max_s = criteria["max_sqm"]
+            filtered = [
+                o for o in filtered
+                if (float(o.get("plot_area") or o.get("built_area") or o.get("surface_m2") or o.get("sqm") or 0)) <= max_s
+            ]
 
         # Portal Específico o Subastas
         if criteria.get("portal_filter"):

@@ -748,19 +748,24 @@ class MarketScraper:
         ):
             return None
 
+        raw_price = float(item.get("listing_price") or item.get("price") or 0.0)
+        raw_surface = float(item.get("surface_m2") or item.get("plot_area") or item.get("built_area") or item.get("sqm") or 0.0)
+        raw_portal = item.get("primary_portal") or item.get("portal") or "Portal Inmobiliario"
+        raw_portal_url = item.get("portal_url") or item.get("source_url") or item.get("url") or ""
+
         publications = item.get("publications") or []
-        if not publications and item.get("listing_price"):
+        if not publications and raw_price > 0:
             publications = [{
-                "portal": item.get("primary_portal", "Portal Inmobiliario"),
-                "url": item.get("portal_url", ""),
-                "price": float(item["listing_price"]),
+                "portal": raw_portal,
+                "url": raw_portal_url,
+                "price": raw_price,
                 "agency": item.get("agency", "Comercializadora"),
                 "published_date": item.get("first_published_date", "")
             }]
 
         valid_prices = [float(p["price"]) for p in publications if p.get("price") and float(p["price"]) > 0]
         if not valid_prices:
-            min_price = float(item.get("listing_price", 0.0))
+            min_price = raw_price
             distinct_prices = [min_price] if min_price > 0 else []
         else:
             distinct_prices = sorted(list(set(valid_prices)))
@@ -773,7 +778,7 @@ class MarketScraper:
             pub_p = float(pub.get("price", 0.0))
             pub["is_minimum"] = math.isclose(pub_p, min_price, abs_tol=0.01)
 
-        original_price = float(item.get("original_listing_price") or max(distinct_prices if distinct_prices else [min_price]))
+        original_price = float(item.get("original_listing_price") or item.get("original_price") or max(distinct_prices if distinct_prices else [min_price]))
         if original_price > min_price and original_price > 0:
             price_drop = original_price - min_price
             discount_pct = round((price_drop / original_price) * 100, 1)
@@ -786,8 +791,8 @@ class MarketScraper:
         if not price_drop_date and price_drop > 0:
             price_drop_date = item.get("first_published_date") or "2026-03-01"
 
-        surface = float(item.get("surface_m2") or 1.0)
-        property_m2_price = round(min_price / surface, 2) if surface > 0 else 0.0
+        surface = raw_surface if raw_surface > 0 else 1.0
+        property_m2_price = round(min_price / surface, 2) if surface > 0 and min_price > 0 else 0.0
 
         census = item.get("census_tract_data", {})
         postal_code = item.get("postal_code")
