@@ -120,6 +120,42 @@ PROVINCE_MARKET_2X2: Dict[str, Dict[str, Dict[str, float]]] = {
 
 # Matrices 2x2 por Municipio Específico (€/m²)
 MUNICIPALITY_MARKET_2X2: Dict[str, Dict[str, Dict[str, float]]] = {
+    "EL MOLAR": {
+        "URBANO": {"INMUEBLE": 1650.0, "SOLAR": 480.0},
+        "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 5.0}
+    },
+    "FUENTE EL SAZ DE JARAMA": {
+        "URBANO": {"INMUEBLE": 1700.0, "SOLAR": 500.0},
+        "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 5.5}
+    },
+    "FUENTE EL SAZ": {
+        "URBANO": {"INMUEBLE": 1700.0, "SOLAR": 500.0},
+        "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 5.5}
+    },
+    "ALGETE": {
+        "URBANO": {"INMUEBLE": 1850.0, "SOLAR": 550.0},
+        "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 6.5}
+    },
+    "SAN SEBASTIÁN DE LOS REYES": {
+        "URBANO": {"INMUEBLE": 2900.0, "SOLAR": 900.0},
+        "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 12.0}
+    },
+    "SAN SEBASTIAN DE LOS REYES": {
+        "URBANO": {"INMUEBLE": 2900.0, "SOLAR": 900.0},
+        "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 12.0}
+    },
+    "TALAMANCA DE JARAMA": {
+        "URBANO": {"INMUEBLE": 1500.0, "SOLAR": 450.0},
+        "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 4.5}
+    },
+    "TALAMANCA": {
+        "URBANO": {"INMUEBLE": 1500.0, "SOLAR": 450.0},
+        "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 4.5}
+    },
+    "MORALZARZAL": {
+        "URBANO": {"INMUEBLE": 1950.0, "SOLAR": 600.0},
+        "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 8.0}
+    },
     "DAGANZO DE ARRIBA": {
         "URBANO": {"INMUEBLE": 1450.0, "SOLAR": 450.0},
         "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 12.0}
@@ -256,6 +292,14 @@ CP_DISTRICT_MARKET_2X2: Dict[str, Tuple[Dict[str, Dict[str, float]], str]] = {
     "28805": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 720.0}, "RÚSTICO": {"INMUEBLE": 325.0, "SOLAR": 14.0}}, "Alcalá de Henares - Val"),
     "28806": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 15.0}}, "Alcalá de Henares - La Garena"),
     "28814": ({"URBANO": {"INMUEBLE": 1450.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 12.0}}, "Daganzo de Arriba"),
+    "28710": ({"URBANO": {"INMUEBLE": 1650.0, "SOLAR": 480.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 5.0}}, "El Molar"),
+    "28140": ({"URBANO": {"INMUEBLE": 1700.0, "SOLAR": 500.0}, "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 5.5}}, "Fuente el Saz de Jarama"),
+    "28110": ({"URBANO": {"INMUEBLE": 1850.0, "SOLAR": 550.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 6.5}}, "Algete"),
+    "28701": ({"URBANO": {"INMUEBLE": 2900.0, "SOLAR": 900.0}, "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 12.0}}, "San Sebastián de los Reyes - Centro"),
+    "28702": ({"URBANO": {"INMUEBLE": 3100.0, "SOLAR": 950.0}, "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 12.0}}, "San Sebastián de los Reyes - Dehesa"),
+    "28703": ({"URBANO": {"INMUEBLE": 3300.0, "SOLAR": 1050.0}, "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 14.0}}, "San Sebastián de los Reyes - Rosa Luxemburgo"),
+    "28160": ({"URBANO": {"INMUEBLE": 1500.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 4.5}}, "Talamanca de Jarama"),
+    "28411": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 600.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 8.0}}, "Moralzarzal"),
     "03001": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 15.0}}, "Alicante - Centro Tradicional"),
     "03002": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 720.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Alicante - Casco Antiguo"),
     "03004": ({"URBANO": {"INMUEBLE": 2200.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 14.0}}, "Alicante - Mercado"),
@@ -579,6 +623,16 @@ DISTRICT_NEIGHBORHOOD_TO_CP: Dict[str, str] = {
     "las tablas": "28050",
     "barajas": "28042",
     "alameda de osuna": "28042",
+    "el molar": "28710",
+    "molar": "28710",
+    "fuente el saz": "28140",
+    "fuente el saz de jarama": "28140",
+    "algete": "28110",
+    "san sebastian de los reyes": "28701",
+    "san sebastián de los reyes": "28701",
+    "talamanca": "28160",
+    "talamanca de jarama": "28160",
+    "moralzarzal": "28411",
 
     # Barcelona
     "eixample": "08007",
@@ -814,7 +868,17 @@ DISTRICT_NEIGHBORHOOD_TO_CP_BY_PREFIX: Dict[str, Dict[str, str]] = {
         "alcorcón": "28921",
         "mostoles": "28931",
         "móstoles": "28931",
-        "fuenlabrada": "28941"
+        "fuenlabrada": "28941",
+        "el molar": "28710",
+        "molar": "28710",
+        "fuente el saz": "28140",
+        "fuente el saz de jarama": "28140",
+        "algete": "28110",
+        "san sebastian de los reyes": "28701",
+        "san sebastián de los reyes": "28701",
+        "talamanca": "28160",
+        "talamanca de jarama": "28160",
+        "moralzarzal": "28411"
     },
     # Alicante (03)
     "03": {
@@ -910,8 +974,15 @@ def resolve_meso_market_price_2x2(
     prov_key = (province_str or "").strip().upper()
     loc_key = (locality_str or "").strip().upper()
     
+    # Normalización robusta para clasificación RÚSTICO vs URBANO
+    norm_land = (land_type or "").upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+    desc_norm = f"{full_address_str} {desc_text} {locality_str}".upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+    
+    is_rustico = any(k in norm_land for k in ["RUSTICO", "AGRARIO", "RURAL", "CAMPO", "NO URBANIZABLE"]) or \
+                 (is_solar and any(k in desc_norm for k in ["RUSTICO", "AGRARIO", "RURAL", "NO URBANIZABLE", "SECANO", "REGADIO"]))
+    
     # Eje Y: URBANO vs RÚSTICO
-    y_axis = "RÚSTICO" if ("RUSTICO" in (land_type or "").upper() or "AGRARIO" in (land_type or "").upper()) else "URBANO"
+    y_axis = "RÚSTICO" if is_rustico else "URBANO"
     
     # Eje X: INMUEBLE vs SOLAR
     x_axis = "SOLAR" if is_solar else "INMUEBLE"
@@ -941,6 +1012,10 @@ def resolve_meso_market_price_2x2(
 
     # Si conocemos la provincia, el CP DEBE coincidir con el prefijo provincial (evita falsos positivos como 28045 en Zaragoza)
     if cp_candidate and target_prov_prefix and not cp_candidate.startswith(target_prov_prefix):
+        cp_candidate = None
+
+    # Si el CP candidate es 28001 (fallback default de Madrid centro) pero la localidad NO es Madrid capital, descartar para permitir resolución real por municipio/barrio
+    if cp_candidate in ("28001", "28000") and loc_key and loc_key not in ("MADRID", "MADRID CAPITAL", "CENTRO", ""):
         cp_candidate = None
 
     if cp_candidate and cp_candidate in CP_DISTRICT_MARKET_2X2:

@@ -574,10 +574,10 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
 
     # Fila 1: Precio y Superficie
     draw.text((col1_x, y), "Precio de Oferta:", fill=(71, 85, 105), font=font_label)
-    draw.text((col1_x + 125, y - 2), f"{price:,.0f} €", fill=(15, 23, 42), font=font_bold)
+    draw.text((col1_x + 125, y - 2), f"{price:,.0f} €".replace(",", "."), fill=(15, 23, 42), font=font_bold)
 
     draw.text((col2_x, y), "Superficie:", fill=(71, 85, 105), font=font_label)
-    specs_str = f"{sqm:.0f} m²" if sqm else "N/D"
+    specs_str = f"{sqm:,.0f} m²".replace(",", ".") if sqm else "N/D"
     if rooms: specs_str += f" · {rooms} hab"
     if bathrooms: specs_str += f" · {bathrooms} bñ"
     draw.text((col2_x + 85, y - 1), specs_str, fill=(15, 23, 42), font=font_bold)
@@ -585,11 +585,17 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
 
     # Fila 2: Estimación Mercado y Referencia Zona
     draw.text((col1_x, y), "Estimación Mercado:", fill=(71, 85, 105), font=font_label)
-    est_str = f"{market_val:,.0f} €" if market_val > 0 else "Consultar"
+    est_str = f"{market_val:,.0f} €".replace(",", ".") if market_val > 0 else "Consultar"
     draw.text((col1_x + 155, y - 2), est_str, fill=(2, 132, 199), font=font_bold)
 
     draw.text((col2_x, y), "Ref. Zona:", fill=(71, 85, 105), font=font_label)
-    ref_str = f"{m2_price:,.0f} €/m²" if m2_price else "MIVAU"
+    if m2_price:
+        if m2_price < 50:
+            ref_str = f"{m2_price:.1f} €/m²".replace(".", ",")
+        else:
+            ref_str = f"{m2_price:,.0f} €/m²".replace(",", ".")
+    else:
+        ref_str = "MIVAU"
     draw.text((col2_x + 85, y - 1), ref_str, fill=(100, 116, 139), font=font_bold)
     y += 34
 
@@ -620,7 +626,7 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
         rental_yield = round(((monthly_rent * 12) / price) * 100.0, 1)
     btl_str = f"{rental_yield:.1f}% Yield" if rental_yield > 0 else "Consultar"
     if monthly_rent > 0:
-        btl_str += f" ({monthly_rent:,.0f}€)"
+        btl_str += f" ({monthly_rent:,.0f}€)".replace(",", ".")
     draw.text((col2_x + 125, y - 1), btl_str, fill=(15, 23, 42), font=font_bold)
     y += 34
 
@@ -635,7 +641,7 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     profit = float(opp.get("potential_gross_profit") or max(0.0, market_val - price))
     if profit > 0:
         draw.text((col2_x, y), "Margen Estimado:", fill=(71, 85, 105), font=font_label)
-        draw.text((col2_x + 125, y - 1), f"+{profit:,.0f} €", fill=(21, 128, 61), font=font_bold)
+        draw.text((col2_x + 125, y - 1), f"+{profit:,.0f} €".replace(",", "."), fill=(21, 128, 61), font=font_bold)
     else:
         strat_lbl = "House Flipping" if "FLIP" in str(opp.get("strategy", "")).upper() else "Buy to Let (Renta)"
         draw.text((col2_x, y), "Estrategia:", fill=(71, 85, 105), font=font_label)

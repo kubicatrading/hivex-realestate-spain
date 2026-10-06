@@ -1853,6 +1853,13 @@ def get_opportunity_by_id(
     else:
         candidates.add(f"SUB-{norm_id}")
 
+    # Variaciones de portales (ej. PISOS vs PISOSCOM)
+    upper_c = clean_id.upper()
+    if "PISOSCOM" in upper_c:
+        candidates.add(upper_c.replace("PISOSCOM", "PISOS"))
+    elif "PISOS" in upper_c:
+        candidates.add(upper_c.replace("PISOS", "PISOSCOM"))
+
     # 1. Búsqueda directa en catálogo verificado de mercado
     try:
         from app.connectors.market_scraper import MarketScraper

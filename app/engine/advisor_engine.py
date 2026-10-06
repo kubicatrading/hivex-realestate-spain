@@ -1004,67 +1004,27 @@ class AdvisorEngine:
                 else:
                     parsed_items = []
 
+                from app.connectors.market_scraper import MarketScraper
+                _m_scraper = MarketScraper()
+
                 for item in parsed_items:
                     price = float(item.get("listing_price") or item.get("price") or 0.0)
                     if price <= 0:
                         continue
-                    surf = float(item.get("surface_m2") or 75.0)
-                    addr = item.get("address") or zone or prov
-                    cp = item.get("postal_code") or extract_postal_code(addr, prov)
+                    
+                    if not item.get("id"):
+                        p_id_raw = item.get("portal_id") or str(abs(hash(target_url + str(price))) % 100000000)
+                        item["id"] = f"MKT-{p_name.upper()}-{p_id_raw}"
 
-                    ref_val = float(item.get("estimated_reference_value") or item.get("market_valuation") or 0.0)
-                    if ref_val <= price:
-                        meso_p = resolve_meso_market_price_2x2(cp, prov, addr)
-                        ref_val = round(meso_p * surf, 2)
+                    item.setdefault("primary_portal", target.get("portal") or "Pisos.com")
+                    item.setdefault("portal_url", item.get("url") or target_url)
+                    item.setdefault("province", prov)
+                    if zone and not item.get("locality"):
+                        item["locality"] = zone
 
-                    disc = float(item.get("discount_percentage") or 0.0)
-                    if disc <= 0 and ref_val > price:
-                        disc = round(((ref_val - price) / ref_val) * 100, 1)
-
-                    ryield = float(item.get("rental_yield") or 0.0)
-                    rent = float(item.get("estimated_monthly_rent") or 0.0)
-                    if ryield <= 0:
-                        rent_calc = rental_engine.calculate_market_rent(
-                            province=prov,
-                            municipality=zone or prov,
-                            postal_code=cp,
-                            surface_m2=surf,
-                            rooms=int(item.get("rooms") or 2)
-                        )
-                        rent = rent_calc.get("estimated_monthly_rent", 0.0)
-                        ryield = rent_calc.get("gross_yield_percentage", 0.0)
-
-                    score = float(item.get("overall_score") or 0.0)
-                    if score <= 0:
-                        d_factor = min(100.0, max(0.0, disc * 2.5))
-                        y_factor = min(100.0, max(0.0, ryield * 10.0))
-                        score = round(d_factor * 0.5 + y_factor * 0.3 + 20.0, 1)
-
-                    opp_dict = {
-                        "id": str(item.get("id") or f"MKT-{p_name.upper()}-{abs(hash(target_url)) % 1000000}"),
-                        "source_type": "market",
-                        "primary_portal": target.get("portal") or "Idealista",
-                        "strategy": item.get("strategy") or "HOUSE_FLIPPING",
-                        "title": item.get("title") or f"Inmueble en {zone or prov}",
-                        "locality": item.get("locality") or zone or prov,
-                        "province": prov,
-                        "address": addr,
-                        "postal_code": cp,
-                        "listing_price": price,
-                        "estimated_reference_value": ref_val,
-                        "discount_percentage": disc,
-                        "potential_gross_profit": max(0.0, ref_val - price),
-                        "rental_yield": ryield,
-                        "estimated_monthly_rent": rent,
-                        "overall_score": score,
-                        "poi_score": item.get("poi_score") or 75.0,
-                        "surface_m2": surf,
-                        "rooms": int(item.get("rooms") or 2),
-                        "bathrooms": int(item.get("bathrooms") or 1),
-                        "url": item.get("url") or target_url,
-                        "images": item.get("images") or []
-                    }
-                    discovered_opps.append(opp_dict)
+                    processed_opp = _m_scraper._process_market_listing(dict(item))
+                    if processed_opp:
+                        discovered_opps.append(processed_opp)
 
         except Exception as e_gem:
             logger.warning(f"[Advisor Sync] Error en scraping dinámico con Gemini: {e_gem}")
@@ -1081,7 +1041,10 @@ class AdvisorEngine:
         # 3. PERSISTENCIA EN PLATAFORMA (verified_market_catalog.json)
         if discovered_opps:
             try:
-                catalog_path = "app/data/verified_market_catalog.json"
+                from pathlib import Path
+                catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
+                if not catalog_path.exists():
+                    catalog_path = Path("app/data/verified_market_catalog.json")
                 existing_items = []
                 if os.path.exists(catalog_path):
                     with open(catalog_path, "r", encoding="utf-8") as f:
@@ -1385,11 +1348,11 @@ class AdvisorEngine:
 
         lines = [
             f"🏡 <b>{title}</b>",
-            f"📍 <i>{addr}, {loc} ({prov}) • {surf:.0f} m²</i>\n",
-            f"💰 <b>Precio Venta:</b> {price:,.0f} €  <code>({disc_str} s/ Ref: {mkt:,.0f} €)</code>",
-            f"📈 <b>Rentabilidad BTL:</b> <b>{ryield:.1f}% Yield</b> (Est. <b>{rent:,.0f} €/mes</b>)",
+            f"📍 <i>{addr}, {loc} ({prov}) • {surf:,.0f} m²</i>\n".replace(",", "."),
+            f"💰 <b>Precio Venta:</b> {price:,.0f} €  <code>({disc_str} s/ Ref: {mkt:,.0f} €)</code>".replace(",", "."),
+            f"📈 <b>Rentabilidad BTL:</b> <b>{ryield:.1f}% Yield</b> (Est. <b>{rent:,.0f} €/mes</b>)".replace(",", "."),
             f"⭐ <b>HIVEX Score:</b> <b>{score:.0f}/100</b> | 🏷️ <b>{strat_label}</b>",
-            f"💶 <b>Margen Estimado:</b> <b>+{profit:,.0f} €</b>",
+            f"💶 <b>Margen Estimado:</b> <b>+{profit:,.0f} €</b>".replace(",", "."),
             f"🛒 <b>Fuente:</b> {portal}"
         ]
         return "\n".join(lines)

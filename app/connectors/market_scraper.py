@@ -800,11 +800,39 @@ class MarketScraper:
         locality = item.get("locality", province)
         address = item.get("address", item.get("title", ""))
 
+        # Resolución inteligente de Código Postal por Municipio si viene vacío o con fallback 28001
+        MUNICIPALITY_POSTAL_CODES = {
+            "el molar": "28710",
+            "molar": "28710",
+            "fuente el saz de jarama": "28140",
+            "fuente el saz": "28140",
+            "algete": "28110",
+            "san sebastian de los reyes": "28701",
+            "san sebastián de los reyes": "28701",
+            "talamanca de jarama": "28160",
+            "talamanca": "28160",
+            "moralzarzal": "28411",
+            "torres de la alameda": "28813",
+            "daganzo de arriba": "28814",
+            "daganzo": "28814",
+            "cobeña": "28863",
+            "pedrezuela": "28723",
+            "san agustin del guadalix": "28750",
+            "san agustín del guadalix": "28750",
+        }
+        loc_clean = (locality or "").lower().strip()
+        addr_clean = (address or "").lower()
+        if not postal_code or postal_code == "28001":
+            for mun_name, mun_cp in MUNICIPALITY_POSTAL_CODES.items():
+                if mun_name in loc_clean or mun_name in addr_clean:
+                    postal_code = mun_cp
+                    break
+
         strategy = item.get("strategy", "HOUSE_FLIPPING")
         prop_type = (item.get("property_type") or "").lower()
         desc_text = (item.get("description") or "").lower()
         is_solar = (strategy == "LAND_DEVELOPMENT" or any(k in prop_type for k in ["solar", "terreno", "suelo", "parcela"]) or any(k in address.lower() for k in ["solar", "terreno", "suelo", "parcela"]))
-        land_type = "RÚSTICO" if any(k in prop_type or k in desc_text for k in ["rústico", "rustico", "agrario"]) else item.get("land_type", "URBANO")
+        land_type = "RÚSTICO" if any(k in prop_type or k in desc_text or k in address.lower() for k in ["rústico", "rustico", "agrario", "no urbanizable", "secano", "regadio", "regadío"]) else item.get("land_type", "URBANO")
 
         meso_m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
             province_str=province,
@@ -818,6 +846,14 @@ class MarketScraper:
         area_m2_price = meso_m2_price or float(census.get("area_m2_price") or 3400.0)
         census["area_m2_price"] = area_m2_price
         item["area_m2_price"] = area_m2_price
+
+        lat = item.get("lat")
+        lon = item.get("lon")
+        if lat is None or lon is None:
+            from app.core.geo_utils import get_spanish_province_coords
+            coords = get_spanish_province_coords(province, locality, apply_jitter=True)
+            if coords:
+                lat, lon = coords
 
         estimated_market_value = round(surface * area_m2_price, 2)
 
@@ -871,10 +907,12 @@ class MarketScraper:
             "address": item.get("address", ""),
             "locality": item.get("locality", ""),
             "province": item.get("province", ""),
-            "postal_code": item.get("postal_code", ""),
-            "lat": item.get("lat"),
-            "lon": item.get("lon"),
+            "postal_code": postal_code or item.get("postal_code", ""),
+            "lat": lat,
+            "lon": lon,
             "property_type": item.get("property_type", "PISO"),
+            "land_type": land_type,
+            "is_solar": is_solar,
             "strategy": item.get("strategy", "HOUSE_FLIPPING"),
             "surface_m2": surface,
             "rooms": item.get("rooms"),
@@ -903,7 +941,7 @@ class MarketScraper:
             "property_m2_price": property_m2_price,
             "area_m2_price": area_m2_price,
             "area_m2_price_source": "IDEALISTA_INE_MESO",
-            "area_m2_price_label": f"Ref. Barrio ({census.get('district', item.get('locality', ''))})",
+            "area_m2_price_label": meso_label or f"Ref. Barrio ({census.get('district', item.get('locality', ''))})",
             "price_ref_level": "MESO",
             "price_ref_level_label": "Portales Inmobiliarios",
             "estimated_reference_value": estimated_market_value,

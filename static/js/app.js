@@ -123,11 +123,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const normId = cleanId.replace(/^SUB-SUB-/, 'SUB-');
         window._openedDeepLinkOpp = true;
 
-        try {
+        const showTargetOpportunity = (targetOpp) => {
+            if (!targetOpp) return;
             const loginOverlay = document.getElementById('login-overlay');
             const dashboardApp = document.getElementById('dashboard-app');
+            if (loginOverlay) loginOverlay.classList.add('hidden');
+            if (dashboardApp) dashboardApp.classList.remove('hidden');
 
-            // 1. Si ya se habían cargado oportunidades en memoria, abrirla y fijar el filtro
+            const targetSource = targetOpp.source_type || (cleanId.startsWith('MKT-') ? 'market' : (cleanId.startsWith('PGOU-') ? 'pgou' : (cleanId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
+
+            // 1. Conmutar a la pestaña adecuada (market / subastas / pgou / edictos)
+            if (typeof window.switchOpportunitySource === 'function') {
+                window.switchOpportunitySource(targetSource);
+            } else {
+                state.activeSource = targetSource;
+                document.querySelectorAll('.source-tab').forEach(b => {
+                    b.classList.toggle('active', b.id === `tab-${targetSource}`);
+                });
+            }
+
+            // 2. Asegurar que está en memoria y en la cabecera de la lista
+            if (!state.allOpportunities.some(o => String(o.id || '').toUpperCase() === String(targetOpp.id || '').toUpperCase())) {
+                state.allOpportunities.unshift(targetOpp);
+            }
+            state.filteredOpportunities = [targetOpp, ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(targetOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)];
+            
+            renderDeals(state.filteredOpportunities);
+            if (typeof updateKPIs === 'function') updateKPIs(state.filteredOpportunities);
+
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.value = targetOpp.title || targetOpp.id_subasta || targetOpp.id;
+
+            // 3. Resaltar tarjeta en el feed
+            setTimeout(() => {
+                document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
+                const cardEl = document.querySelector(`.deal-card[data-opp-id="${targetOpp.id}"]`);
+                if (cardEl) {
+                    cardEl.classList.add('card-highlight');
+                    cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }, 100);
+
+            // 4. Centrar mapa en la ubicación del activo y abrir chincheta con su ficha previa (popup)
+            renderMapMarkers(state.filteredOpportunities);
+            const rawLat = parseFloat(targetOpp.lat);
+            const rawLon = parseFloat(targetOpp.lon);
+            if (!isNaN(rawLat) && !isNaN(rawLon) && rawLat !== 0 && rawLon !== 0) {
+                setTimeout(() => {
+                    if (map && typeof map.setView === 'function') {
+                        try {
+                            map.invalidateSize();
+                            map.setView([rawLat, rawLon], 14, { animate: true });
+                            setTimeout(() => {
+                                const marker = markersMap && markersMap[targetOpp.id];
+                                if (marker && typeof marker.openPopup === 'function') {
+                                    marker.openPopup();
+                                }
+                            }, 250);
+                        } catch(e) {
+                            console.warn('Error centrando mapa en oportunidad:', e);
+                        }
+                    }
+                }, 150);
+            }
+        };
+
+        try {
+            // 1. Si ya se habían cargado oportunidades en memoria, abrirla directamente
             if (state.allOpportunities && state.allOpportunities.length > 0) {
                 const found = state.allOpportunities.find(o => {
                     const idStr = String(o.id || '').trim().toUpperCase();
@@ -135,21 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return idStr === cleanId || idStr === normId || subStr === cleanId || subStr === normId || ('SUB-' + subStr) === cleanId || ('SUB-' + subStr) === normId;
                 });
                 if (found) {
-                    if (loginOverlay) loginOverlay.classList.add('hidden');
-                    if (dashboardApp) dashboardApp.classList.remove('hidden');
-
-                    if (found.source_type && state.activeSource !== found.source_type) {
-                        state.activeSource = found.source_type;
-                        document.querySelectorAll('.tab-btn').forEach(btn => {
-                            btn.classList.toggle('active', btn.dataset.source === found.source_type);
-                        });
-                    }
-                    state.filteredOpportunities = [found];
-                    renderDeals([found]);
-                    if (typeof updateKPIs === 'function') updateKPIs([found]);
-                    const searchInput = document.getElementById('search-input');
-                    if (searchInput) searchInput.value = found.title || found.id_subasta || found.id;
-                    setTimeout(() => window.openPropertyDetailModal(found), 120);
+                    showTargetOpportunity(found);
                     return;
                 }
             }
@@ -160,24 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const opp = await res.json();
                 if (opp && (opp.id || opp.title)) {
-                    if (loginOverlay) loginOverlay.classList.add('hidden');
-                    if (dashboardApp) dashboardApp.classList.remove('hidden');
-                    
-                    if (opp.source_type && state.activeSource !== opp.source_type) {
-                        state.activeSource = opp.source_type;
-                        document.querySelectorAll('.tab-btn').forEach(btn => {
-                            btn.classList.toggle('active', btn.dataset.source === opp.source_type);
-                        });
-                    }
-
-                    // Posicionar y filtrar el dashboard exclusivamente en esta oportunidad
-                    state.filteredOpportunities = [opp];
-                    renderDeals([opp]);
-                    if (typeof updateKPIs === 'function') updateKPIs([opp]);
-                    const searchInput = document.getElementById('search-input');
-                    if (searchInput) searchInput.value = opp.title || opp.id_subasta || opp.id;
-
-                    setTimeout(() => window.openPropertyDetailModal(opp), 120);
+                    showTargetOpportunity(opp);
                 }
             }
         } catch (err) {

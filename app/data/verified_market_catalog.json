@@ -17,7 +17,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373331/938bb2d9-9eec-4f43-ae2e-fca92f59cd6f.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.5986,
+    "lon": -3.4981
   },
   {
     "id": "MKT-PISOS-65840767150",
@@ -37,7 +39,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373331/c13d5fa1-a1ff-4d57-8df1-ff3839b6ae36.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.6322,
+    "lon": -3.5117
   },
   {
     "id": "MKT-PISOS-65879933926",
@@ -57,7 +61,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373331/8674ed25-e3d6-4ba6-9c84-6b7b93757c24.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.6322,
+    "lon": -3.5117
   },
   {
     "id": "MKT-PISOS-65840989648",
@@ -65,7 +71,7 @@
     "address": "Terreno en calle Central Cercado Chico, Talamanca de Jarama",
     "locality": "Talamanca de Jarama",
     "province": "Madrid",
-    "postal_code": "28001",
+    "postal_code": "28160",
     "property_type": "Rústico / Terreno",
     "strategy": "LAND_DEVELOPMENT",
     "listing_price": 72000.0,
@@ -77,7 +83,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373331/a188ded8-cfc2-46fc-b9b2-86f4bbf769d0.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.7483,
+    "lon": -3.5144
   },
   {
     "id": "MKT-PISOS-65890563010",
@@ -97,15 +105,17 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373331/dfdff09b-e5d5-4bc0-ba52-8b33103f9a45.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.5986,
+    "lon": -3.4981
   },
   {
     "id": "MKT-PISOS-46764225422",
     "title": "Terreno en Moralzarzal",
     "address": "Terreno en Moralzarzal, Madrid",
-    "locality": "Madrid",
+    "locality": "Moralzarzal",
     "province": "Madrid",
-    "postal_code": "28001",
+    "postal_code": "28411",
     "property_type": "Rústico / Terreno",
     "strategy": "LAND_DEVELOPMENT",
     "listing_price": 540000.0,
@@ -117,7 +127,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1010/108/1010_24108_1_2024101612105106466.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.6756,
+    "lon": -3.9694
   },
   {
     "id": "MKT-PISOS-38399550049",
@@ -137,7 +149,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1010/258/1010_69541258_1_202606101630589365899.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.6322,
+    "lon": -3.5117
   },
   {
     "id": "MKT-PISOS-65901779638",
@@ -145,7 +159,7 @@
     "address": "Terreno en calle Carretera Vieja del Canal No Number, El Molar",
     "locality": "El Molar",
     "province": "Madrid",
-    "postal_code": "28001",
+    "postal_code": "28710",
     "property_type": "Rústico / Terreno",
     "strategy": "LAND_DEVELOPMENT",
     "listing_price": 449000.0,
@@ -157,7 +171,9 @@
     "images": [
       "https://fotos.imghs.net/mm-wp/1061/3230323630373231/4dd7f8f7-0824-4600-9a45-0e218c8f05d4.jpg"
     ],
-    "first_published_date": "2026-03-01"
+    "first_published_date": "2026-03-01",
+    "lat": 40.7339,
+    "lon": -3.5819
   },
   {
     "id": "MKT-IDEALISTA-108314327",
