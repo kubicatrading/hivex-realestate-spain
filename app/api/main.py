@@ -14,6 +14,7 @@ if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"
     del os.environ["SSL_CERT_DIR"]
 
 import time
+import asyncio
 import logging
 logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Depends, Query, HTTPException, status, BackgroundTasks, Request, Header, Body
@@ -935,10 +936,15 @@ async def telegram_webhook(request: Request):
     try:
         data = await request.json()
         from app.services.telegram_advisor_bot import telegram_advisor_bot
-        res = await telegram_advisor_bot.process_update(data)
+        try:
+            res = await asyncio.wait_for(telegram_advisor_bot.process_update(data), timeout=8.5)
+        except asyncio.TimeoutError:
+            logger.warning("[Telegram Webhook] Timeout de 8.5s alcanzado. Despachando resto en background.")
+            asyncio.create_task(telegram_advisor_bot.process_update(data))
+            res = {"status": "background_processing"}
         return {"ok": True, "result": res}
     except Exception as e:
-        print(f"Error en webhook de Telegram: {e}")
+        logger.error(f"Error en webhook de Telegram: {e}")
         return {"ok": False, "error": str(e)}
 
 @app.post("/api/v1/telegram/simulate")

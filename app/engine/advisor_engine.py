@@ -71,7 +71,7 @@ SPANISH_ZONE_DEFINITIONS = [
     ("Ciudalcampo - San Sebastián de los Reyes Norte", "Madrid", ["ciudalcampo", "fuente del fresno", "santo domingo", "la granjilla", "club de campo", "valdelagua", "28707", "28708", "28120"]),
     ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
-    ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "valpuercos", "28110", "28140", "28701", "28702", "28703"]),
+    ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "paracuellos", "paracuellos de jarama", "paracuellos del jarama", "jarama", "rio jarama", "río jarama", "valpuercos", "28110", "28140", "28701", "28702", "28703", "28860"]),
     ("Pinto", "Madrid", ["pinto", "28320"]),
     ("Valdemoro", "Madrid", ["valdemoro", "28340"]),
     # Barcelona
@@ -103,12 +103,9 @@ class AdvisorEngine:
     """
 
     GEMINI_FLASH_CASCADE = [
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
         "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
     ]
 
     def __init__(self):
@@ -245,8 +242,11 @@ class AdvisorEngine:
                     else:
                         logger.warning(
                             f"[Gemini Cascade] Modelo {model} no respondió exitosamente ({resp.status_code}): {resp.text[:120]}. "
-                            f"Descendiendo al inmediatamente anterior..."
                         )
+                        if resp.status_code == 403:
+                            logger.info("[Gemini Cascade] Error 403 detectado (restricción por política de API Key). Abortando cascada inmediatamente hacia motor heurístico.")
+                            break
+                        logger.info(f"Descendiendo al inmediatamente anterior...")
             except Exception as e:
                 logger.warning(f"[Gemini Cascade] Error intentando {model}: {e}. Descendiendo al inmediatamente anterior...")
 
@@ -444,10 +444,43 @@ class AdvisorEngine:
             except ValueError:
                 pass
 
+        # Detección de exclusiones explícitas (ej: "excluye chalets", "sin chalets")
+        excludes_chalet = any(w in q_lower for w in [
+            "excluye chalet", "excluye chalets", "sin chalet", "sin chalets",
+            "no chalet", "no chalets", "quitar chalet", "quitar chalets",
+            "excluyendo chalet", "excluyendo chalets"
+        ])
+
+        keywords_exclude = []
+        if excludes_chalet:
+            keywords_exclude.extend(["chalet", "chalets"])
+
+        # Extraer palabras clave requeridas en la descripción o anuncio
+        keywords_include = []
+        m_kw = re.search(r'(?:palabras?\s+clave|keywords?|incluyan?|palabras?)\s+(?:como\s+)?([a-záéíóúñ,\s]+?)(?:en la descripción|en la descripcion|\.|$)', q_lower)
+        if m_kw:
+            raw_kws = m_kw.group(1)
+            for token in re.split(r'[,yyo\s]+', raw_kws):
+                token = token.strip().lower()
+                if token and len(token) > 2 and token not in ["como", "las", "los", "del", "con", "que", "una", "uno", "por", "para"]:
+                    keywords_include.append(token)
+
+        for spec_kw in ["pozo", "pozos", "rio", "río", "vivienda", "casa", "arroyo", "manantial", "agua"]:
+            if spec_kw in q_lower and spec_kw not in keywords_include:
+                keywords_include.append(spec_kw)
+
         # Tipo de Activo
         property_type = None
-        has_rustic = any(w in q_lower for w in ["rústic", "rustic", "finca", "agrario", "terreno rústico", "suelo rústico"])
+        has_rustic = any(w in q_lower for w in ["rústic", "rustic", "finca", "agrario", "terreno rústico", "suelo rústico", "fincas"])
         has_chalet = any(w in q_lower for w in ["chalet", "chalets", "casa", "casas", "unifamiliar", "villa", "independiente", "adosado"])
+
+        if excludes_chalet:
+            has_chalet = False
+
+        # Si el usuario busca "fincas rústicas con vivienda/casa", o "palabras clave como casa", es una FINCA RÚSTICA, no un chalet residencial
+        is_rustic_with_house = has_rustic and any(w in q_lower for w in ["con vivienda", "con una vivienda", "con casa", "con una casa", "como casa", "o casa", "palabras clave"])
+        if is_rustic_with_house:
+            has_chalet = False
 
         if has_rustic and has_chalet:
             property_type = "Rústico y Chalet"
@@ -475,10 +508,20 @@ class AdvisorEngine:
         is_alert = any(w in q_lower for w in ["avísame", "avisame", "alerta", "notifícame", "notificame", "programa una alerta", "guardar búsqueda", "cuando salga", "si sale"])
 
         # Clasificación del Tipo de Consulta
+        is_explicit_search = any(w in q_lower for w in [
+            "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
+            "haz búsqueda", "haz busqueda", "busca", "buscar", "búsqueda de", "busqueda de", "encuentra",
+            "enséñame", "enseñame", "muéstrame", "muestrame", "qué hay", "dime qué", "dime que",
+            "oportunidades", "inmuebles", "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica",
+            "fincas", "terrenos", "subastas"
+        ])
+
         if is_alert:
             query_type = "SCHEDULED_ALERT"
+        elif is_explicit_search:
+            query_type = "SEARCH_OPPORTUNITIES"
         elif any(w in q_lower for w in [
-            "barrio", "distrito", "zona", "renta media", "demografía", "demografia",
+            "barrio", "distrito", "renta media", "demografía", "demografia",
             "precios de ruzafa", "precios de chamberí", "precio m2 en", "precio medio",
             "mejor zona", "mejores zonas", "dónde invertir", "donde invertir",
             "dónde comprar", "donde comprar", "qué zona", "que zona", "qué barrio", "que barrio",
@@ -521,6 +564,8 @@ class AdvisorEngine:
             "min_sqm": min_sqm,
             "max_sqm": max_sqm,
             "is_alert": is_alert,
+            "keywords_include": keywords_include,
+            "keywords_exclude": keywords_exclude,
             "raw_text": text_input
         }
 
@@ -693,9 +738,9 @@ class AdvisorEngine:
                     matched_zone_def = (z_name, z_prov)
                     break
 
-            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas, ampliar al cinturón rústico contiguo
-            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas"]):
-                zone_keys.extend(["algete", "fuente el saz", "el molar", "talamanca", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno"])
+            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas / Jarama, ampliar al cinturón rústico contiguo
+            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama"]):
+                zone_keys.extend(["algete", "fuente el saz", "el molar", "talamanca", "paracuellos", "paracuellos de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno", "jarama"])
                 zone_keys = list(set(zone_keys))
 
             def _matches_target_zone(o: Dict[str, Any]) -> bool:
@@ -780,6 +825,25 @@ class AdvisorEngine:
                 o for o in filtered
                 if (float(o.get("plot_area") or o.get("built_area") or o.get("surface_m2") or o.get("sqm") or 0)) <= max_s
             ]
+
+        # Palabras clave excluidas (ej: chalets)
+        if criteria.get("keywords_exclude"):
+            k_excl = [k.lower() for k in criteria["keywords_exclude"]]
+            filtered = [
+                o for o in filtered
+                if not any(k in str(o.get("property_type", "")).lower() or (k in str(o.get("title", "")).lower() and not any(w in str(o.get("title", "")).lower() for w in ["finca", "terreno", "suelo", "rústic"])) for k in k_excl)
+            ]
+
+        # Palabras clave requeridas en descripción o título (ej: pozo, rio, casa, vivienda)
+        if criteria.get("keywords_include"):
+            k_incl = [k.lower() for k in criteria["keywords_include"]]
+            def _has_keyword(o):
+                full_text = (str(o.get("title", "")) + " " + str(o.get("description", "")) + " " + str(o.get("property_type", ""))).lower()
+                return any(k in full_text for k in k_incl)
+
+            with_kw = [o for o in filtered if _has_keyword(o)]
+            if with_kw:
+                filtered = with_kw
 
         # Portal Específico o Subastas
         if criteria.get("portal_filter"):
@@ -1801,7 +1865,10 @@ class AdvisorEngine:
             "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
             "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
             "busca también", "busca tambien", "busca", "buscar", "encuentra", "rastrea", "rastrear",
-            "localiza", "dame", "trae", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas"
+            "localiza", "dame", "trae", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
+            "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
+            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "búsqueda de", "busqueda de",
+            "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica"
         ]
         is_explicit_listing_request = any(v in prompt_lower for v in explicit_show_verbs)
 
@@ -1893,12 +1960,20 @@ class AdvisorEngine:
                 logger.info(
                     f"[Advisor Process] Activando búsqueda fuera de HIVEX (solicitud explícita o falta de datos previa)..."
                 )
-                newly_synced = await self.sync_portal_opportunities_on_demand(
-                    criteria=criteria,
-                    prompt_text=final_prompt,
-                    target_count=target_count,
-                    db=db
-                )
+                try:
+                    newly_synced = await asyncio.wait_for(
+                        self.sync_portal_opportunities_on_demand(
+                            criteria=criteria,
+                            prompt_text=final_prompt,
+                            target_count=target_count,
+                            db=db
+                        ),
+                        timeout=8.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("[Advisor Process] Timeout de 8s en sincronización bajo demanda. Procediendo con catálogo interno.")
+                    newly_synced = []
+
                 if newly_synced:
                     all_opps = self.get_live_catalog_opportunities(db=db)
                     matched_opps = self.filter_opportunities(all_opps, criteria)

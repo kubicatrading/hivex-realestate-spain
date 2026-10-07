@@ -200,6 +200,7 @@ class TelegramAdvisorBot:
                         res = await client.post(url, json=chunk_payload)
                         if res.status_code != 200:
                             chunk_payload.pop("parse_mode", None)
+                            chunk_payload.pop("reply_to_message_id", None)
                             chunk_payload["text"] = re.sub(r'<[^>]+>', '', ch)
                             r_fallback = await client.post(url, json=chunk_payload)
                             if r_fallback.status_code != 200:
@@ -216,8 +217,9 @@ class TelegramAdvisorBot:
                     return True
                 else:
                     logger.warning(f"Telegram sendMessage error {res.status_code}: {res.text}. Reintentando con texto limpio...")
-                    # Si falla por parseo HTML/Markdown, retirar parse_mode y limpiar etiquetas para no mostrar tags crudos
+                    # Si falla por parseo HTML/Markdown o por reply_to_message_id no encontrado, retirar ambos
                     payload.pop("parse_mode", None)
+                    payload.pop("reply_to_message_id", None)
                     payload["text"] = re.sub(r'<[^>]+>', '', text)
                     res2 = await client.post(url, json=payload)
                     return res2.status_code == 200
@@ -681,6 +683,14 @@ class TelegramAdvisorBot:
         ]
         is_extension = any(clean_lower.startswith(ext) or f" {ext} " in clean_lower for ext in extension_triggers)
 
+        anaphora_triggers = [
+            "la misma", "misma zona", "mismo lugar", "misma búsqueda", "misma busqueda",
+            "en esa zona", "por allí", "por alli", "en ese eje", "por esa zona", "en la misma",
+            "excluye", "sin chalets", "sin chalet", "no chalets", "no chalet", "quitar",
+            "excluyendo", "y que", "que tengan", "pero sin", "pero que"
+        ]
+        is_anaphora = any(ana in clean_lower for ana in anaphora_triggers)
+
         # Extraer propuesta o pregunta del asistente previo si existe
         assistant_proposal = ""
         if last_assistant_msg and last_assistant_msg.content:
@@ -732,12 +742,18 @@ class TelegramAdvisorBot:
                 logger.info(f"[Prompt Chaining] Mensaje con afirmación y extensión directa -> 'Sí, {normalized_proposal}, y además {clean_remainder}'")
                 return f"Sí, {normalized_proposal}, y además {clean_remainder}"
 
-        # Caso 4: Encadenamiento directo de mensajes del usuario sin propuesta del asistente
-        if is_extension and recent_user_msgs:
+        # Caso 4: Encadenamiento directo de mensajes del usuario sin propuesta del asistente (extensiones o referencias anafóricas)
+        if (is_extension or is_anaphora) and recent_user_msgs:
             for u_m in recent_user_msgs:
                 prev_u = (u_m.content or "").strip()
                 if prev_u and not any(prev_u.lower() == aff for aff in affirmation_words) and len(prev_u) > 10:
                     logger.info(f"[Prompt Chaining] Concatenando mensaje previo del usuario: '{prev_u}' + '{clean_text}'")
+                    # Si el mensaje actual es una exclusión o corrección rápida como "Excluye chalets", anexar directamente
+                    if any(clean_lower.startswith(w) for w in ["excluye", "sin ", "no ", "quitar"]):
+                        return f"{prev_u}. {clean_text}"
+                    # Si el mensaje actual dice "la misma zona" o "la misma búsqueda", enriquecer con contexto previo
+                    if any(ana in clean_lower for ana in ["misma zona", "misma búsqueda", "misma busqueda", "la misma"]):
+                        return f"{clean_text} (Contexto previo: {prev_u})"
                     return f"{prev_u}, y además {clean_text}"
 
         return clean_text
@@ -752,6 +768,7 @@ class TelegramAdvisorBot:
         if callback_query:
             return await self.handle_callback_query(callback_query)
 
+        is_edited = "edited_message" in update
         message = update.get("message") or update.get("edited_message")
         if not message:
             return {"status": "ignored", "reason": "No message or callback_query in update"}
@@ -762,10 +779,11 @@ class TelegramAdvisorBot:
             return {"status": "ignored", "reason": "Message from bot"}
 
         message_id = message.get("message_id")
-        if message_id:
-            if message_id in self._processed_message_ids:
+        dedup_key = f"edit_{message_id}_{message.get('edit_date', '')}" if is_edited else message_id
+        if dedup_key:
+            if dedup_key in self._processed_message_ids:
                 return {"status": "ignored", "reason": "Already processed message"}
-            self._processed_message_ids.add(message_id)
+            self._processed_message_ids.add(dedup_key)
             if len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.clear()
 
