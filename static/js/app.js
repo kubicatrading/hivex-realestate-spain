@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const showTargetOpportunity = (targetOpp) => {
             if (!targetOpp) return;
+            window._deepLinkedOpp = targetOpp;
             const loginOverlay = document.getElementById('login-overlay');
             const dashboardApp = document.getElementById('dashboard-app');
             if (loginOverlay) loginOverlay.classList.add('hidden');
@@ -209,7 +210,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const opp = await res.json();
                 if (opp && (opp.id || opp.title)) {
                     showTargetOpportunity(opp);
+                } else {
+                    showToast('⚠️ No se encontró la ficha de la oportunidad seleccionada', 'warning');
                 }
+            } else {
+                showToast('⚠️ No se encontró la ficha de la oportunidad seleccionada', 'warning');
             }
         } catch (err) {
             console.error('Error cargando oportunidad directa por ID:', err);
@@ -403,10 +408,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 const addedCount = newOpps.filter(o => !oldIds.has(o.id)).length;
                 const removedCount = state.allOpportunities.filter(o => !newIds.has(o.id)).length;
                 
+                if (window._deepLinkedOpp) {
+                    if (!newOpps.some(o => String(o.id || '').toUpperCase() === String(window._deepLinkedOpp.id || '').toUpperCase())) {
+                        newOpps.unshift(window._deepLinkedOpp);
+                    }
+                }
                 state.allOpportunities = newOpps;
                 updateTabBadges(newOpps);
                 updateKPIs(newOpps);
-                applyFilters();
+
+                if (window._deepLinkedOpp) {
+                    const targetSource = window._deepLinkedOpp.source_type || (String(window._deepLinkedOpp.id || '').startsWith('MKT-') ? 'market' : 'subastas');
+                    state.activeSource = targetSource;
+                    state.filteredOpportunities = [
+                        window._deepLinkedOpp,
+                        ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(window._deepLinkedOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)
+                    ];
+                    renderDeals(state.filteredOpportunities);
+                    renderMapMarkers(state.filteredOpportunities);
+                } else {
+                    applyFilters();
+                }
 
                 if (addedCount > 0) {
                     showToast(`✨ Se han incorporado ${addedCount} nueva(s) oportunidad(es) al mercado`, 'success');
@@ -415,12 +437,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast(`ℹ️ Se han retirado ${removedCount} oportunidad(es) que ya no están activas`, 'info');
                 }
             } else {
+                if (window._deepLinkedOpp) {
+                    if (!newOpps.some(o => String(o.id || '').toUpperCase() === String(window._deepLinkedOpp.id || '').toUpperCase())) {
+                        newOpps.unshift(window._deepLinkedOpp);
+                    }
+                }
                 state.allOpportunities = newOpps;
                 updateTabBadges(newOpps);
                 updateKPIs(newOpps);
-                const isModalOpen = !document.getElementById('modal-property-detail')?.classList.contains('hidden');
-                if (!window._openedDeepLinkOpp || !isModalOpen) {
-                    applyFilters();
+
+                if (window._deepLinkedOpp) {
+                    const targetSource = window._deepLinkedOpp.source_type || (String(window._deepLinkedOpp.id || '').startsWith('MKT-') ? 'market' : 'subastas');
+                    state.activeSource = targetSource;
+                    state.filteredOpportunities = [
+                        window._deepLinkedOpp,
+                        ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(window._deepLinkedOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)
+                    ];
+                    renderDeals(state.filteredOpportunities);
+                    renderMapMarkers(state.filteredOpportunities);
+                } else {
+                    const isModalOpen = !document.getElementById('modal-property-detail')?.classList.contains('hidden');
+                    if (!window._openedDeepLinkOpp || !isModalOpen) {
+                        applyFilters();
+                    }
                 }
             }
 
@@ -938,6 +977,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateFavoritesCountBadge();
 
         state.filteredOpportunities = state.allOpportunities.filter(opp => {
+            // Preservar incondicionalmente la oportunidad activa abierta desde Telegram
+            if (window._deepLinkedOpp && String(opp.id || '').toUpperCase() === String(window._deepLinkedOpp.id || '').toUpperCase()) {
+                return true;
+            }
+
             // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg. vs Market)
             const oppSource = opp.source_type || 'subastas';
             if (oppSource !== state.activeSource) {
@@ -1036,11 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .map(img => img.replace('?rule=web_listing_440x330', ''))
                 .filter(img => {
                     const low = img.toLowerCase();
-                    return !low.includes('catastro') &&
-                           !low.includes('cartografia') &&
-                           !low.includes('wms') &&
-                           !low.includes('ortofoto') &&
-                           !low.includes('pnoa') &&
+                    return !low.includes('cartografia') &&
                            !low.includes('sedecatastro');
                 });
 
@@ -1049,14 +1089,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        // Para subastas y oportunidades sin reportaje de portal comercial: Exclusivamente foto de fachada Street View
+        // Para subastas y oportunidades sin reportaje de portal comercial: Foto de fachada Street View con fallback PNOA
         if (list.length === 0) {
             const lat = opp.lat || opp.latitude;
             const lon = opp.lon || opp.longitude;
-            const locParam = (lat && lon) ? `${lat},${lon}` : encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`);
-            const gmapsKey = window.GOOGLE_MAPS_API_KEY || localStorage.getItem('hivex_gmaps_api_key') || 'AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc';
-            const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x350&location=${locParam}&key=${gmapsKey}`;
-            list = [streetViewUrl];
+            let photoUrl = '';
+            if (lat && lon) {
+                photoUrl = `/api/v1/streetview_photo?lat=${lat}&lon=${lon}&address=${encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`)}`;
+            } else {
+                photoUrl = `/api/v1/streetview_photo?address=${encodeURIComponent(opp.full_address || `${opp.address || ''}, ${opp.locality || ''}`)}`;
+            }
+            list = [photoUrl];
         }
         return list;
     }
@@ -2936,9 +2979,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </button>
                     ${popupImages.length > 1 ? `
                         <span style="position: absolute; bottom: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">📷 ${popupImages.length} fotos</span>
-                    ` : (hasPortalEnrichment ? `
-                        <span id="popup-loader-${escapeHtml(opp.id)}" style="position: absolute; bottom: 4px; left: 4px; right: 4px; background: rgba(15,23,42,0.85); color: #38bdf8; font-size: 10px; font-weight: 600; padding: 3px 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 4px; backdrop-filter: blur(4px);"><span class="spin">⏳</span> Obteniendo fotos reales...</span>
-                    ` : '')}
+                    ` : ''}
                 </div>
                 ${loteHeaderHtml}
                 <strong style="font-size: 13px; display: block; margin-bottom: 4px; color: #0f172a; line-height: 1.2;">${escapeHtml(opp.title)}</strong>

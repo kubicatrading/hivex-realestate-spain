@@ -936,7 +936,7 @@ def extract_postal_code(text: str) -> Optional[str]:
     if not text:
         return None
     # 1. Búsqueda estándar por delimitador de palabra
-    matches = re.findall(r'\b(0[1-9]|[1-4][0-9]|5[0-2])\d{3}\b', text)
+    matches = re.findall(r'\b((?:0[1-9]|[1-4][0-9]|5[0-2])\d{3})\b', text)
     if matches:
         for cp in matches:
             if cp not in ("2023", "2024", "2025", "2026"):

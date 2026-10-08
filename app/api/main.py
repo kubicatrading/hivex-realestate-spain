@@ -936,12 +936,8 @@ async def telegram_webhook(request: Request):
     try:
         data = await request.json()
         from app.services.telegram_advisor_bot import telegram_advisor_bot
-        try:
-            res = await asyncio.wait_for(telegram_advisor_bot.process_update(data), timeout=8.5)
-        except asyncio.TimeoutError:
-            logger.warning("[Telegram Webhook] Timeout de 8.5s alcanzado. Despachando resto en background.")
-            asyncio.create_task(telegram_advisor_bot.process_update(data))
-            res = {"status": "background_processing"}
+        # Ejecutar de forma asíncrona y con await para no cancelar la petición por tiempo
+        res = await telegram_advisor_bot.process_update(data)
         return {"ok": True, "result": res}
     except Exception as e:
         logger.error(f"Error en webhook de Telegram: {e}")
@@ -2231,25 +2227,50 @@ def sync_market_endpoint(
 @app.get("/api/v1/streetview_photo")
 def get_streetview_photo(address: Optional[str] = Query(None), lat: Optional[float] = Query(None), lon: Optional[float] = Query(None), key: Optional[str] = Query(None)):
     """
-    Returns a clean Street View static JPEG photo of the building facade.
-    Uses Google Maps Street View Static API if GOOGLE_MAPS_API_KEY is configured or passed.
+    Returns a clean Street View static JPEG photo of the building facade or PNOA aerial orthophoto.
+    Uses Google Maps Street View Static API with radius=100.
+    If Street View has ZERO_RESULTS (or for rural land/plots), seamlessly falls back to official PNOA IGN high-res orthophoto.
     """
-    api_key = key or settings.GOOGLE_MAPS_API_KEY or os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    api_key = key or getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.environ.get("GOOGLE_MAPS_API_KEY", "")
     
+    # 1. Attempt Google Street View Static API (with radius=100 for exact coverage)
     if api_key:
-        location_str = address if address else (f"{lat},{lon}" if lat and lon else "")
-        if location_str:
-            sv_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(location_str)}&key={api_key}"
+        if lat and lon:
+            loc_arg = f"{lat},{lon}"
+        elif address:
+            loc_arg = address
+        else:
+            loc_arg = ""
+
+        if loc_arg:
+            sv_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(loc_arg)}&radius=100&key={api_key}"
             try:
                 req = urllib.request.Request(sv_url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     if resp.status == 200:
-                        return Response(content=resp.read(), media_type="image/jpeg")
+                        content = resp.read()
+                        # Google returns ~5887 bytes empty grey image when ZERO_RESULTS
+                        if len(content) > 6000:
+                            return Response(content=content, media_type="image/jpeg")
             except Exception as e:
                 print(f"Street View Static API fetch error: {e}")
 
-    # Generic SVG placeholder for Building Facade when GOOGLE_MAPS_API_KEY is not configured
-    display_addr = (address or "Fachada Inmueble").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # 2. Seamless fallback: PNOA (Plan Nacional de Ortofotografía Aérea - IGN España) for parcels/land/rustic assets
+    if lat and lon:
+        try:
+            bbox_str = f"{lat-0.0018},{lon-0.0028},{lat+0.0018},{lon+0.0028}"
+            pnoa_url = f"http://www.ign.es/wms-inspire/pnoa-ma?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&BBOX={bbox_str}&CRS=EPSG:4326&WIDTH=600&HEIGHT=350&LAYERS=OI.OrthoimageCoverage&STYLES=&FORMAT=image/jpeg"
+            req_pnoa = urllib.request.Request(pnoa_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req_pnoa, timeout=5) as resp_pnoa:
+                if resp_pnoa.status == 200:
+                    content_pnoa = resp_pnoa.read()
+                    if len(content_pnoa) > 2000:
+                        return Response(content=content_pnoa, media_type="image/jpeg")
+        except Exception as e_pnoa:
+            print(f"PNOA aerial orthophoto fallback error: {e_pnoa}")
+
+    # 3. Clean SVG placeholder fallback
+    display_addr = (address or "Inmueble / Parcela").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     svg_content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="600" height="350" viewBox="0 0 600 350">
         <defs>
             <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -2274,7 +2295,7 @@ def get_streetview_photo(address: Optional[str] = Query(None), lat: Optional[flo
         <rect x="330" y="160" width="40" height="35" fill="#38bdf8" opacity="0.6"/>
         <rect x="260" y="220" width="60" height="70" fill="#2563eb" rx="2"/>
         <circle cx="310" cy="258" r="3" fill="#fbbf24"/>
-        <text x="300" y="45" font-family="sans-serif" font-size="16" font-weight="bold" fill="#38bdf8" text-anchor="middle">📷 FOTO FACHADA STREET VIEW</text>
+        <text x="300" y="45" font-family="sans-serif" font-size="16" font-weight="bold" fill="#38bdf8" text-anchor="middle">📷 FOTO INMUEBLE / PARCELA</text>
         <text x="300" y="68" font-family="sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">{display_addr}</text>
     </svg>"""
     return Response(content=svg_content, media_type="image/svg+xml")

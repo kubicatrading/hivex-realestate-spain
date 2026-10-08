@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.db.models import User, TelegramConversationMessage
+from app.db.models import User, TelegramConversationMessage, SavedConsultation
 from app.engine.advisor_engine import advisor_engine
 
 logger = logging.getLogger(__name__)
@@ -74,32 +74,52 @@ class TelegramAdvisorBot:
         str_tg_id = str(telegram_user_id)
         tg_user_clean = (telegram_username or "").lower().lstrip("@")
 
-        # 1. Búsqueda por telegram_id ya registrado en BD por el administrador
+        # 1. Caso explícito prioritario para el administrador y usuario principal jsaavedra
+        if str_tg_id == "1450113787" or tg_user_clean in ["juanma_oms", "jsaavedra"]:
+            admin = db.query(User).filter(User.username == "jsaavedra").first()
+            if admin:
+                if admin.telegram_id != "1450113787" or admin.telegram_username != "Juanma_OMS":
+                    admin.telegram_id = "1450113787"
+                    admin.telegram_username = "Juanma_OMS"
+                    db.commit()
+                return True, admin, f"Usuario autenticado como jsaavedra (Juanma)"
+
+        # 2. Búsqueda por telegram_id ya registrado en BD
         user = db.query(User).filter(User.telegram_id == str_tg_id).first()
         if user and user.is_active:
             return True, user, f"Usuario autenticado por ID de Telegram ({user.username})"
 
-        # 2. Búsqueda por username coincidente en BD registrado por el administrador
+        # 3. Búsqueda por username coincidente en BD registrado por el administrador
         if tg_user_clean:
             user = db.query(User).filter(
                 (User.telegram_username.ilike(tg_user_clean)) |
                 (User.username.ilike(tg_user_clean))
             ).first()
             if user and user.is_active:
-                # Auto-asociar telegram_id
                 user.telegram_id = str_tg_id
                 user.telegram_username = tg_user_clean
                 db.commit()
                 return True, user, f"Usuario vinculado automáticamente por username ({user.username})"
 
-        # 3. Comprobación en lista autorizada de variables de entorno
+        # 4. Comprobación en lista autorizada de variables de entorno (mapeo unívoco por username)
         if (str_tg_id in self.authorized_env_users) or (tg_user_clean and tg_user_clean in self.authorized_env_users):
-            admin_user = db.query(User).filter(User.is_active == True).first()
-            if admin_user:
-                admin_user.telegram_id = str_tg_id
-                admin_user.telegram_username = tg_user_clean
+            target_user = None
+            if tg_user_clean:
+                target_user = db.query(User).filter(
+                    (User.username.ilike(tg_user_clean)) | (User.telegram_username.ilike(tg_user_clean))
+                ).first()
+            if not target_user:
+                # Si es el ID conocido de Juanma
+                if str_tg_id == "1450113787":
+                    target_user = db.query(User).filter(User.username == "jsaavedra").first()
+                else:
+                    target_user = db.query(User).filter(User.telegram_id == str_tg_id).first()
+            if target_user:
+                target_user.telegram_id = str_tg_id
+                if tg_user_clean:
+                    target_user.telegram_username = tg_user_clean
                 db.commit()
-                return True, admin_user, "Usuario autorizado por configuración de entorno"
+                return True, target_user, f"Usuario autorizado por configuración de entorno ({target_user.username})"
 
         return False, None, "Usuario no identificado en HIVEX"
 
@@ -623,22 +643,79 @@ class TelegramAdvisorBot:
         finally:
             db.close()
 
+    def get_last_active_search_context(self, chat_id: Any) -> Optional[Dict[str, Any]]:
+        """
+        Recupera el último contexto o búsqueda activa en la memoria de este chat.
+        Examina SavedConsultation y TelegramConversationMessage previos.
+        """
+        try:
+            with SessionLocal() as db_mem:
+                # 1. Buscar en SavedConsultation de este chat
+                last_consultation = db_mem.query(SavedConsultation).filter(
+                    SavedConsultation.telegram_chat_id == str(chat_id)
+                ).order_by(SavedConsultation.id.desc()).first()
+
+                if last_consultation:
+                    crit = {}
+                    if last_consultation.criteria_json:
+                        try:
+                            crit = json.loads(last_consultation.criteria_json)
+                        except Exception:
+                            crit = {}
+                    zone = crit.get("zone_or_neighborhood") or crit.get("province") or crit.get("locality")
+                    if not zone and last_consultation.title:
+                        m = re.search(r'en\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+)$', last_consultation.title)
+                        if m:
+                            zone = m.group(1).strip()
+                    if zone and zone.lower() != "españa":
+                        return {
+                            "zone": zone,
+                            "title": last_consultation.title,
+                            "description": last_consultation.description or "",
+                            "criteria": crit
+                        }
+
+                # 2. Buscar en los últimos mensajes de usuario en este chat
+                from app.engine.advisor_engine import advisor_engine
+                recent_msgs = db_mem.query(TelegramConversationMessage).filter(
+                    TelegramConversationMessage.telegram_chat_id == str(chat_id),
+                    TelegramConversationMessage.role == "user"
+                ).order_by(TelegramConversationMessage.id.desc()).limit(10).all()
+
+                for m in recent_msgs:
+                    txt = (m.content or "").strip()
+                    crit = advisor_engine._parse_query_intent_heuristics(txt)
+                    zone = crit.get("zone_or_neighborhood") or crit.get("province")
+                    if zone and zone.lower() != "españa":
+                        return {
+                            "zone": zone,
+                            "title": f"Búsqueda en {zone}",
+                            "description": txt,
+                            "criteria": crit
+                        }
+        except Exception as e_mem:
+            logger.warning(f"Error consultando banco de memoria para chat {chat_id}: {e_mem}")
+
+        return None
+
     def synthesize_conversation_prompt(
         self,
         chat_id: Any,
         user_id: Any,
         current_text: str,
         reply_to: Optional[Dict[str, Any]] = None
-    ) -> str:
+    ) -> Tuple[str, Optional[str]]:
         """
-        Sintetiza de forma inteligente el prompt cuando el usuario encadena mensajes
-        o responde a una propuesta previa del asistente (ej: el bot propone buscar fincas rústicas en
-        el radio de 15km del Colegio Suizo y el usuario responde 'sí' y luego añade 'busca también los chalets individuales').
-        Garantiza que nunca se pierda el hilo conductor ni los criterios acumulados.
+        Sintetiza de forma inteligente el prompt contextualizado del usuario:
+        1. Si responde a un mensaje específico con Reply nativo de Telegram.
+        2. Si hace referencia a 'misma zona' o 'misma búsqueda': busca en el banco de memoria la última búsqueda activa.
+           Si no encuentra nada, activa fallback conversacional para solicitar confirmación de zona de forma natural.
+        3. Concatena mensajes consecutivos del mismo usuario o chat con punto y seguido sin exigir palabras clave.
+        Retorna (prompt_to_process, clarification_question).
         """
         clean_text = (current_text or "").strip()
         if not clean_text:
-            return clean_text
+            return clean_text, None
 
         # 1. Si el usuario utilizó la función nativa 'Reply' de Telegram
         if reply_to:
@@ -649,10 +726,25 @@ class TelegramAdvisorBot:
                 return (
                     f"[Contexto conversacional: El usuario está respondiendo específicamente a este mensaje previo de HIVEX:\n"
                     f"'''{clean_prev[:600]}'''\n]\n"
-                    f"Pregunta del usuario sobre el mensaje anterior: {clean_text}"
+                    f"Pregunta del usuario sobre el mensaje anterior: {clean_text}",
+                    None
                 )
 
-        # 2. Consultar historial reciente en BD para este chat y usuario
+        clean_lower = clean_text.lower()
+        anaphora_triggers = [
+            "la misma", "misma zona", "mismo lugar", "misma búsqueda", "misma busqueda",
+            "en esa zona", "por allí", "por alli", "en ese eje", "por esa zona", "en la misma"
+        ]
+        
+        # Comprobar si el texto actual YA especifica una zona o términos geográficos explícitos
+        from app.engine.advisor_engine import advisor_engine
+        current_parsed = advisor_engine._parse_query_intent_heuristics(clean_text)
+        has_explicit_zone = bool(current_parsed.get("zone_or_neighborhood"))
+        
+        # Es anáfora hacia una búsqueda anterior SOLO si el usuario NO especifica una nueva zona en este mensaje
+        is_anaphora = not has_explicit_zone and any(ana in clean_lower for ana in anaphora_triggers)
+
+        # 2. Consultar historial reciente en BD para este chat
         last_assistant_msg = None
         recent_user_msgs = []
         try:
@@ -662,101 +754,52 @@ class TelegramAdvisorBot:
                     TelegramConversationMessage.role == "assistant"
                 ).order_by(TelegramConversationMessage.id.desc()).first()
 
-                window_ago = datetime.utcnow() - timedelta(hours=24)
+                window_ago = datetime.utcnow() - timedelta(minutes=25)
                 recent_user_msgs = db_hist.query(TelegramConversationMessage).filter(
                     TelegramConversationMessage.telegram_chat_id == str(chat_id),
-                    TelegramConversationMessage.telegram_user_id == str(user_id),
                     TelegramConversationMessage.role == "user",
                     TelegramConversationMessage.created_at >= window_ago
-                ).order_by(TelegramConversationMessage.id.desc()).limit(5).all()
+                ).order_by(TelegramConversationMessage.id.desc()).limit(3).all()
         except Exception as e_hist:
             logger.warning(f"Error recuperando historial para concatenación de prompt: {e_hist}")
 
-        clean_lower = clean_text.lower()
-        affirmation_words = {"sí", "si", "vale", "ok", "adelante", "hazlo", "de acuerdo", "perfecto", "actívalo", "activar", "por favor", "claro"}
-        is_pure_affirmation = any(clean_lower == aff or clean_lower.startswith(aff + " ") or clean_lower.startswith(aff + ",") for aff in affirmation_words)
-
-        extension_triggers = [
-            "busca también", "busca tambien", "también", "tambien", "además", "ademas",
-            "y además", "y ademas", "y busca", "y también", "y tambien", "pero también",
-            "pero tambien", "incluye", "añade", "agrega"
-        ]
-        is_extension = any(clean_lower.startswith(ext) or f" {ext} " in clean_lower for ext in extension_triggers)
-
-        anaphora_triggers = [
-            "la misma", "misma zona", "mismo lugar", "misma búsqueda", "misma busqueda",
-            "en esa zona", "por allí", "por alli", "en ese eje", "por esa zona", "en la misma",
-            "excluye", "sin chalets", "sin chalet", "no chalets", "no chalet", "quitar",
-            "excluyendo", "y que", "que tengan", "pero sin", "pero que"
-        ]
-        is_anaphora = any(ana in clean_lower for ana in anaphora_triggers)
-
-        # Extraer propuesta o pregunta del asistente previo si existe
-        assistant_proposal = ""
-        if last_assistant_msg and last_assistant_msg.content:
-            ast_content = last_assistant_msg.content
-            # Buscar preguntas explícitas como "¿Deseas que activemos el radar...?"
-            m_q = re.search(r'¿(?:Deseas?|Quieres?|Te gustaría|Gusta)\s+(?:que\s+)?([^?]+)\?', ast_content, re.IGNORECASE)
-            if m_q:
-                assistant_proposal = m_q.group(1).strip()
+        # 3. Referencia a "la misma zona" o "la misma búsqueda" (Banco de memoria previo)
+        if is_anaphora:
+            last_context = self.get_last_active_search_context(chat_id)
+            if last_context and last_context.get("zone"):
+                recovered_zone = last_context["zone"]
+                logger.info(f"[Memory Bank] ✅ Zona activa previa recuperada con éxito: '{recovered_zone}'")
+                enriched_text = f"{clean_text}. Zona: {recovered_zone} (Búsqueda previa de referencia: {last_context.get('description', '')[:120]})"
+                return enriched_text, None
             else:
-                # Buscar en el bloque de Próximo Paso Accionable
-                m_step = re.search(r'(?:Próximo Paso Accionable|💡)[^\n]*\n+([^\n]+(?:\n[^\n]+)?)', ast_content, re.IGNORECASE)
-                if m_step:
-                    raw_p = re.sub(r'<[^>]+>', '', m_step.group(1)).strip()
-                    m_p_q = re.search(r'¿(?:Deseas?|Quieres?|Te gustaría|Gusta)\s+(?:que\s+)?([^?]+)\?', raw_p, re.IGNORECASE)
-                    if m_p_q:
-                        assistant_proposal = m_p_q.group(1).strip()
-                    else:
-                        assistant_proposal = raw_p
+                # Fallback conversacional: Preguntar la zona de forma natural para no lanzar macro-análisis a ciegas
+                logger.info("[Memory Bank] ⚠️ No se encontró zona activa en memoria. Activando fallback conversacional de aclaración.")
+                fallback_question = (
+                    "🤔 Para realizar la búsqueda en la misma zona, ¿a qué municipio o zona te refieres exactamente?\n\n"
+                    "Indícamelo para afinar los resultados y buscar con precisión."
+                )
+                return clean_text, fallback_question
 
-        # Comprobar si el usuario había enviado una afirmación previa en el historial
-        had_recent_affirmation = False
-        for u_msg in recent_user_msgs:
-            u_clean = u_msg.content.strip().lower()
-            if any(u_clean == aff or u_clean.startswith(aff + " ") for aff in affirmation_words):
-                had_recent_affirmation = True
-                break
+        # 4. Concatenación de mensajes consecutivos: SOLO si el mensaje actual es una continuación o refinamiento
+        # (ej: "y con piscina", "de más de 100m2", "con pozo"), NO si es una búsqueda completa independiente
+        if recent_user_msgs:
+            last_u = recent_user_msgs[0]
+            prev_u_text = (last_u.content or "").strip()
+            affirmation_words = {"sí", "si", "vale", "ok", "adelante", "hazlo", "de acuerdo", "perfecto"}
+            
+            is_new_independent_search = any(
+                clean_lower.startswith(prefix) for prefix in [
+                    "búscame", "buscame", "busca", "buscar", "encuentra", "dime", "muéstrame", "muestrame",
+                    "quiero", "necesito", "dame", "analiza", "cuál es", "cual es", "qué tal", "que tal"
+                ]
+            ) or has_explicit_zone
 
-        # Normalizar propuesta
-        normalized_proposal = assistant_proposal
-        if normalized_proposal.lower().startswith("activemos "):
-            normalized_proposal = "activa " + normalized_proposal[10:]
-        elif normalized_proposal.lower().startswith("nuestro equipo de inteligencia de mercado rastree "):
-            normalized_proposal = "activa el radar para rastrear " + normalized_proposal[50:]
+            if not is_new_independent_search and prev_u_text and prev_u_text != clean_text and prev_u_text.lower() not in affirmation_words:
+                logger.info(f"[Prompt Chaining] Concatenando refinamiento previo del usuario con punto y seguido: '{prev_u_text}. {clean_text}'")
+                combined_text = f"{prev_u_text}. {clean_text}"
+                return combined_text, None
 
-        if normalized_proposal:
-            # Caso 1: El usuario sólo dijo "sí" o "de acuerdo"
-            if is_pure_affirmation and len(clean_text.split()) <= 4:
-                logger.info(f"[Prompt Chaining] Usuario afirmó propuesta previa -> 'Sí, {normalized_proposal}'")
-                return f"Sí, {normalized_proposal}"
-
-            # Caso 2: El usuario añadió una extensión tras decir "sí" previamente, o este mensaje empieza con extensión
-            if had_recent_affirmation and (is_extension or len(clean_text.split()) > 1):
-                logger.info(f"[Prompt Chaining] Encadenando afirmación previa + nuevo requisito -> 'Sí, {normalized_proposal}, y además {clean_text}'")
-                return f"Sí, {normalized_proposal}, y además {clean_text}"
-
-            # Caso 3: El mensaje actual combina afirmación y extensión (ej: "Sí, busca también chalets")
-            if is_pure_affirmation and is_extension:
-                clean_remainder = re.sub(r'^(?:sí|si|vale|ok|adelante|de acuerdo|por favor)[,.\s]+(?:y\s+)?', '', clean_text, flags=re.IGNORECASE).strip()
-                logger.info(f"[Prompt Chaining] Mensaje con afirmación y extensión directa -> 'Sí, {normalized_proposal}, y además {clean_remainder}'")
-                return f"Sí, {normalized_proposal}, y además {clean_remainder}"
-
-        # Caso 4: Encadenamiento directo de mensajes del usuario sin propuesta del asistente (extensiones o referencias anafóricas)
-        if (is_extension or is_anaphora) and recent_user_msgs:
-            for u_m in recent_user_msgs:
-                prev_u = (u_m.content or "").strip()
-                if prev_u and not any(prev_u.lower() == aff for aff in affirmation_words) and len(prev_u) > 10:
-                    logger.info(f"[Prompt Chaining] Concatenando mensaje previo del usuario: '{prev_u}' + '{clean_text}'")
-                    # Si el mensaje actual es una exclusión o corrección rápida como "Excluye chalets", anexar directamente
-                    if any(clean_lower.startswith(w) for w in ["excluye", "sin ", "no ", "quitar"]):
-                        return f"{prev_u}. {clean_text}"
-                    # Si el mensaje actual dice "la misma zona" o "la misma búsqueda", enriquecer con contexto previo
-                    if any(ana in clean_lower for ana in ["misma zona", "misma búsqueda", "misma busqueda", "la misma"]):
-                        return f"{clean_text} (Contexto previo: {prev_u})"
-                    return f"{prev_u}, y además {clean_text}"
-
-        return clean_text
+        return clean_text, None
 
     # --------------------------------------------------------------------------
     # 4. GESTIÓN Y PROCESAMIENTO DE UPDATES
@@ -842,12 +885,37 @@ class TelegramAdvisorBot:
             audio_duration = None
             # Sintetizar prompt contextualizado si hay encadenamiento de mensajes o respuesta previa
             reply_to = message.get("reply_to_message")
-            prompt_to_process = self.synthesize_conversation_prompt(
+            prompt_to_process, clarification_question = self.synthesize_conversation_prompt(
                 chat_id=chat_id,
                 user_id=user_id,
                 current_text=text_content or "",
                 reply_to=reply_to
             )
+
+            # Si se requiere aclaración conversacional (ej: fallback cuando no se encuentra la zona en memoria)
+            if clarification_question:
+                await self.send_message(chat_id, clarification_question, reply_to_message_id=message_id)
+                # Registrar en memoria para que la respuesta subsiguiente del usuario se encadene naturalmente
+                try:
+                    with SessionLocal() as db_clarify:
+                        db_clarify.add(TelegramConversationMessage(
+                            telegram_chat_id=str(chat_id),
+                            telegram_user_id=str(user_id),
+                            user_id=db_user.id if db_user else None,
+                            role="user",
+                            content=text_content or ""
+                        ))
+                        db_clarify.add(TelegramConversationMessage(
+                            telegram_chat_id=str(chat_id),
+                            telegram_user_id=str(user_id),
+                            user_id=db_user.id if db_user else None,
+                            role="assistant",
+                            content=clarification_question
+                        ))
+                        db_clarify.commit()
+                except Exception as e_reg:
+                    logger.warning(f"Error registrando aclaración conversacional en BD: {e_reg}")
+                return {"status": "clarification_requested", "question": clarification_question}
 
             # Si es nota de voz o archivo de audio
             if voice or audio:

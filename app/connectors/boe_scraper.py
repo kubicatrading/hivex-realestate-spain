@@ -659,12 +659,18 @@ class BOESubastasScraper:
         pt_low = (property_type or '').lower()
         combined = f"{t_low} {d_low} {pt_low}"
 
+        # 0. Protección expresa: Fincas rústicas, parcelas, terrenos y viviendas residenciales
+        # con casetas, aperos o almacén agrícola NO son naves industriales
+        is_rustic_or_residential = any(w in t_low or w in pt_low for w in ['finca', 'rústica', 'rustica', 'terreno', 'parcela', 'solar', 'vivienda', 'chalet', 'casa'])
+        if is_rustic_or_residential and not any(w in t_low for w in ['nave', 'industrial', 'taller']) and not any(w in pt_low for w in ['nave', 'industrial', 'taller']):
+            return False
+
         # 1. Tipo de propiedad declarado
         if any(w in pt_low for w in ['nave', 'industrial', 'almacen', 'almacén', 'logistico', 'logístico', 'taller']):
             return True
 
-        # 2. Título o encabezado menciona expresamente nave o almacén
-        if re.search(r'\b(naves?|almac[eé]n(es)?|talleres?)\b', t_low):
+        # 2. Título o encabezado menciona expresamente nave o almacén industrial
+        if re.search(r'\b(naves?|almac[eé]n(es)?\s+industriales?|talleres?)\b', t_low):
             return True
 
         # 3. Patrones directos en descripción
@@ -683,7 +689,7 @@ class BOESubastasScraper:
             r'\bparque\s+empresarial\b',
             r'\bpol[ií]gono\s+industrial\b',
             r'\bnave\s+sita\b',
-            r'\balmac[eé]n\b',
+            r'\balmac[eé]n\s+(industrial|log[ií]stico|comercial)\b',
             r'\bplataforma\s+log[ií]stica\b'
         ]
         if any(re.search(pat, combined) for pat in nave_patterns):

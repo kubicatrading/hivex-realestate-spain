@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # AI & Speech-to-Text Keys (Optional, fallback built-in engine active if empty)
     GEMINI_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
+    GOOGLE_MAPS_API_KEY: str = "AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc"
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     TELEGRAM_AUTHORIZED_USERS: str = ""  # Comma-separated list of usernames or telegram user IDs allowed

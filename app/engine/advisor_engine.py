@@ -71,6 +71,7 @@ SPANISH_ZONE_DEFINITIONS = [
     ("Ciudalcampo - San Sebastián de los Reyes Norte", "Madrid", ["ciudalcampo", "fuente del fresno", "santo domingo", "la granjilla", "club de campo", "valdelagua", "28707", "28708", "28120"]),
     ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
+    ("Eje Guadalix de la Sierra - Algete - Colmenar Viejo", "Madrid", ["guadalix de la sierra", "guadalix", "gualix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "miraflores de la sierra", "28794", "28770", "28791", "28792"]),
     ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "paracuellos", "paracuellos de jarama", "paracuellos del jarama", "jarama", "rio jarama", "río jarama", "valpuercos", "28110", "28140", "28701", "28702", "28703", "28860"]),
     ("Pinto", "Madrid", ["pinto", "28320"]),
     ("Valdemoro", "Madrid", ["valdemoro", "28340"]),
@@ -103,6 +104,9 @@ class AdvisorEngine:
     """
 
     GEMINI_FLASH_CASCADE = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.0-flash",
         "gemini-2.5-flash",
         "gemini-flash-latest",
         "gemini-2.5-flash-lite",
@@ -241,12 +245,8 @@ class AdvisorEngine:
                                 return text_res, model
                     else:
                         logger.warning(
-                            f"[Gemini Cascade] Modelo {model} no respondió exitosamente ({resp.status_code}): {resp.text[:120]}. "
+                            f"[Gemini Cascade] Modelo {model} no respondió exitosamente ({resp.status_code}): {resp.text[:120]}. Descendiendo al siguiente..."
                         )
-                        if resp.status_code == 403:
-                            logger.info("[Gemini Cascade] Error 403 detectado (restricción por política de API Key). Abortando cascada inmediatamente hacia motor heurístico.")
-                            break
-                        logger.info(f"Descendiendo al inmediatamente anterior...")
             except Exception as e:
                 logger.warning(f"[Gemini Cascade] Error intentando {model}: {e}. Descendiendo al inmediatamente anterior...")
 
@@ -638,7 +638,9 @@ class AdvisorEngine:
                         "source_type": "subastas",
                         "primary_portal": auc.source or "BOE",
                         "strategy": opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy),
+                        "property_type": getattr(auc, "property_type", "Inmueble") or "Inmueble",
                         "title": auc.title or "Inmueble en Subasta Pública",
+                        "description": getattr(auc, "description", "") or "",
                         "locality": auc.locality or "España",
                         "province": auc.province or "España",
                         "address": auc.address or "",
@@ -686,7 +688,9 @@ class AdvisorEngine:
                         "source_type": "market",
                         "primary_portal": item.get("primary_portal") or item.get("portal") or "Idealista",
                         "strategy": item.get("strategy", "HOUSE_FLIPPING"),
+                        "property_type": item.get("property_type") or "Vivienda",
                         "title": item.get("title", "Oportunidad Residencial"),
+                        "description": item.get("description") or "",
                         "locality": item.get("locality", "España"),
                         "province": item.get("province", "España"),
                         "address": item.get("address") or item.get("full_address") or "",
@@ -738,9 +742,9 @@ class AdvisorEngine:
                     matched_zone_def = (z_name, z_prov)
                     break
 
-            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas / Jarama, ampliar al cinturón rústico contiguo
-            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama"]):
-                zone_keys.extend(["algete", "fuente el saz", "el molar", "talamanca", "paracuellos", "paracuellos de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno", "jarama"])
+            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas / Jarama / Guadalix / Colmenar, ampliar al cinturón rústico contiguo
+            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama", "guadalix", "gualix", "colmenar"]):
+                zone_keys.extend(["guadalix", "guadalix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "algete", "fuente el saz", "el molar", "talamanca", "paracuellos", "paracuellos de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno", "jarama", "zarzalejo", "quijorna", "brunete", "valdemorillo", "villa del prado", "el álamo", "alamo"])
                 zone_keys = list(set(zone_keys))
 
             def _matches_target_zone(o: Dict[str, Any]) -> bool:
@@ -1058,18 +1062,22 @@ class AdvisorEngine:
             supadata = SupadataClient()
             rental_engine = RentalReferenceEngine()
 
-            for target in targets[:4]:
+            async def _scrape_single_target(target: Dict[str, Any]) -> List[Dict[str, Any]]:
                 p_name = target.get("portal", "").lower()
                 target_url = target.get("url", "")
                 if not target_url or not target_url.startswith("http"):
-                    continue
+                    return []
 
                 logger.info(f"[Advisor Sync] Extrayendo contenido en vivo de {target.get('portal')} URL: {target_url}")
                 content = ""
-                scrape_res = supadata.scrape_url(target_url)
-                if scrape_res and scrape_res.get("content"):
-                    content = scrape_res.get("content", "")
-                elif any(k in p_name for k in ["fotocasa", "habitaclia", "pisos"]):
+                try:
+                    scrape_res = await asyncio.to_thread(supadata.scrape_url, target_url)
+                    if scrape_res and scrape_res.get("content"):
+                        content = scrape_res.get("content", "")
+                except Exception as e_supa:
+                    logger.warning(f"[Advisor Sync] Supadata excepción para {p_name}: {e_supa}")
+
+                if not content and any(k in p_name for k in ["fotocasa", "habitaclia", "pisos"]):
                     # Fallback directo con httpx (0 créditos Supadata)
                     try:
                         headers = {
@@ -1077,7 +1085,9 @@ class AdvisorEngine:
                             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
                         }
-                        direct_resp = httpx.get(target_url, headers=headers, follow_redirects=True, timeout=8.0)
+                        direct_resp = await asyncio.to_thread(
+                            httpx.get, target_url, headers=headers, follow_redirects=True, timeout=8.0
+                        )
                         if direct_resp.status_code == 200 and len(direct_resp.text) > 500:
                             content = direct_resp.text
                             logger.info(f"[Advisor Sync] Fetch directo exitoso para {p_name} ({len(content)} bytes)")
@@ -1085,7 +1095,7 @@ class AdvisorEngine:
                         logger.warning(f"[Advisor Sync] Fetch directo falló para {p_name}: {e_direct}")
 
                 if not content:
-                    continue
+                    return []
 
                 if "idealista" in p_name:
                     parsed_items = IdealistaMarkdownParser.parse_listings(content, default_province=prov)
@@ -1098,6 +1108,7 @@ class AdvisorEngine:
                 else:
                     parsed_items = []
 
+                results = []
                 from app.connectors.market_scraper import MarketScraper
                 _m_scraper = MarketScraper()
 
@@ -1118,7 +1129,16 @@ class AdvisorEngine:
 
                     processed_opp = _m_scraper._process_market_listing(dict(item))
                     if processed_opp:
-                        discovered_opps.append(processed_opp)
+                        results.append(processed_opp)
+
+                return results
+
+            # Ejecutar scraping de todos los portales objetivo en paralelo
+            scrape_tasks = [_scrape_single_target(t) for t in targets[:4]]
+            batch_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
+            for b in batch_results:
+                if isinstance(b, list):
+                    discovered_opps.extend(b)
 
         except Exception as e_gem:
             logger.warning(f"[Advisor Sync] Error en scraping dinámico con Gemini: {e_gem}")
@@ -1958,20 +1978,18 @@ class AdvisorEngine:
 
             if (is_explicit_external or (len(matched_opps) == 0 and not internal_metrics.get("is_statistically_representative", False))):
                 logger.info(
-                    f"[Advisor Process] Activando búsqueda fuera de HIVEX (solicitud explícita o falta de datos previa)..."
+                    f"[Advisor Process] Activando búsqueda fuera de HIVEX (out-hivex) de forma asíncrona y con await..."
                 )
                 try:
-                    newly_synced = await asyncio.wait_for(
-                        self.sync_portal_opportunities_on_demand(
-                            criteria=criteria,
-                            prompt_text=final_prompt,
-                            target_count=target_count,
-                            db=db
-                        ),
-                        timeout=8.0
+                    # Ejecutar de forma asíncrona y con await directo para no cancelar la petición por tiempo
+                    newly_synced = await self.sync_portal_opportunities_on_demand(
+                        criteria=criteria,
+                        prompt_text=final_prompt,
+                        target_count=target_count,
+                        db=db
                     )
-                except asyncio.TimeoutError:
-                    logger.warning("[Advisor Process] Timeout de 8s en sincronización bajo demanda. Procediendo con catálogo interno.")
+                except Exception as e_sync:
+                    logger.warning(f"[Advisor Process] Error en sincronización externa out-hivex: {e_sync}")
                     newly_synced = []
 
                 if newly_synced:
