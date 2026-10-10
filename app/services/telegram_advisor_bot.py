@@ -21,19 +21,6 @@ from app.engine.advisor_engine import advisor_engine
 
 logger = logging.getLogger(__name__)
 
-VERIFIED_REAL_ESTATE_PHOTOS = [
-    "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&q=80",
-    "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&q=80",
-    "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&q=80",
-    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80",
-    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&q=80",
-    "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=80",
-    "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=80",
-    "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&q=80",
-    "https://images.unsplash.com/photo-1502005229762-ae1b46642b58?w=800&q=80",
-    "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=800&q=80"
-]
-
 class TelegramAdvisorBot:
     """
     Bot conversacional de Telegram para HIVEX Real Estate.

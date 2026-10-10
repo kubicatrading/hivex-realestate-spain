@@ -22,6 +22,62 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Patrones terminantemente prohibidos: fotos mockeadas, de stock o satelitales / ortofotos
+FORBIDDEN_IMAGE_PATTERNS = [
+    "unsplash.com", "pexels.com", "pixabay.com", "freepik.com", "shutterstock.com",
+    "placeholder", "dummy", "mock", "sample", "stock", "fake",
+    "catastro", "cartografia", "wms", "ortofoto", "pnoa", "sedecatastro",
+    "ign.es", "mapa", "satelite", "satellite", "aerial"
+]
+
+def is_forbidden_image(url: str) -> bool:
+    """Detecta y rechaza fotografías mockeadas, de stock o mapas/ortofotos satelitales."""
+    if not url or not str(url).startswith("http"):
+        return True
+    u_lower = str(url).lower()
+    return any(p in u_lower for p in FORBIDDEN_IMAGE_PATTERNS)
+
+def fetch_verified_streetview(opp: Dict[str, Any]) -> Optional[Image.Image]:
+    """
+    Obtiene la foto real de fachada/calle usando la API de Google Street View
+    solo si existe cobertura real ('status' == 'OK'). Si no existe, retorna None
+    para evitar imágenes grises de error de Google.
+    """
+    gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
+    if not gmaps_key:
+        return None
+
+    lat = opp.get("latitude") or opp.get("lat")
+    lon = opp.get("longitude") or opp.get("lon")
+    addr = opp.get("full_address") or opp.get("address") or opp.get("locality")
+    if not (lat and lon or addr):
+        return None
+
+    loc_param = f"{lat},{lon}" if (lat and lon) else quote_plus(str(addr))
+    headers = {"User-Agent": "HIVEX/1.0"}
+
+    # 1. Verificar metadata para confirmar que existe imagen real capturada por el coche de Google
+    meta_url = f"https://maps.googleapis.com/maps/api/streetview/metadata?location={loc_param}&key={gmaps_key}"
+    try:
+        req_meta = urllib.request.Request(meta_url, headers=headers)
+        with urllib.request.urlopen(req_meta, timeout=2.5) as resp_meta:
+            meta_json = json.loads(resp_meta.read().decode("utf-8"))
+            if meta_json.get("status") != "OK":
+                return None
+    except Exception as e_meta:
+        logger.debug(f"Aviso consultando metadata Street View: {e_meta}")
+        return None
+
+    # 2. Descargar la fotografía real de Street View
+    sv_url = f"https://maps.googleapis.com/maps/api/streetview?size=720x350&location={loc_param}&fov=80&heading=70&pitch=0&key={gmaps_key}"
+    try:
+        req_sv = urllib.request.Request(sv_url, headers=headers)
+        with urllib.request.urlopen(req_sv, timeout=3.5) as resp_sv:
+            return Image.open(io.BytesIO(resp_sv.read())).convert("RGB")
+    except Exception as e_sv:
+        logger.debug(f"Aviso descargando foto Street View: {e_sv}")
+        return None
+
 # Paleta de colores oficial Google Maps / HIVEX Light Popup
 
 COLOR_CARD_BG = (255, 255, 255)       # Blanco puro
@@ -422,7 +478,7 @@ def generate_opportunity_card_image(
     return buffer.getvalue()
 
 
-def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
+def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
     """
     Renderiza la ficha gráfica estilo WhatsApp Marketing Template:
     1. Fotos agrupadas arriba (1 a 3 imágenes reales en mosaico armónico con badge indicador).
@@ -438,31 +494,16 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     BODY_H = 300
     TOTAL_H = PHOTO_H + BODY_H
 
-    # 1. Obtener fotos válidas reales de la oportunidad (EXCLUYENDO ortofotos satelitales y mapas Catastro/WMS)
+    # 1. Obtener fotos válidas reales de la oportunidad (RECHAZANDO terminantemente fotos mock, stock, ortofotos)
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
     valid_images = [
         str(i) for i in raw_images
-        if i and str(i).startswith("http")
-        and "catastro" not in str(i).lower()
-        and "cartografia" not in str(i).lower()
-        and "wms" not in str(i).lower()
-        and "ortofoto" not in str(i).lower()
-        and "pnoa" not in str(i).lower()
+        if not is_forbidden_image(i)
     ]
-    if not valid_images:
-        lat = opp.get("latitude") or opp.get("lat")
-        lon = opp.get("longitude") or opp.get("lon")
-        addr = opp.get("full_address") or opp.get("address")
-        gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
-        if lat and lon and gmaps_key:
-            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={lat},{lon}&fov=80&heading=70&pitch=0&key={gmaps_key}"]
-        elif addr and gmaps_key:
-            valid_images = [f"https://maps.googleapis.com/maps/api/streetview?size=600x340&location={quote_plus(addr)}&fov=80&heading=70&pitch=0&key={gmaps_key}"]
 
-
-    # Descargar hasta 3 fotos reales
+    # Descargar hasta 3 fotos reales del anuncio
     loaded_imgs = []
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
     for img_url in valid_images[:3]:
@@ -474,10 +515,16 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
         except Exception:
             pass
 
+    # Si NO existen fotos reales del anuncio, intentar Google Street View verificado
     if not loaded_imgs:
-        # Generar cabecera técnica oficial; nunca imágenes mockeadas
-        tech_banner = create_technical_banner(W, PHOTO_H, opp).convert("RGB")
-        loaded_imgs.append(tech_banner)
+        sv_img = fetch_verified_streetview(opp)
+        if sv_img:
+            loaded_imgs.append(sv_img)
+
+    # EN ÚLTIMA INSTANCIA: Si no existen fotos reales ni Street View verificado, NO ENVIAR FOTO
+    if not loaded_imgs:
+        logger.info(f"Oportunidad {opp.get('id')} sin fotos reales ni Street View verificado. Omitiendo generación de imagen para enviar ficha limpia sin foto.")
+        return None
 
 
     # Fuentes
