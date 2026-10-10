@@ -98809,7 +98809,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 71.0,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-58314000000366",
@@ -98889,7 +98890,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 89.6,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-16985000000473",
@@ -98969,7 +98971,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 81.6,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-15692000000672",
@@ -99049,7 +99052,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 0.0,
     "overall_score": 36.6,
-    "final_score": 36.6
+    "final_score": 36.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-51966000000077",
@@ -99129,7 +99133,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 49.3,
     "overall_score": 85.9,
-    "final_score": 85.9
+    "final_score": 85.9,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-15692000000686",
@@ -99209,7 +99214,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 82.0,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-15337000000210",
@@ -99289,7 +99295,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 23.1,
     "overall_score": 59.7,
-    "final_score": 59.7
+    "final_score": 59.7,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-57251000000039",
@@ -99368,7 +99375,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 43.5,
     "overall_score": 80.1,
-    "final_score": 80.1
+    "final_score": 80.1,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-17979000000584",
@@ -99446,7 +99454,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 71.7,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-52428000000029",
@@ -99523,7 +99532,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 50.9,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-19071000000357",
@@ -99599,7 +99609,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 32.3,
     "overall_score": 68.9,
-    "final_score": 68.9
+    "final_score": 68.9,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-16374000000740",
@@ -99674,7 +99685,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 60.5,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-55857000000048",
@@ -99749,7 +99761,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 0.0,
     "overall_score": 36.6,
-    "final_score": 36.6
+    "final_score": 36.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-44351000000323",
@@ -99823,7 +99836,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 0.0,
     "overall_score": 36.6,
-    "final_score": 36.6
+    "final_score": 36.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-57251000000017",
@@ -99897,7 +99911,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 0.0,
     "overall_score": 36.6,
-    "final_score": 36.6
+    "final_score": 36.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-16985000000477",
@@ -99970,7 +99985,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 81.0,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-15240003798085",
@@ -100042,7 +100058,8 @@
     "btl_color": "neutral",
     "discount_vs_market": 84.0,
     "overall_score": 86.6,
-    "final_score": 86.6
+    "final_score": 86.6,
+    "source_type": "market"
   },
   {
     "id": "MKT-HABITACLIA-45815000000193",
@@ -100114,6 +100131,7 @@
     "btl_color": "neutral",
     "discount_vs_market": 0.0,
     "overall_score": 36.6,
-    "final_score": 36.6
+    "final_score": 36.6,
+    "source_type": "market"
   }
 ]

@@ -147,13 +147,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.allOpportunities.some(o => String(o.id || '').toUpperCase() === String(targetOpp.id || '').toUpperCase())) {
                 state.allOpportunities.unshift(targetOpp);
             }
-            state.filteredOpportunities = [targetOpp, ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(targetOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)];
+            state.filteredOpportunities = [
+                targetOpp,
+                ...state.allOpportunities.filter(o => {
+                    const oId = String(o.id || '').toUpperCase();
+                    if (oId === String(targetOpp.id || '').toUpperCase()) return false;
+                    const s = o.source_type || (oId.startsWith('MKT-') ? 'market' : (oId.startsWith('PGOU-') ? 'pgou' : (oId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
+                    return s === targetSource;
+                })
+            ];
             
             renderDeals(state.filteredOpportunities);
             if (typeof updateKPIs === 'function') updateKPIs(state.filteredOpportunities);
-
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) searchInput.value = targetOpp.title || targetOpp.id_subasta || targetOpp.id;
 
             // 3. Resaltar tarjeta en el feed
             setTimeout(() => {
@@ -187,6 +192,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 150);
             }
+
+            // 5. Abrir la ficha completa detallada del inmueble
+            setTimeout(() => {
+                if (typeof window.openPropertyDetailModal === 'function') {
+                    window.openPropertyDetailModal(targetOpp);
+                }
+            }, 350);
         };
 
         try {
@@ -422,7 +434,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.activeSource = targetSource;
                     state.filteredOpportunities = [
                         window._deepLinkedOpp,
-                        ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(window._deepLinkedOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)
+                        ...state.allOpportunities.filter(o => {
+                            const oId = String(o.id || '').toUpperCase();
+                            if (oId === String(window._deepLinkedOpp.id || '').toUpperCase()) return false;
+                            const s = o.source_type || (oId.startsWith('MKT-') ? 'market' : (oId.startsWith('PGOU-') ? 'pgou' : (oId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
+                            return s === targetSource;
+                        })
                     ];
                     renderDeals(state.filteredOpportunities);
                     renderMapMarkers(state.filteredOpportunities);
@@ -451,7 +468,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.activeSource = targetSource;
                     state.filteredOpportunities = [
                         window._deepLinkedOpp,
-                        ...state.allOpportunities.filter(o => String(o.id || '').toUpperCase() !== String(window._deepLinkedOpp.id || '').toUpperCase() && (o.source_type || 'subastas') === targetSource)
+                        ...state.allOpportunities.filter(o => {
+                            const oId = String(o.id || '').toUpperCase();
+                            if (oId === String(window._deepLinkedOpp.id || '').toUpperCase()) return false;
+                            const s = o.source_type || (oId.startsWith('MKT-') ? 'market' : (oId.startsWith('PGOU-') ? 'pgou' : (oId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
+                            return s === targetSource;
+                        })
                     ];
                     renderDeals(state.filteredOpportunities);
                     renderMapMarkers(state.filteredOpportunities);
@@ -983,7 +1005,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Source Filter (Subastas BOE vs PGOU Visor vs Edictos/Reg. vs Market)
-            const oppSource = opp.source_type || 'subastas';
+            const idUpper = String(opp.id || '').toUpperCase();
+            const oppSource = opp.source_type || (idUpper.startsWith('MKT-') ? 'market' : (idUpper.startsWith('PGOU-') ? 'pgou' : (idUpper.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
             if (oppSource !== state.activeSource) {
                 return false;
             }

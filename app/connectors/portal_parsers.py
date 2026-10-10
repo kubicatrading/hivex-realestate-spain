@@ -974,6 +974,7 @@ class HabitacliaMarkdownParser:
 
                     opportunity = {
                         "id": f"MKT-HABITACLIA-{item_id}",
+                        "source_type": "market",
                         "title": title,
                         "address": address,
                         "locality": municipality,
