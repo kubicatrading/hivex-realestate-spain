@@ -888,26 +888,12 @@ class MarketScraper:
         from app.engine.rental_reference import RentalReferenceEngine
 
         if is_rustic or is_solar:
-            if has_house and min_price > 0:
-                # Alquiler residencial estimado únicamente sobre los m2 de la vivienda (120-180 m2), nunca sobre la finca rústica
-                house_sqm = float(item.get("built_area") or item.get("house_m2") or 140.0)
-                ref_rental_sqm = min(11.5, RentalReferenceEngine.get_rental_price_m2(postal_code or "28001", province))
-                monthly_rent = round(house_sqm * ref_rental_sqm, 2)
-                calc_yield = RentalReferenceEngine.calculate_rental_yield(
-                    listing_price=min_price,
-                    monthly_rent=monthly_rent
-                )
-                rental_yield = round(max(3.5, min(14.0, calc_yield)), 2)
-                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
-                btl_score = yield_score
-                btl_color = yield_color
-            else:
-                monthly_rent = 0.0
-                rental_yield = 0.0
-                yield_score = 0.0
-                yield_color = "rojo"
-                btl_score = None
-                btl_color = None
+            monthly_rent = 0.0
+            rental_yield = 0.0
+            yield_score = 0.0
+            yield_color = "gris"
+            btl_score = None
+            btl_color = None
         else:
             # Inmueble urbano residencial
             monthly_rent = item.get("estimated_monthly_rent") or RentalReferenceEngine.estimate_monthly_rent(

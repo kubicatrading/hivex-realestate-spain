@@ -1460,17 +1460,35 @@ class AdvisorEngine:
         profit = float(opp.get("potential_gross_profit") or max(0.0, mkt - price))
         portal = html.escape(str(opp.get("primary_portal") or "Idealista"))
 
-        strat_label = "Flipping" if opp.get("strategy") == "HOUSE_FLIPPING" else "BTL / Renta"
+        is_rustic_card = (
+            opp.get("land_type") in ["RÚSTICO", "RUSTICO"]
+            or opp.get("is_solar")
+            or any(w in str(opp.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"])
+        )
+
+        if is_rustic_card:
+            strat_label = "Finca / Recreo"
+        elif opp.get("strategy") == "HOUSE_FLIPPING":
+            strat_label = "Flipping"
+        else:
+            strat_label = "BTL / Renta"
 
         lines = [
             f"🏡 <b>{title}</b>",
             f"📍 <i>{addr}, {loc} ({prov}) • {surf:,.0f} m²</i>\n".replace(",", "."),
-            f"💰 <b>Precio Venta:</b> {price:,.0f} €  <code>({disc_str} s/ Ref: {mkt:,.0f} €)</code>".replace(",", "."),
-            f"📈 <b>Rentabilidad BTL:</b> <b>{ryield:.1f}% Yield</b> (Est. <b>{rent:,.0f} €/mes</b>)".replace(",", "."),
+            f"💰 <b>Precio Venta:</b> {price:,.0f} €  <code>({disc_str} s/ Ref: {mkt:,.0f} €)</code>".replace(",", ".")
+        ]
+
+        if not is_rustic_card and ryield > 0:
+            lines.append(f"📈 <b>Rentabilidad BTL:</b> <b>{ryield:.1f}% Yield</b> (Est. <b>{rent:,.0f} €/mes</b>)".replace(",", "."))
+        elif is_rustic_card:
+            lines.append(f"🌾 <b>Tipología Suelo:</b> <b>Finca Rústica / Recreo</b>")
+
+        lines.extend([
             f"⭐ <b>HIVEX Score:</b> <b>{score:.0f}/100</b> | 🏷️ <b>{strat_label}</b>",
             f"💶 <b>Margen Estimado:</b> <b>+{profit:,.0f} €</b>".replace(",", "."),
             f"🛒 <b>Fuente:</b> {portal}"
-        ]
+        ])
         return "\n".join(lines)
 
     # --------------------------------------------------------------------------
@@ -1821,7 +1839,13 @@ class AdvisorEngine:
                 intro_lines.append(f"• <b>Prima sobre {ref_label}:</b> +{abs(avg_disc):.1f}%")
             else:
                 intro_lines.append(f"• <b>Precio en línea con {ref_label}</b>")
-            if avg_yield > 0:
+            is_rustic_query = any(
+                o.get("land_type") in ["RÚSTICO", "RUSTICO"]
+                or o.get("is_solar")
+                or any(w in str(o.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"])
+                for o in matched_opps
+            ) or any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"])
+            if not is_rustic_query and avg_yield > 0:
                 clean_yield = min(18.0, avg_yield)
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{clean_yield:.1f}% Yield</b>")
             intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")

@@ -619,15 +619,24 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> bytes:
     draw.rounded_rectangle([col1_x + 130, y - 2, col1_x + 130 + badge_w, y + 24], radius=6, fill=badge_bg)
     draw.text((col1_x + 135, y + 1), badge_text, fill=badge_fg, font=font_badge)
 
-    draw.text((col2_x, y), "Rentabilidad BTL:", fill=(71, 85, 105), font=font_label)
-    rental_yield = float(opp.get("rental_yield") or opp.get("yield") or 0.0)
-    monthly_rent = float(opp.get("estimated_monthly_rent") or 0.0)
-    if not rental_yield and price > 0 and monthly_rent > 0:
-        rental_yield = round(((monthly_rent * 12) / price) * 100.0, 1)
-    btl_str = f"{rental_yield:.1f}% Yield" if rental_yield > 0 else "Consultar"
-    if monthly_rent > 0:
-        btl_str += f" ({monthly_rent:,.0f}€)".replace(",", ".")
-    draw.text((col2_x + 125, y - 1), btl_str, fill=(15, 23, 42), font=font_bold)
+    is_rustic_opp = (
+        opp.get("land_type") in ["RÚSTICO", "RUSTICO"]
+        or opp.get("is_solar")
+        or any(w in str(opp.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"])
+    )
+    if is_rustic_opp:
+        draw.text((col2_x, y), "Tipología Suelo:", fill=(71, 85, 105), font=font_label)
+        draw.text((col2_x + 125, y - 1), "Rústico / Recreo", fill=(15, 23, 42), font=font_bold)
+    else:
+        draw.text((col2_x, y), "Rentabilidad BTL:", fill=(71, 85, 105), font=font_label)
+        rental_yield = float(opp.get("rental_yield") or opp.get("yield") or 0.0)
+        monthly_rent = float(opp.get("estimated_monthly_rent") or 0.0)
+        if not rental_yield and price > 0 and monthly_rent > 0:
+            rental_yield = round(((monthly_rent * 12) / price) * 100.0, 1)
+        btl_str = f"{rental_yield:.1f}% Yield" if rental_yield > 0 else "Consultar"
+        if monthly_rent > 0:
+            btl_str += f" ({monthly_rent:,.0f}€)".replace(",", ".")
+        draw.text((col2_x + 125, y - 1), btl_str, fill=(15, 23, 42), font=font_bold)
     y += 34
 
     # Fila 4: Scoring Global HIVEX y Margen Estimado (Yield NO pondera en Overall Score)

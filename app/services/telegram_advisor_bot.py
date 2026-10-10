@@ -466,6 +466,16 @@ class TelegramAdvisorBot:
 
                 async with httpx.AsyncClient(timeout=45.0) as client:
                     res = await client.post(photo_url, data=data, files=files)
+                    if res.status_code == 429:
+                        try:
+                            retry_sec = int(res.json().get("parameters", {}).get("retry_after", 3))
+                        except Exception:
+                            retry_sec = 3
+                        logger.warning(f"sendPhoto rate-limited (429). Pausando {retry_sec}s y reintentando...")
+                        await asyncio.sleep(min(retry_sec, 6))
+                        files_retry = {"photo": ("hivex_card.png", card_bytes, "image/png")}
+                        res = await client.post(photo_url, data=data, files=files_retry)
+
                     if res.status_code == 200:
                         res_data = res.json().get("result", {})
                         sent_msg_id = res_data.get("message_id")
@@ -976,7 +986,7 @@ class TelegramAdvisorBot:
                 cards_to_send = matched_opps[:target_count]
                 for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.35)
+                    await asyncio.sleep(0.85)
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
