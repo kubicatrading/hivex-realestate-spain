@@ -803,7 +803,13 @@ class AdvisorEngine:
             elif any(w in ptype for w in ["rústic", "rustic", "finca", "solar", "terreno", "suelo", "parcela"]):
                 filtered = [
                     o for o in filtered
-                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in ["rústic", "rustic", "solar", "terreno", "suelo", "parcela", "finca", "agrario"])
+                    if (
+                        o.get("land_type") == "RÚSTICO"
+                        or o.get("is_solar")
+                        or any(w in str(o.get("property_type", "")).lower() for w in ["rústic", "rustic", "solar", "terreno", "finca"])
+                        or any(w in str(o.get("title", "")).lower() for w in ["rústic", "rustic", "solar", "terreno", "suelo", "parcela", "finca rústica", "finca rustica"])
+                    )
+                    and not any(w in str(o.get("property_type", "")).lower() for w in ["piso", "apartamento", "ático", "duplex"])
                 ]
             elif ptype in ("vivienda", "piso", "apartamento"):
                 filtered = [

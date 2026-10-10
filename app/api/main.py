@@ -2059,8 +2059,8 @@ def enrich_opportunity_gallery(
             "id": clean_id
         }
 
-    # Si ya tiene una galería completa de 15 o más fotos propias, retornarla de inmediato
-    if target_item and len(target_item.get("images", [])) >= 15:
+    # Si ya tiene una galería de fotos verificadas (>= 3), retornarla de inmediato sin re-raspar
+    if target_item and len(target_item.get("images", [])) >= 3:
         return {
             "success": True,
             "images": target_item.get("images", []),

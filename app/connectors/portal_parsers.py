@@ -924,10 +924,18 @@ class HabitacliaMarkdownParser:
                     url = f"https://www.habitaclia.com{nav_url}" if nav_url.startswith('/') else nav_url
 
                     prop = it.get('property', {}) or {}
-                    surface_m2 = float(prop.get('builtSurface') or 80.0)
-                    rooms = int(prop.get('rooms') or 2)
-                    bathrooms = int(prop.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1))
-                    floor = str(prop.get('floor') or "Exterior")
+                    prop_type = str(prop.get('propertyType') or '').lower()
+                    prop_subtype = str(prop.get('propertySubtype') or '').lower()
+                    is_solar = (prop_type == 'land') or ('rustic' in prop_subtype) or any(k in title.lower() for k in ["terreno", "solar", "parcela", "finca"])
+                    land_type = "RÚSTICO" if ('rustic' in prop_subtype or any(k in (title + " " + (summary.get("description") or "")).lower() for k in ["rústic", "rustica", "agrario", "no urbanizable", "recreo"])) else ("URBANO" if is_solar else "RESIDENCIAL")
+
+                    raw_land_area = float(prop.get('landArea') or 0.0)
+                    raw_built_area = float(prop.get('builtSurface') or 0.0)
+                    surface_m2 = raw_land_area if (is_solar and raw_land_area > 0) else (raw_built_area or raw_land_area or 80.0)
+
+                    rooms = int(prop.get('rooms') or 0 if is_solar else (prop.get('rooms') or 2))
+                    bathrooms = int(prop.get('bathrooms') or 0 if is_solar else (prop.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1)))
+                    floor = str(prop.get('floor') or ("Terreno" if is_solar else "Exterior"))
                     features_dict = prop.get('features', {}) or {}
                     has_list = features_dict.get('has', []) or []
                     has_elevator = "ELEVATOR" in has_list
@@ -943,6 +951,13 @@ class HabitacliaMarkdownParser:
                     district = loc.get('district') or default_province
                     municipality = loc.get('municipality') or default_province
                     province = loc.get('province') or default_province
+
+                    if title in ("Piso en venta", "Inmueble en venta", "Casa en venta") or not title:
+                        if land_type == "RÚSTICO":
+                            title = f"Finca rústica de {int(surface_m2):,} m² en {municipality}".replace(",", ".")
+                        elif is_solar:
+                            title = f"Terreno / Parcela de {int(surface_m2):,} m² en {municipality}".replace(",", ".")
+
                     address = loc.get('displayAddressLine') or f"{title}, {municipality}"
                     coords = loc.get('coordinates', {}) or {}
                     lat = coords.get('latitude')
@@ -954,6 +969,9 @@ class HabitacliaMarkdownParser:
                     if not lon:
                         lon = loc_data.get('lon')
 
+                    property_type = "Finca Rústica" if land_type == "RÚSTICO" else ("Solar" if is_solar else ("PISO" if "chalet" not in title.lower() else "CHALET"))
+                    strategy = "LAND_DEVELOPMENT" if is_solar else ("HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD")
+
                     opportunity = {
                         "id": f"MKT-HABITACLIA-{item_id}",
                         "title": title,
@@ -963,14 +981,16 @@ class HabitacliaMarkdownParser:
                         "postal_code": loc_data.get("postal_code", "28001"),
                         "lat": lat,
                         "lon": lon,
-                        "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
-                        "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                        "property_type": property_type,
+                        "land_type": land_type,
+                        "is_solar": is_solar,
+                        "strategy": strategy,
                         "surface_m2": surface_m2,
                         "rooms": rooms,
                         "bathrooms": bathrooms,
                         "floor": floor,
                         "has_elevator": has_elevator,
-                        "energy_certificate": "E",
+                        "energy_certificate": "EXENTO" if is_solar else "E",
                         "original_listing_price": original_listing_price,
                         "listing_price": listing_price,
                         "price_drop_percentage": price_drop_percentage,
@@ -998,22 +1018,39 @@ class HabitacliaMarkdownParser:
                         "description": summary.get("description") or f"{title}. Anuncio verificado en Habitaclia."
                     }
 
-                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
-                        surface_m2=opportunity["surface_m2"],
-                        postal_code=opportunity["postal_code"],
-                        province=opportunity["province"],
-                        floor=opportunity["floor"],
-                        has_elevator=opportunity["has_elevator"]
-                    )
-                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
-                        listing_price=listing_price,
-                        monthly_rent=monthly_rent
-                    )
-                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
-                    btl_score = yield_score
+                    if is_solar or land_type == "RÚSTICO":
+                        monthly_rent = 0.0
+                        rental_yield = 0.0
+                        yield_score = 0.0
+                        yield_color = "neutral"
+                        btl_score = 0.0
+                        m2_meso, _, _ = resolve_meso_market_price_2x2(
+                            province_str=province,
+                            locality_str=municipality,
+                            full_address_str=address,
+                            desc_text=summary.get("description", ""),
+                            land_type=land_type,
+                            is_solar=True,
+                            postal_code=opportunity["postal_code"]
+                        )
+                        est_market_val = surface_m2 * m2_meso if m2_meso > 0 else listing_price * 1.15
+                    else:
+                        monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                            surface_m2=opportunity["surface_m2"],
+                            postal_code=opportunity["postal_code"],
+                            province=opportunity["province"],
+                            floor=opportunity["floor"],
+                            has_elevator=opportunity["has_elevator"]
+                        )
+                        rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                            listing_price=listing_price,
+                            monthly_rent=monthly_rent
+                        )
+                        yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                        btl_score = yield_score
+                        area_m2_price = float(loc_data.get("area_m2_price", 3900.0))
+                        est_market_val = opportunity["surface_m2"] * area_m2_price
 
-                    area_m2_price = float(loc_data.get("area_m2_price", 3900.0))
-                    est_market_val = opportunity["surface_m2"] * area_m2_price
                     discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
 
                     overall_score = KPICalculator.calculate_overall_opportunity_score(
@@ -1022,14 +1059,16 @@ class HabitacliaMarkdownParser:
                         income_amount=loc_data.get("avg_household_income", 40000),
                         population_growth=loc_data.get("population_growth_rate", 1.5),
                         rental_yield=rental_yield,
-                        is_solar=False
+                        is_solar=is_solar
                     )
 
                     opportunity["portal_id"] = str(item_id)
                     opportunity["portal_url"] = url
                     opportunity["primary_portal"] = "Habitaclia"
+                    opportunity["estimated_reference_value"] = est_market_val
                     opportunity["discount_percentage"] = discount_vs_market
                     opportunity["estimated_monthly_rent"] = monthly_rent
+                    opportunity["gross_yield_btl"] = rental_yield
                     opportunity["rental_yield"] = rental_yield
                     opportunity["yield_score"] = yield_score
                     opportunity["yield_color"] = yield_color
