@@ -831,8 +831,21 @@ class MarketScraper:
         strategy = item.get("strategy", "HOUSE_FLIPPING")
         prop_type = (item.get("property_type") or "").lower()
         desc_text = (item.get("description") or "").lower()
-        is_solar = (strategy == "LAND_DEVELOPMENT" or any(k in prop_type for k in ["solar", "terreno", "suelo", "parcela"]) or any(k in address.lower() for k in ["solar", "terreno", "suelo", "parcela"]))
-        land_type = "RÚSTICO" if any(k in prop_type or k in desc_text or k in address.lower() for k in ["rústico", "rustico", "agrario", "no urbanizable", "secano", "regadio", "regadío"]) else item.get("land_type", "URBANO")
+        title_text = (item.get("title") or "").lower()
+        addr_text = (item.get("address") or "").lower()
+
+        # Detección rigurosa de Suelo / Finca Rústica
+        is_rustic = any(k in prop_type or k in desc_text or k in title_text or k in addr_text for k in [
+            "rústico", "rustico", "rústica", "rustica", "agrario", "no urbanizable", "secano", "regadio", "regadío", "finca"
+        ]) or surface > 2500.0
+
+        is_solar = is_rustic or (strategy == "LAND_DEVELOPMENT" or any(k in prop_type or k in desc_text or k in title_text or k in addr_text for k in ["solar", "terreno", "suelo", "parcela"]))
+        land_type = "RÚSTICO" if is_rustic else item.get("land_type", "URBANO")
+
+        if is_rustic:
+            item["property_type"] = "Finca Rústica"
+            item["land_type"] = "RÚSTICO"
+            item["is_solar"] = True
 
         meso_m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
             province_str=province,
@@ -843,7 +856,7 @@ class MarketScraper:
             is_solar=is_solar,
             postal_code=postal_code
         )
-        area_m2_price = meso_m2_price or float(census.get("area_m2_price") or 3400.0)
+        area_m2_price = meso_m2_price or float(census.get("area_m2_price") or (25.0 if is_rustic else 3400.0))
         census["area_m2_price"] = area_m2_price
         item["area_m2_price"] = area_m2_price
 
@@ -855,7 +868,17 @@ class MarketScraper:
             if coords:
                 lat, lon = coords
 
-        estimated_market_value = round(surface * area_m2_price, 2)
+        has_house = any(k in desc_text or k in title_text or k in prop_type for k in ["casa", "chalet", "vivienda", "edificación", "edificacion"])
+
+        # Valoración de mercado
+        if is_rustic:
+            # En fincas rústicas, el suelo cotiza a 10-35 €/m2. Si tiene vivienda construida, se suma el valor de la edificación
+            house_sqm = float(item.get("built_area") or item.get("house_m2") or 140.0) if has_house else 0.0
+            house_val = house_sqm * 650.0  # Valor constructivo rural consolidado
+            land_val = surface * area_m2_price  # p.ej. 28.000 m2 * 20 €/m2 = 560.000 €
+            estimated_market_value = round(house_val + land_val, 2)
+        else:
+            estimated_market_value = round(surface * area_m2_price, 2)
 
         potential_profit = max(0.0, round(estimated_market_value - min_price, 2))
         discount_vs_market = round(max(0.0, ((estimated_market_value - min_price) / estimated_market_value) * 100), 1) if estimated_market_value > 0 else 0.0
@@ -864,25 +887,41 @@ class MarketScraper:
 
         from app.engine.rental_reference import RentalReferenceEngine
 
-        if is_solar:
-            monthly_rent = 0.0
-            rental_yield = 0.0
-            yield_score = 0.0
-            yield_color = "rojo"
-            btl_score = None
-            btl_color = None
+        if is_rustic or is_solar:
+            if has_house and min_price > 0:
+                # Alquiler residencial estimado únicamente sobre los m2 de la vivienda (120-180 m2), nunca sobre la finca rústica
+                house_sqm = float(item.get("built_area") or item.get("house_m2") or 140.0)
+                ref_rental_sqm = min(11.5, RentalReferenceEngine.get_rental_price_m2(postal_code or "28001", province))
+                monthly_rent = round(house_sqm * ref_rental_sqm, 2)
+                calc_yield = RentalReferenceEngine.calculate_rental_yield(
+                    listing_price=min_price,
+                    monthly_rent=monthly_rent
+                )
+                rental_yield = round(max(3.5, min(14.0, calc_yield)), 2)
+                yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                btl_score = yield_score
+                btl_color = yield_color
+            else:
+                monthly_rent = 0.0
+                rental_yield = 0.0
+                yield_score = 0.0
+                yield_color = "rojo"
+                btl_score = None
+                btl_color = None
         else:
+            # Inmueble urbano residencial
             monthly_rent = item.get("estimated_monthly_rent") or RentalReferenceEngine.estimate_monthly_rent(
-                surface_m2=surface,
+                surface_m2=min(450.0, surface),
                 postal_code=item.get("postal_code") or "28001",
                 province=item.get("province") or "Madrid",
                 floor=item.get("floor") or "2ª planta",
                 has_elevator=item.get("has_elevator", True)
             )
-            rental_yield = item.get("rental_yield") or RentalReferenceEngine.calculate_rental_yield(
+            calc_yield = item.get("rental_yield") or RentalReferenceEngine.calculate_rental_yield(
                 listing_price=min_price,
                 monthly_rent=monthly_rent
             )
+            rental_yield = round(max(1.0, min(18.0, calc_yield)), 2)
             yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
             btl_score = yield_score
             btl_color = yield_color

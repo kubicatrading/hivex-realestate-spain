@@ -708,6 +708,8 @@ class AdvisorEngine:
                         "bathrooms": item.get("bathrooms") or 0,
                         "area_m2_price": float(item.get("area_m2_price") or 0.0),
                         "discount_vs_market": disc,
+                        "land_type": item.get("land_type", "URBANO"),
+                        "is_solar": item.get("is_solar", False),
                         "url": item.get("url") or item.get("portal_url") or "",
                         "portal_url": item.get("portal_url") or item.get("url") or "",
                         "images": item.get("images") or []
@@ -1812,9 +1814,16 @@ class AdvisorEngine:
         intro_lines.append(f"• <b>Zona:</b> {html.escape(zone_title)}")
         if matched_opps:
             intro_lines.append(f"• <b>Precio medio de entrada:</b> {avg_price:,.0f} €")
-            intro_lines.append(f"• <b>Descuento medio vs Ref. MIVAU:</b> -{avg_disc:.1f}%")
+            ref_label = "Ref. Rústica / Mercado" if any(o.get("land_type") == "RÚSTICO" or o.get("is_solar") for o in matched_opps) else "Ref. MIVAU"
+            if avg_disc > 0:
+                intro_lines.append(f"• <b>Descuento medio vs {ref_label}:</b> {avg_disc:.1f}%")
+            elif avg_disc < 0:
+                intro_lines.append(f"• <b>Prima sobre {ref_label}:</b> +{abs(avg_disc):.1f}%")
+            else:
+                intro_lines.append(f"• <b>Precio en línea con {ref_label}</b>")
             if avg_yield > 0:
-                intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{avg_yield:.1f}% Yield</b>")
+                clean_yield = min(18.0, avg_yield)
+                intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{clean_yield:.1f}% Yield</b>")
             intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
         else:
             internal_m = self.get_hivex_internal_zone_metrics(prov, criteria.get("zone_or_neighborhood"))
@@ -1881,16 +1890,20 @@ class AdvisorEngine:
         explicit_show_verbs = [
             "muéstrame", "muestrame", "enséñame", "enseñame", "dame los pisos", "dame las fichas",
             "dame las oportunidades", "ver pisos", "ver oportunidades", "ver fichas", "listar",
-            "listado de", "pásame las fichas", "quiero ver", "sácame las", "sacame las",
+            "listado de", "pásame las fichas", "pásame", "pasame", "quiero ver", "sácame las", "sacame las",
             "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
             "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
-            "busca también", "busca tambien", "busca", "buscar", "encuentra", "rastrea", "rastrear",
-            "localiza", "dame", "trae", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
+            "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "encuentra", "encuéntrame",
+            "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame", "dame", "trae", "tráeme", "traeme",
+            "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
             "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
-            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "búsqueda de", "busqueda de",
-            "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica"
+            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "búsqueda de", "busqueda de", "búsqueda", "busqueda",
+            "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica", "pisos", "chalets"
         ]
-        is_explicit_listing_request = any(v in prompt_lower for v in explicit_show_verbs)
+        is_explicit_listing_request = (
+            criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
+            or any(v in prompt_lower for v in explicit_show_verbs)
+        )
 
         # 2. Preguntas cuantitativas de conteo o volumen (ej: "¿Cuántas oportunidades tenemos en Carabanchel?")
         is_count_query = any(w in prompt_lower for w in [
@@ -2014,6 +2027,23 @@ class AdvisorEngine:
                             )
                         except Exception as e_pers_opps:
                             logger.debug(f"Aviso persistiendo conocimiento externo de oportunidades: {e_pers_opps}")
+
+            # Si el filtro ultraestricto arrojó menos de target_count (20) oportunidades,
+            # relajar criterios secundarios para completar el cupo normativo de 20 fichas de HIVEX
+            if len(matched_opps) < target_count:
+                seen_ids = {str(o.get("id")) for o in matched_opps}
+                relaxed_criteria = dict(criteria)
+                relaxed_criteria.pop("keywords_include", None)
+                relaxed_criteria.pop("min_sqm", None)
+                relaxed_opps = self.filter_opportunities(all_opps, relaxed_criteria)
+                for ro in relaxed_opps:
+                    if str(ro.get("id")) not in seen_ids:
+                        matched_opps.append(ro)
+                        seen_ids.add(str(ro.get("id")))
+                        if len(matched_opps) >= target_count:
+                            break
+                if len(matched_opps) >= target_count:
+                    is_relaxed = True
 
             # Recortar al top solicitado (hasta target_count, máximo 20)
             matched_opps = matched_opps[:target_count]

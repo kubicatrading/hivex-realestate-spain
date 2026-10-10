@@ -226,9 +226,12 @@ class RentalReferenceEngine:
     ) -> float:
         """
         Calcula el alquiler mensual de mercado (€/mes):
-        Superficie (m2) * Precio m2 Alquiler (CP) * Factor de Altura/Ascensor
+        Superficie (m2) * Precio m2 Alquiler (CP) * Factor de Altura/Ascensor.
+        La superficie computable para alquiler residencial se acota a 450 m2 para
+        prevenir aberraciones matemáticas en parcelas, naves o fincas rústicas.
         """
-        surf = surface_m2 if surface_m2 and surface_m2 > 0 else 80.0
+        raw_surf = surface_m2 if surface_m2 and surface_m2 > 0 else 80.0
+        surf = min(450.0, raw_surf)
         ref_price_m2 = cls.get_rental_price_m2(postal_code, province)
         factor = cls.calculate_height_factor(floor, has_elevator)
         monthly_rent = surf * ref_price_m2 * factor
@@ -242,7 +245,8 @@ class RentalReferenceEngine:
     ) -> float:
         """
         Calcula el porcentaje de rentabilidad bruta anual:
-        (Alquiler Anual) / (Precio Adquisición + 10% gastos de notaría y escrituras) * 100
+        (Alquiler Anual) / (Precio Adquisición + 10% gastos de notaría y escrituras) * 100.
+        Se aplica un tope de consistencia de mercado del 25.0% para evitar distorsiones.
         """
         if not listing_price or listing_price <= 0:
             return 0.0
@@ -250,7 +254,7 @@ class RentalReferenceEngine:
         total_acquisition_cost = listing_price * 1.10 # +10% gastos
         annual_rent = monthly_rent * 12.0
         yield_pct = (annual_rent / total_acquisition_cost) * 100.0
-        return round(yield_pct, 2)
+        return round(min(25.0, yield_pct), 2)
 
     @classmethod
     def evaluate_yield(cls, rental_yield: float) -> Tuple[float, str]:
