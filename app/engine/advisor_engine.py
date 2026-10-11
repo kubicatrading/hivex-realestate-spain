@@ -966,39 +966,39 @@ class AdvisorEngine:
         }
 
     @classmethod
-    def allocate_portal_counts(cls, total_count: int) -> Dict[str, int]:
+    def allocate_portal_counts(
+        cls,
+        total_count: int,
+        query_text: str = "",
+        property_type: Optional[str] = None,
+        province: Optional[str] = None,
+        zone: Optional[str] = None
+    ) -> Dict[str, int]:
         """
-        Distribuye total_count (ej: 20) proporcionalmente entre los portales
-        respetando el peso que tiene cada portal actualmente en la plataforma.
+        Distribuye total_count (ej: 20) dinámicamente entre los 6 portales inmobiliarios
+        (Idealista, Fotocasa, Habitaclia, Pisos.com, Milanuncios, YaEncontré)
+        utilizando la Matriz de Ponderación Dinámica según tipología de activo y geografía.
         """
-        raw_weights = cls.get_market_portal_weights()
-        portals = ["Idealista", "Habitaclia", "Fotocasa", "Pisos.com"]
-        weights = {}
-        for p in portals:
-            matched = next((k for k in raw_weights if k.lower() == p.lower()), None)
-            weights[p] = raw_weights[matched] if matched else (
-                0.35 if p == "Idealista" else 0.29 if p == "Habitaclia" else 0.25 if p == "Fotocasa" else 0.11
+        try:
+            from app.engine.portal_strategy import PortalStrategyEngine
+            return PortalStrategyEngine.allocate_portal_quotas(
+                total_count=total_count,
+                query_text=query_text,
+                property_type=property_type,
+                province=province,
+                zone=zone
             )
-        total_w = sum(weights.values())
-        weights = {p: w / total_w for p, w in weights.items()}
-
-        allocations = {p: int(round(total_count * weights[p])) for p in portals}
-
-        # Ajuste para cuadrar exactamente total_count
-        diff = total_count - sum(allocations.values())
-        if diff != 0:
-            allocations["Idealista"] += diff
-
-        # Si total_count >= 4, asegurar al menos 1 por portal
-        if total_count >= 4:
-            for p in portals:
-                if allocations[p] < 1:
-                    allocations[p] = 1
-            diff = total_count - sum(allocations.values())
-            allocations["Idealista"] += diff
-
-        logger.info(f"[Portal Quota] Reparto para {total_count} oportunidades según peso de plataforma: {allocations}")
-        return allocations
+        except Exception as e_strat:
+            logger.warning(f"Fallo calculando cuotas con PortalStrategyEngine: {e_strat}")
+            # Fallback seguro proporcional
+            return {
+                "Idealista": max(1, int(total_count * 0.35)),
+                "Fotocasa": max(1, int(total_count * 0.25)),
+                "Habitaclia": max(1, int(total_count * 0.20)),
+                "Pisos.com": max(1, int(total_count * 0.10)),
+                "Milanuncios": max(1, int(total_count * 0.07)),
+                "YaEncontré": max(0, total_count - (int(total_count * 0.35) + int(total_count * 0.25) + int(total_count * 0.20) + int(total_count * 0.10) + int(total_count * 0.07)))
+            }
 
     async def sync_portal_opportunities_on_demand(
         self,
@@ -1008,11 +1008,12 @@ class AdvisorEngine:
         db: Optional[Session] = None
     ) -> List[Dict[str, Any]]:
         """
-        Sincroniza y despierta los conectores de los portales bajo demanda.
+        Sincroniza y despierta los conectores de los portales bajo demanda para Telegram.
         REGLA DE ORO DE HIVEX: CERO DATOS SIMULADOS NI FALLBACKS INVENTADOS.
-        Utiliza a Gemini Flash Cascade para interpretar dinámicamente la consulta
-        del usuario y construir la estrategia y URLs exactas de scraping sobre portales
-        (Idealista, Fotocasa, Habitaclia, Pisos.com).
+        Aplica la Matriz Dinámica de Ponderación (PortalStrategyEngine) para diversificar
+        la prospección entre Idealista, Fotocasa, Habitaclia, Pisos.com, Milanuncios y YaEncontré.
+        Para Telegram Out-of-HIVEX, Idealista opera con rotación de IPs residenciales Supadata
+        con total libertad de cuota para capturar hasta target_count oportunidades reales.
         Extrae datos reales con Supadata/parsers, enriquece con métricas HIVEX (BTL, score, MIVAU)
         y persiste permanentemente en plataforma (verified_market_catalog.json y PostgreSQL).
         """
@@ -1020,11 +1021,25 @@ class AdvisorEngine:
         prov = criteria.get("province") or "Madrid"
         zone = criteria.get("zone_or_neighborhood") or ""
         max_p = criteria.get("max_price")
+        prop_type = criteria.get("property_type") or "Vivienda"
         user_query = prompt_text or criteria.get("original_query") or f"inmuebles en venta en {zone} {prov}"
 
         discovered_opps: List[Dict[str, Any]] = []
 
-        # 1. GENERAR ESTRATEGIA DE SCRAPING CON GEMINI FLASH CASCADE
+        # 1. CALCULAR CUOTAS ASIGNADAS POR PORTAL SEGÚN LA MATRIZ DINÁMICA
+        portal_quotas = self.allocate_portal_counts(
+            total_count=target_count,
+            query_text=user_query,
+            property_type=prop_type,
+            province=prov,
+            zone=zone
+        )
+        logger.info(f"[Advisor Sync] Cuotas calculadas por matriz para N={target_count}: {portal_quotas}")
+
+        # Filtrar portales con cuota asignada > 0
+        active_target_portals = [p for p, q in portal_quotas.items() if q > 0]
+
+        # 2. GENERAR ESTRATEGIA DE SCRAPING CON GEMINI FLASH CASCADE
         try:
             builder_prompt = (
                 f"Eres el arquitecto de web scraping y prospección inmobiliaria en vivo de HIVEX España.\n"
@@ -1033,16 +1048,18 @@ class AdvisorEngine:
                 f"- Provincia: '{prov}'\n"
                 f"- Micro-zona / Barrio / Calle: '{zone}'\n"
                 f"- Precio Máximo: '{max_p or 'Sin límite'}'\n"
-                f"- Tipo de Inmueble: '{criteria.get('property_type') or 'Vivienda'}'\n"
-                f"- Portal preferente: '{criteria.get('portal_filter') or 'Todos (Idealista, Fotocasa, Habitaclia, Pisos.com)'}'\n\n"
-                f"Construye las URLs de búsqueda exactas en portales inmobiliarios españoles (Idealista, Fotocasa, Habitaclia, Pisos.com) con los filtros de zona, precio y rebajas aplicados.\n"
+                f"- Tipo de Inmueble: '{prop_type}'\n"
+                f"- Portales activos a consultar y cuota requerida: {portal_quotas}\n\n"
+                f"Construye las URLs de búsqueda exactas en portales inmobiliarios españoles (Idealista, Fotocasa, Habitaclia, Pisos.com, Milanuncios, YaEncontré) con los filtros de zona, precio y rebajas aplicados.\n"
                 f"Responde estrictamente en formato JSON con la siguiente estructura:\n"
                 f"{{\n"
                 f'  "target_portals": [\n'
-                f'    {{"portal": "Idealista", "url": "https://www.idealista.com/venta-viviendas/...", "zone": "{zone or prov}"}},\n'
-                f'    {{"portal": "Fotocasa", "url": "https://www.fotocasa.es/es/comprar/viviendas/...", "zone": "{zone or prov}"}},\n'
-                f'    {{"portal": "Habitaclia", "url": "https://www.habitaclia.com/comprar/viviendas/...", "zone": "{zone or prov}"}},\n'
-                f'    {{"portal": "Pisos.com", "url": "https://www.pisos.com/venta/pisos-...", "zone": "{zone or prov}"}}\n'
+                f'    {{"portal": "Idealista", "url": "https://www.idealista.com/venta-viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Idealista", 4)}}},\n'
+                f'    {{"portal": "Fotocasa", "url": "https://www.fotocasa.es/es/comprar/viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Fotocasa", 3)}}},\n'
+                f'    {{"portal": "Habitaclia", "url": "https://www.habitaclia.com/comprar/viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Habitaclia", 3)}}},\n'
+                f'    {{"portal": "Pisos.com", "url": "https://www.pisos.com/venta/pisos-...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Pisos.com", 2)}}},\n'
+                f'    {{"portal": "Milanuncios", "url": "https://www.milanuncios.com/fincas-rusticas-en-...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Milanuncios", 6)}}},\n'
+                f'    {{"portal": "YaEncontré", "url": "https://www.yaencontre.com/venta/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("YaEncontré", 1)}}}\n'
                 f'  ]\n'
                 f"}}"
             )
@@ -1055,13 +1072,18 @@ class AdvisorEngine:
                 parsed_spec = json.loads(match.group(0))
                 targets = parsed_spec.get("target_portals", [])
 
-            # 2. EJECUTAR SCRAPING EN VIVO PARA CADA PORTAL OBJETIVO
+            # Filtrar solo los portales que tengan cuota asignada
+            targets = [t for t in targets if portal_quotas.get(t.get("portal", ""), 0) > 0]
+
+            # 3. EJECUTAR SCRAPING EN VIVO PARA CADA PORTAL OBJETIVO
             from app.connectors.supadata_client import SupadataClient
             from app.connectors.portal_parsers import (
                 IdealistaMarkdownParser,
                 HabitacliaMarkdownParser,
                 FotocasaMarkdownParser,
                 PisosComMarkdownParser,
+                MilanunciosMarkdownParser,
+                YaEncontreMarkdownParser,
                 resolve_meso_market_price_2x2,
                 extract_postal_code
             )
@@ -1085,7 +1107,7 @@ class AdvisorEngine:
                 except Exception as e_supa:
                     logger.warning(f"[Advisor Sync] Supadata excepción para {p_name}: {e_supa}")
 
-                if not content and any(k in p_name for k in ["fotocasa", "habitaclia", "pisos"]):
+                if not content and any(k in p_name for k in ["fotocasa", "habitaclia", "pisos", "milanuncios", "yaencontre"]):
                     # Fallback directo con httpx (0 créditos Supadata)
                     try:
                         headers = {
@@ -1094,7 +1116,7 @@ class AdvisorEngine:
                             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
                         }
                         direct_resp = await asyncio.to_thread(
-                            httpx.get, target_url, headers=headers, follow_redirects=True, timeout=8.0
+                            httpx.get, target_url, headers=headers, follow_redirects=True, timeout=12.0
                         )
                         if direct_resp.status_code == 200 and len(direct_resp.text) > 500:
                             content = direct_resp.text
@@ -1113,6 +1135,10 @@ class AdvisorEngine:
                     parsed_items = HabitacliaMarkdownParser.parse_listings(content, default_province=prov)
                 elif "pisos" in p_name:
                     parsed_items = PisosComMarkdownParser.parse_listings(content, default_province=prov)
+                elif "milanuncios" in p_name:
+                    parsed_items = MilanunciosMarkdownParser.parse_listings(content, default_province=prov)
+                elif "yaencontre" in p_name:
+                    parsed_items = YaEncontreMarkdownParser.parse_listings(content, default_province=prov)
                 else:
                     parsed_items = []
 
@@ -1142,7 +1168,7 @@ class AdvisorEngine:
                 return results
 
             # Ejecutar scraping de todos los portales objetivo en paralelo
-            scrape_tasks = [_scrape_single_target(t) for t in targets[:4]]
+            scrape_tasks = [_scrape_single_target(t) for t in targets]
             batch_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
             for b in batch_results:
                 if isinstance(b, list):

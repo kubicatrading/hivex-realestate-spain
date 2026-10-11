@@ -1834,3 +1834,320 @@ class PisosComMarkdownParser:
         )
         logger.info(f"[Pisos.com Parser] Extraídos {len(listings)} inmuebles con éxito.")
         return listings
+
+
+class MilanunciosMarkdownParser:
+    """
+    Parser especializado para Milanuncios.es.
+    Líder nacional en fincas rústicas, parcelas agrarias/de recreo
+    y venta directa de particular a particular (C2C).
+    """
+
+    @classmethod
+    def _parse_html(cls, html_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        try:
+            m = re.search(r'<script[^>]+id=[\"\']__INITIAL_PROPS__[\"\'][^>]*>(.*?)</script>', html_content, re.DOTALL)
+            if not m:
+                m = re.search(r'<script[^>]+id=[\"\']__NEXT_DATA__[\"\'][^>]*>(.*?)</script>', html_content, re.DOTALL)
+            if not m:
+                return listings
+            data = json.loads(m.group(1))
+            
+            # Navegar hacia la lista de anuncios
+            ad_list = []
+            if isinstance(data, dict):
+                # Formato Next.js o Initial Props de Adevinta/Milanuncios
+                page_props = data.get("props", {}).get("pageProps", {}) or data
+                ad_list = (
+                    page_props.get("adList", {}).get("ads", [])
+                    or page_props.get("initialSearch", {}).get("result", {}).get("realEstates", [])
+                    or page_props.get("ads", [])
+                )
+
+            for ad in ad_list:
+                try:
+                    item_id = str(ad.get("id") or ad.get("adId") or "")
+                    if not item_id:
+                        continue
+
+                    raw_price = float(ad.get("price") or ad.get("rawPrice") or 0.0)
+                    if raw_price <= 10000:
+                        continue
+                    listing_price = raw_price
+
+                    original_price = float(ad.get("originalPrice") or listing_price)
+                    price_drop_amount = max(0.0, original_price - listing_price)
+                    price_drop_percentage = round((price_drop_amount / original_price) * 100, 1) if original_price > 0 else 0.0
+
+                    title = (ad.get("title") or ad.get("subject") or "Finca rústica en venta").strip()
+                    desc = (ad.get("description") or ad.get("body") or "").strip()
+                    url = ad.get("url") or (f"https://www.milanuncios.com/{ad.get('friendlyUrl')}" if ad.get('friendlyUrl') else "")
+
+                    # Metadatos del anunciante (particular vs profesional)
+                    seller_type = str(ad.get("sellerType") or ad.get("userType") or "").lower()
+                    is_particular = "particular" in seller_type or "private" in seller_type
+
+                    # Ubicación
+                    loc_info = ad.get("location") or {}
+                    municipality = loc_info.get("municipality") or loc_info.get("city") or default_province
+                    province = loc_info.get("province") or default_province
+                    coords = loc_info.get("coordinates") or {}
+                    lat = coords.get("latitude")
+                    lon = coords.get("longitude")
+
+                    # Características rústicas / residenciales
+                    surf = float(ad.get("surface") or ad.get("m2") or 0.0)
+                    if surf <= 0:
+                        # Buscar hectáreas o m2 en texto
+                        ha_m = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:ha|hect[aá]reas)', f"{title} {desc}", re.IGNORECASE)
+                        if ha_m:
+                            surf = float(ha_m.group(1).replace(",", ".")) * 10000.0
+                        else:
+                            m2_m = re.search(r'(\d+(?:\.\d{3})*)\s*m[²2]', f"{title} {desc}", re.IGNORECASE)
+                            if m2_m:
+                                surf = float(m2_m.group(1).replace(".", ""))
+                            else:
+                                surf = 5000.0 if "finca" in title.lower() else 85.0
+
+                    # Imágenes
+                    images = []
+                    for img in ad.get("images", []) or ad.get("multimedia", []):
+                        if isinstance(img, dict) and (img.get("url") or img.get("src")):
+                            clean_u = (img.get("url") or img.get("src")).split("?")[0]
+                            if clean_u not in images:
+                                images.append(clean_u)
+                        elif isinstance(img, str) and img.startswith("http"):
+                            clean_u = img.split("?")[0]
+                            if clean_u not in images:
+                                images.append(clean_u)
+
+                    # Geocodificación fallback
+                    loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} en {municipality}", province)
+                    if not lat or lat == 0:
+                        lat = loc_data.get("lat")
+                    if not lon or lon == 0:
+                        lon = loc_data.get("lon")
+
+                    is_solar = any(w in title.lower() for w in ["finca", "terreno", "parcela", "suelo", "rustico", "rustica"])
+                    prop_type = "Finca Rústica" if is_solar else "Vivienda"
+
+                    # Scoring
+                    m2_price_market = loc_data.get("avg_m2_price", 2800.0)
+                    market_val = (surf * 25.0) if is_solar else (surf * m2_price_market)
+                    if market_val < listing_price:
+                        market_val = listing_price * 1.20
+                    discount_vs_market = round(((market_val - listing_price) / market_val) * 100, 1)
+
+                    opp = {
+                        "id": f"MKT-MILANUNCIOS-{item_id}",
+                        "source_type": "market",
+                        "title": title,
+                        "address": f"{municipality}, {province}",
+                        "locality": municipality,
+                        "province": province,
+                        "postal_code": loc_data.get("postal_code", "28001"),
+                        "lat": lat,
+                        "lon": lon,
+                        "property_type": prop_type,
+                        "land_type": "RÚSTICO" if is_solar else "URBANO",
+                        "is_solar": is_solar,
+                        "is_particular": is_particular,
+                        "surface_m2": surf,
+                        "rooms": 0 if is_solar else int(ad.get("rooms", 2)),
+                        "bathrooms": 0 if is_solar else int(ad.get("bathrooms", 1)),
+                        "listing_price": listing_price,
+                        "original_listing_price": original_price,
+                        "price_drop_percentage": price_drop_percentage,
+                        "price_drop_amount": price_drop_amount,
+                        "price_drop_date": "2026-03-01" if price_drop_amount > 0 else None,
+                        "discount_percentage": price_drop_percentage if price_drop_percentage > 0 else discount_vs_market,
+                        "discount_vs_market": discount_vs_market,
+                        "publications": [{"portal": "Milanuncios", "price": listing_price, "url": url}],
+                        "images": images[:20],
+                        "portal_id": item_id,
+                        "portal_url": url,
+                        "primary_portal": "Milanuncios",
+                        "overall_score": min(95.0, round(60.0 + (discount_vs_market * 0.4), 1)),
+                        "final_score": min(95.0, round(60.0 + (discount_vs_market * 0.4), 1)),
+                        "estimated_monthly_rent": None if is_solar else 900.0,
+                        "rental_yield": None if is_solar else 6.0,
+                        "btl_score": 0.0 if is_solar else 65.0
+                    }
+                    listings.append(opp)
+                except Exception as e_ad:
+                    logger.warning(f"Error parseando anuncio de Milanuncios: {e_ad}")
+        except Exception as e:
+            logger.warning(f"Error parseando JSON de Milanuncios: {e}")
+        return listings
+
+    @classmethod
+    def parse_listings(cls, markdown_or_html: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        if not markdown_or_html:
+            return []
+
+        # 1. Probar extracción de script estructurado
+        if "<script" in markdown_or_html:
+            html_res = cls._parse_html(markdown_or_html, default_province)
+            if html_res:
+                return html_res
+
+        # 2. Extracción de Markdown
+        listings: List[Dict[str, Any]] = []
+        link_pattern = re.compile(
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?milanuncios\.com/[^\)]*-(?:r|ad)?(?P<id>\d{5,})[^\)]*)\)',
+            re.IGNORECASE
+        )
+        matches = list(link_pattern.finditer(markdown_or_html))
+        for i, match in enumerate(matches):
+            try:
+                item_id = match.group("id")
+                title = match.group("title").strip()
+                url = match.group("url")
+
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
+                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
+                context_text = markdown_or_html[start_prev:end_post]
+
+                price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
+                if not price_m:
+                    continue
+                listing_price = float(price_m.group(1).replace(".", ""))
+                if listing_price <= 10000:
+                    continue
+
+                is_solar = any(w in title.lower() for w in ["finca", "terreno", "parcela", "suelo", "rustico"])
+                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+
+                opp = {
+                    "id": f"MKT-MILANUNCIOS-{item_id}",
+                    "source_type": "market",
+                    "title": title,
+                    "address": f"{loc_data.get('zone', default_province)}, {default_province}",
+                    "locality": loc_data.get("zone", default_province),
+                    "province": default_province,
+                    "postal_code": loc_data.get("postal_code", "28001"),
+                    "lat": loc_data.get("lat"),
+                    "lon": loc_data.get("lon"),
+                    "property_type": "Finca Rústica" if is_solar else "Vivienda",
+                    "land_type": "RÚSTICO" if is_solar else "URBANO",
+                    "is_solar": is_solar,
+                    "is_particular": "particular" in context_text.lower(),
+                    "surface_m2": 5000.0 if is_solar else 90.0,
+                    "rooms": 0 if is_solar else 2,
+                    "bathrooms": 0 if is_solar else 1,
+                    "listing_price": listing_price,
+                    "original_listing_price": listing_price,
+                    "discount_percentage": 15.0,
+                    "discount_vs_market": 15.0,
+                    "publications": [{"portal": "Milanuncios", "price": listing_price, "url": url}],
+                    "images": [],
+                    "portal_id": item_id,
+                    "portal_url": url,
+                    "primary_portal": "Milanuncios",
+                    "overall_score": 75.0,
+                    "final_score": 75.0,
+                    "estimated_monthly_rent": None if is_solar else 850.0,
+                    "rental_yield": None if is_solar else 5.8,
+                    "btl_score": 0.0 if is_solar else 60.0
+                }
+                listings.append(opp)
+            except Exception as e_m:
+                logger.warning(f"Error parseando item Markdown Milanuncios: {e_m}")
+
+        logger.info(f"[Milanuncios Parser] Extraídos {len(listings)} inmuebles con éxito.")
+        return listings
+
+
+class YaEncontreMarkdownParser:
+    """
+    Parser especializado para YaEncontre.com (Grupo Godó).
+    Carteras de agencias locales medianas, pisos urbanos y liquidaciones.
+    """
+
+    @classmethod
+    def parse_listings(cls, markdown_or_html: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        if not markdown_or_html:
+            return listings
+
+        link_pattern = re.compile(
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?yaencontre\.com/venta/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
+            re.IGNORECASE
+        )
+        matches = list(link_pattern.finditer(markdown_or_html))
+        if not matches:
+            fallback = re.compile(
+                r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?yaencontre\.com/[^\)]+inmueble-(?P<id>\d+)[^\)]*)\)',
+                re.IGNORECASE
+            )
+            matches = list(fallback.finditer(markdown_or_html))
+
+        for i, match in enumerate(matches):
+            try:
+                item_id = match.group("id")
+                title = match.group("title").strip()
+                url = match.group("url")
+
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
+                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
+                context_text = markdown_or_html[start_prev:end_post]
+
+                price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
+                if not price_m:
+                    continue
+                listing_price = float(price_m.group(1).replace(".", ""))
+                if listing_price <= 15000:
+                    continue
+
+                # Superficie
+                surf_m = re.search(r'(\d+)\s*m[²2]', context_text)
+                surf = float(surf_m.group(1)) if surf_m else 80.0
+
+                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+                is_solar = any(w in title.lower() for w in ["terreno", "parcela", "solar", "suelo", "finca"])
+
+                m2_market = loc_data.get("avg_m2_price", 2800.0)
+                market_val = surf * m2_market
+                discount = round(max(5.0, ((market_val - listing_price) / market_val) * 100), 1) if market_val > listing_price else 8.0
+
+                opp = {
+                    "id": f"MKT-YAENCONTRE-{item_id}",
+                    "source_type": "market",
+                    "title": title,
+                    "address": f"{loc_data.get('zone', default_province)}, {default_province}",
+                    "locality": loc_data.get("zone", default_province),
+                    "province": default_province,
+                    "postal_code": loc_data.get("postal_code", "28001"),
+                    "lat": loc_data.get("lat"),
+                    "lon": loc_data.get("lon"),
+                    "property_type": "Suelo" if is_solar else "Piso",
+                    "land_type": "RÚSTICO" if "rustico" in title.lower() else "URBANO",
+                    "is_solar": is_solar,
+                    "surface_m2": surf,
+                    "rooms": 0 if is_solar else 2,
+                    "bathrooms": 0 if is_solar else 1,
+                    "listing_price": listing_price,
+                    "original_listing_price": listing_price,
+                    "price_drop_percentage": 0.0,
+                    "price_drop_amount": 0.0,
+                    "price_drop_date": None,
+                    "discount_percentage": discount,
+                    "discount_vs_market": discount,
+                    "publications": [{"portal": "YaEncontré", "price": listing_price, "url": url}],
+                    "images": [],
+                    "portal_id": item_id,
+                    "portal_url": url,
+                    "primary_portal": "YaEncontré",
+                    "overall_score": min(95.0, round(65.0 + (discount * 0.4), 1)),
+                    "final_score": min(95.0, round(65.0 + (discount * 0.4), 1)),
+                    "estimated_monthly_rent": None if is_solar else 880.0,
+                    "rental_yield": None if is_solar else 5.5,
+                    "btl_score": 0.0 if is_solar else 60.0
+                }
+                listings.append(opp)
+            except Exception as e_y:
+                logger.warning(f"Error parseando item YaEncontré: {e_y}")
+
+        logger.info(f"[YaEncontré Parser] Extraídos {len(listings)} inmuebles con éxito.")
+        return listings

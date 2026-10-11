@@ -28,7 +28,9 @@ from app.connectors.portal_parsers import (
     IdealistaMarkdownParser,
     HabitacliaMarkdownParser,
     FotocasaMarkdownParser,
-    PisosComMarkdownParser
+    PisosComMarkdownParser,
+    MilanunciosMarkdownParser,
+    YaEncontreMarkdownParser
 )
 from app.engine.meso_market_price import resolve_meso_market_price_2x2
 
@@ -513,8 +515,8 @@ class MarketScraper:
                     clean_url = f"{clean_url}{sep}ordenado-por=rebajas-desc"
 
                 content = ""
-                # Portales directos con 0 créditos: Habitaclia, Fotocasa, Pisos.com
-                if portal_type in ["fotocasa", "habitaclia", "pisoscom"]:
+                # Portales directos con 0 créditos: Habitaclia, Fotocasa, Pisos.com, Milanuncios, YaEncontré
+                if portal_type in ["fotocasa", "habitaclia", "pisoscom", "milanuncios", "yaencontre"]:
                     try:
                         headers = {
                             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -546,6 +548,10 @@ class MarketScraper:
                     return FotocasaMarkdownParser.parse_listings(content, default_province=prov_name)
                 elif portal_type == "pisoscom":
                     return PisosComMarkdownParser.parse_listings(content, default_province=prov_name)
+                elif portal_type == "milanuncios":
+                    return MilanunciosMarkdownParser.parse_listings(content, default_province=prov_name)
+                elif portal_type == "yaencontre":
+                    return YaEncontreMarkdownParser.parse_listings(content, default_province=prov_name)
                 return []
             except Exception as e_w:
                 logger.warning(f"Aviso extrayendo {url}: {e_w}")
