@@ -855,6 +855,10 @@ class TelegramAdvisorBot:
 
         chat = message.get("chat", {})
         chat_id = chat.get("id")
+        user_id = from_user.get("id")
+        username = from_user.get("username")
+        first_name = from_user.get("first_name", "Usuario")
+
         sender_chat = message.get("sender_chat", {})
         if not user_id and sender_chat:
             user_id = sender_chat.get("id") or 1450113787
