@@ -85,6 +85,7 @@ def test_deduplicate_saved_consultations_db(test_db):
         telegram_chat_id="12345",
         title="🔍 Búsqueda: Pisos en Carabanchel",
         description="enséñame pisos en Carabanchel",
+        matched_opportunity_ids_json=json.dumps(["OPP-CARAB-1"]),
         matched_count=5,
         created_at=datetime(2026, 10, 10, 20, 0, 0)
     )

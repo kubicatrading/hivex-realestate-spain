@@ -199,6 +199,7 @@ class SavedConsultation(Base):
     is_alert = Column(Boolean, default=False)
     alert_frequency = Column(String(20), default="DAILY") # INSTANT, DAILY, WEEKLY
     is_active = Column(Boolean, default=True)
+    last_alert_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

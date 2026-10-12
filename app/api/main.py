@@ -349,7 +349,7 @@ def startup_event():
     except Exception as e_tg:
         print(f"Advertencia al iniciar Polling de Telegram: {e_tg}")
 
-    # 4. Deduplicar consultas redundantes en la base de datos para sanear el repositorio
+    # 4. Deduplicar y sanear consultas en la base de datos para asegurar módulo visual limpio
     try:
         from app.db.session import SessionLocal
         from app.engine.advisor_engine import AdvisorEngine
@@ -357,6 +357,13 @@ def startup_event():
             AdvisorEngine.deduplicate_saved_consultations(db_session)
     except Exception as e_dedup:
         print(f"Advertencia al ejecutar deduplicación de consultas en startup: {e_dedup}")
+
+    # 5. Iniciar Worker de Alertas Diarias para Consultas Activas
+    try:
+        from app.services.consultation_alerts_worker import consultation_alerts_worker
+        consultation_alerts_worker.start()
+    except Exception as e_alerts:
+        print(f"Advertencia al iniciar ConsultationAlertsWorker: {e_alerts}")
 
 @app.get("/")
 @app.get("/api/index.py")
@@ -987,7 +994,12 @@ def get_saved_consultations(
     """
     try:
         from app.engine.advisor_engine import advisor_engine, normalize_prompt_fingerprint
-        consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc(), SavedConsultation.id.desc()).all()
+        # REQUISITO 2: Filtrar exclusivamente aquellas consultas que implican entrega de oportunidades visuales
+        consultations = db.query(SavedConsultation).filter(
+            SavedConsultation.matched_opportunity_ids_json.isnot(None),
+            SavedConsultation.matched_opportunity_ids_json != "[]",
+            SavedConsultation.matched_count > 0
+        ).order_by(SavedConsultation.created_at.desc(), SavedConsultation.id.desc()).all()
 
         # Deduplicar en memoria para garantizar que el usuario nunca vea tarjetas idénticas redundantes
         seen_keys = set()
@@ -1049,6 +1061,29 @@ def get_saved_consultations(
         logger.error(f"Error en get_saved_consultations: {e}")
         return {"consultations": [], "total": 0, "error": str(e)}
 
+@app.patch("/api/v1/consultations/{consultation_id}/toggle-active")
+def toggle_consultation_active(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Activa o desactiva una búsqueda/alerta guardada."""
+    item = db.query(SavedConsultation).filter(SavedConsultation.id == consultation_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Consulta no encontrada")
+
+    item.is_active = not bool(item.is_active)
+    item.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    return {
+        "status": "success",
+        "id": item.id,
+        "is_active": item.is_active,
+        "title": item.title,
+        "message": f"Búsqueda {'activada' if item.is_active else 'pausada'} correctamente."
+    }
+
 @app.delete("/api/v1/consultations/{consultation_id}")
 def delete_consultation(
     consultation_id: int,
@@ -1079,10 +1114,21 @@ def trigger_deduplicate_consultations(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_optional)
 ):
-    """Ejecuta la deduplicación y limpieza de consultas redundantes en la base de datos."""
+    """Ejecuta la deduplicación y saneamiento de consultas en la base de datos."""
     from app.engine.advisor_engine import AdvisorEngine
     removed = AdvisorEngine.deduplicate_saved_consultations(db)
     return {"status": "success", "duplicates_removed": removed}
+
+@app.post("/api/v1/consultations/alerts/run")
+async def trigger_consultation_alerts(
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Ejecuta el rastreador diario de oportunidades para todas las alertas activas."""
+    from app.services.consultation_alerts_worker import consultation_alerts_worker
+    report = await consultation_alerts_worker.run_daily_scan(db=db, force=force)
+    return {"status": "success", "report": report}
 
 @app.post("/api/v1/consultations/{consultation_id}/refresh")
 async def refresh_consultation(

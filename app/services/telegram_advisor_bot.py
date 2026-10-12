@@ -7,6 +7,7 @@ interacción conversacional y ejecución del motor asesor inmobiliario.
 import os
 import re
 import json
+import html
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -878,6 +879,18 @@ class TelegramAdvisorBot:
                 return {"status": "already_authorized", "user": username}
 
             # 2. PROCESAR MENSAJE (TEXTO O AUDIO)
+            # REQUISITO 3: El bot es capaz de activar o inactivar una alerta/búsqueda desde el propio grupo de Telegram
+            if text_content:
+                alert_handled = await self.handle_toggle_alert_command(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    user_display_name=user_display_name,
+                    text_content=text_content,
+                    message_id=message_id
+                )
+                if alert_handled:
+                    return {"status": "alert_toggled", "user": user_display_name}
+
             audio_bytes = None
             audio_duration = None
             # Sintetizar prompt contextualizado si hay encadenamiento de mensajes o respuesta previa
@@ -990,6 +1003,120 @@ class TelegramAdvisorBot:
             logger.error(f"Error procesando update de Telegram: {e}", exc_info=True)
             await self.send_message(chat_id, f"⚠️ Ocurrió un error al procesar tu solicitud: {str(e)}")
             return {"status": "error", "error": str(e)}
+
+    async def handle_toggle_alert_command(
+        self,
+        chat_id: Any,
+        user_id: Any,
+        user_display_name: str,
+        text_content: str,
+        message_id: Optional[int] = None
+    ) -> bool:
+        """
+        Interpreta comandos conversacionales en el grupo de Telegram para activar,
+        pausar o listar búsquedas/alertas del módulo visual de oportunidades.
+        Retorna True si el mensaje fue un comando de alerta y se procesó.
+        """
+        import re
+        txt = text_content.strip().lower()
+
+        # Regex para detectar intenciones sobre alertas/búsquedas
+        list_match = bool(re.search(r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas)\b', txt))
+        
+        deact_verbs = r'(desactiva|desactivar|pausa|pausar|inactiva|inactivar|deten|detén|detener|cancela|cancelar|apaga|apagar|silencia|silenciar)'
+        act_verbs = r'(activa|activar|reanuda|reanudar|reactiva|reactivar|enciende|encender|habilita|habilitar)'
+        alert_nouns = r'(?:la\s+|las\s+|mi\s+|mis\s+)?(?:alerta|alertas|búsqueda|busqueda|búsquedas|busquedas|radar)'
+
+        is_deactivate = bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/pausar") or txt.startswith("/desactivar")
+        is_activate = bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/activar") or txt.startswith("/reanudar")
+
+        if not (list_match or is_deactivate or is_activate):
+            return False
+
+        with SessionLocal() as db:
+            from app.db.models import SavedConsultation
+            from sqlalchemy import or_
+
+            # Recuperar consultas para este chat o usuario
+            user_conds = [SavedConsultation.telegram_chat_id == str(chat_id)]
+            if user_display_name:
+                user_conds.append(SavedConsultation.user_name.ilike(user_display_name.strip()))
+
+            consultations = db.query(SavedConsultation).filter(
+                or_(*user_conds),
+                SavedConsultation.matched_opportunity_ids_json.isnot(None),
+                SavedConsultation.matched_opportunity_ids_json != "[]",
+                SavedConsultation.matched_count > 0
+            ).order_by(SavedConsultation.id.desc()).all()
+
+            if not consultations:
+                msg = (
+                    f"ℹ️ No he encontrado búsquedas ni alertas guardadas registradas para este chat o usuario (<b>{html.escape(user_display_name)}</b>).\n\n"
+                    f"Puedes crear una nueva simplemente pidiéndome lo que buscas (ejemplo: <i>«Búscame fincas rústicas en Madrid con buena rentabilidad»</i>)."
+                )
+                await self.send_message(chat_id, msg, parse_mode="HTML", reply_to_message_id=message_id)
+                return True
+
+            # Caso 1: Listar alertas
+            if list_match:
+                lines = [f"📋 <b>ESTADO DE TUS BÚSQUEDAS Y ALERTAS (HIVEX):</b>\n"]
+                for c in consultations[:10]:
+                    status_badge = "🟢 <b>ACTIVA</b>" if c.is_active else "⏸️ <b>PAUSADA</b>"
+                    lines.append(
+                        f"• #{c.id} {status_badge} — <b>«{html.escape(c.title or 'Búsqueda')}»</b>\n"
+                        f"  <i>{html.escape(c.description[:80])}...</i>\n"
+                        f"  (Total oportunidades vinculadas: {c.matched_count})"
+                    )
+                lines.append(
+                    f"\n💡 <i>Para pausar o activar una búsqueda di: «pausar alerta #ID» o «activar alerta #ID».</i>"
+                )
+                await self.send_message(chat_id, "\n".join(lines), parse_mode="HTML", reply_to_message_id=message_id)
+                return True
+
+            # Caso 2 y 3: Activar o Desactivar
+            target_status = True if is_activate else False
+            action_word = "activada" if target_status else "pausada"
+            icon = "▶️" if target_status else "⏸️"
+
+            # Intentar identificar consulta específica por ID numérico (#12, 12)
+            id_match = re.search(r'#?(\d+)', txt)
+            target_consultation = None
+            if id_match:
+                cand_id = int(id_match.group(1))
+                target_consultation = next((c for c in consultations if c.id == cand_id), None)
+
+            # Si no hay ID, buscar por coincidencia en texto o título (ej. "fincas", "guadalix", "madrid")
+            if not target_consultation:
+                clean_term = re.sub(rf'\b({deact_verbs}|{act_verbs}|{alert_nouns}|de|en|por|para|la|el|los|las)\b', ' ', txt).strip()
+                if len(clean_term) >= 3:
+                    for c in consultations:
+                        c_text = f"{c.title} {c.description}".lower()
+                        if clean_term in c_text:
+                            target_consultation = c
+                            break
+
+            # Si aún no hay target, seleccionar la más reciente
+            if not target_consultation:
+                target_consultation = consultations[0]
+
+            target_consultation.is_active = target_status
+            target_consultation.updated_at = datetime.utcnow()
+            db.commit()
+
+            reply = (
+                f"{icon} <b>Alerta {action_word.capitalize()}</b>\n\n"
+                f"He {action_word} la búsqueda: <b>«{html.escape(target_consultation.title or 'Búsqueda')}»</b> (ID #{target_consultation.id}).\n"
+                f"Criterio: <i>«{html.escape(target_consultation.description[:100])}...»</i>\n\n"
+            )
+            if target_status:
+                reply += "🔔 El rastreador diario de HIVEX te notificará en este grupo cuando descubra nuevas oportunidades que no estuvieran en la plataforma (hasta 20 al día).\n\n"
+                reply += f"💡 <i>Para pausarla cuando quieras, escribe: «pausar alerta #{target_consultation.id}».</i>"
+            else:
+                reply += "🔕 No recibirás más notificaciones diarias automáticas de esta búsqueda mientras esté en pausa.\n\n"
+                reply += f"💡 <i>Para reactivarla cuando quieras, escribe: «activar alerta #{target_consultation.id}».</i>"
+
+            await self.send_message(chat_id, reply, parse_mode="HTML", reply_to_message_id=message_id)
+            return True
 
     # --------------------------------------------------------------------------
     # 5. POLLING EN SEGUNDO PLANO (MODO DESARROLLO / LOCAL)

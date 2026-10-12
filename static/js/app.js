@@ -3815,6 +3815,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
 
+                const isActive = c.is_active !== false;
+
                 return `
                     <div class="consultation-group-card ${isAlert ? 'is-alert-group' : 'is-search-group'}" data-consultation-id="${c.id}">
                         <div class="group-header">
@@ -3828,9 +3830,15 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span class="meta-badge date"><i data-lucide="calendar" style="width: 12px; height: 12px;"></i> ${dateStr}</span>
                                     <span class="meta-badge ${isAlert ? 'type-alert' : 'type-search'}">${queryTypeLabel}</span>
                                     <span class="meta-badge count">${c.matched_count || opps.length} activos</span>
+                                    <span class="meta-badge status-toggle" style="background: ${isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.15)'}; color: ${isActive ? '#4ade80' : '#94a3b8'}; border: 1px solid ${isActive ? 'rgba(34, 197, 94, 0.3)' : 'rgba(148, 163, 184, 0.3)'};">
+                                        <i data-lucide="${isActive ? 'check-circle' : 'pause-circle'}" style="width: 12px; height: 12px;"></i> ${isActive ? 'Activa' : 'Pausada'}
+                                    </span>
                                 </div>
                             </div>
                             <div class="group-actions">
+                                <button class="btn-group-action btn-toggle-active" data-id="${c.id}" title="${isActive ? 'Pausar búsqueda y alertas' : 'Activar búsqueda y alertas'}" style="color: ${isActive ? '#fde047' : '#4ade80'};">
+                                    <i data-lucide="${isActive ? 'pause' : 'play'}" style="width: 14px; height: 14px;"></i> ${isActive ? 'Pausar' : 'Activar'}
+                                </button>
                                 <button class="btn-group-action btn-refresh-group" data-id="${c.id}" title="Re-evaluar mercado">
                                     <i data-lucide="refresh-cw" style="width: 14px; height: 14px;"></i> Re-evaluar
                                 </button>
@@ -3882,6 +3890,32 @@ document.addEventListener('DOMContentLoaded', () => {
                         btn.classList.toggle('is-favorite', isFavNow);
                         const svg = btn.querySelector('svg');
                         if (svg) svg.setAttribute('fill', isFavNow ? 'currentColor' : 'none');
+                    }
+                });
+            });
+
+            repoList.querySelectorAll('.btn-toggle-active').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const cid = btn.dataset.id;
+                    btn.disabled = true;
+                    try {
+                        const resp = await fetch(`/api/v1/consultations/${cid}/toggle-active`, {
+                            method: 'PATCH',
+                            headers: { 'Authorization': `Bearer ${state.token}` }
+                        });
+                        if (resp.ok) {
+                            const resData = await resp.json();
+                            showToast(resData.message || 'Estado de búsqueda actualizado');
+                            await fetchSavedConsultations();
+                        } else {
+                            showToast('Error al actualizar estado de la búsqueda', 'error');
+                        }
+                    } catch (err) {
+                        console.error('Error toggling active state:', err);
+                        showToast('Error de conexión', 'error');
+                    } finally {
+                        btn.disabled = false;
                     }
                 });
             });

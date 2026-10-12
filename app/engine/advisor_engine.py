@@ -139,10 +139,13 @@ class AdvisorEngine:
     @staticmethod
     def deduplicate_saved_consultations(db: Session) -> int:
         """
-        Escanea la tabla saved_consultations y elimina registros redundantes
-        que compartan el mismo prompt canónico para el mismo usuario,
-        conservando únicamente la consulta más reciente y actualizada.
-        Retorna la cantidad de registros duplicados eliminados.
+        Escanea la tabla saved_consultations y:
+        1. Elimina registros redundantes que compartan el mismo prompt canónico para el mismo usuario.
+        2. Elimina consultas que no implican entrega de fichas de oportunidades (preguntas analíticas
+           o de negocio puras), las cuales pertenecen a la base de conocimiento conversacional y no
+           al módulo visual de oportunidades.
+        Conserva únicamente las consultas válidas más recientes con fichas de oportunidades.
+        Retorna la cantidad de registros eliminados.
         """
         try:
             consultations = db.query(SavedConsultation).order_by(
@@ -153,6 +156,16 @@ class AdvisorEngine:
             duplicates_to_delete = []
 
             for c in consultations:
+                # Si la consulta no tiene oportunidades asociadas, no pertenece al módulo visual de oportunidades
+                has_no_cards = (
+                    c.matched_count == 0 
+                    or not c.matched_opportunity_ids_json 
+                    or c.matched_opportunity_ids_json == "[]"
+                )
+                if has_no_cards:
+                    duplicates_to_delete.append(c)
+                    continue
+
                 user_key = (c.user_name or "").strip().lower()
                 fp = normalize_prompt_fingerprint(c.description)
                 group_key = (user_key, fp)
@@ -166,7 +179,6 @@ class AdvisorEngine:
                 else:
                     # Duplicado más antiguo
                     primary = seen_groups[group_key]
-                    # Si el primario no tenía oportunidades pero el duplicado sí, enriquecer el primario
                     if (not primary.matched_opportunity_ids_json or primary.matched_opportunity_ids_json == "[]") and (c.matched_opportunity_ids_json and c.matched_opportunity_ids_json != "[]"):
                         primary.matched_opportunity_ids_json = c.matched_opportunity_ids_json
                         primary.matched_count = c.matched_count
@@ -179,7 +191,7 @@ class AdvisorEngine:
                 for dup in duplicates_to_delete:
                     db.delete(dup)
                 db.commit()
-                logger.info(f"[Deduplicación BD] Se eliminaron {deleted_count} consultas duplicadas redundantes.")
+                logger.info(f"[Saneamiento BD] Se eliminaron {deleted_count} consultas redundantes/sin fichas del módulo visual.")
             return deleted_count
         except Exception as e:
             logger.error(f"Error al deduplicar consultas en BD: {e}")
@@ -2021,7 +2033,182 @@ class AdvisorEngine:
         if not final_prompt:
             final_prompt = "Consultar oportunidades destacadas"
 
-        # 1. Parse de criterios con Cascada Descendente Gemini Flash
+        canonical_fp = normalize_prompt_fingerprint(final_prompt)
+
+        # 0. REUTILIZACIÓN DE CONSULTAS Y OPORTUNIDADES ENTRE USUARIOS (AHORRO 100% DE TOKENS):
+        # Si un usuario consulta lo mismo que otro (o él mismo previamente), se sirven las mismas
+        # fichas de oportunidades que ya se verificaron sin consumir tokens de Gemini ni relanzar scraping.
+        cached_consultation = None
+        if canonical_fp:
+            from app.db.session import SessionLocal
+            check_db = db if db is not None else SessionLocal()
+            try:
+                candidates = check_db.query(SavedConsultation).filter(
+                    SavedConsultation.matched_opportunity_ids_json.isnot(None),
+                    SavedConsultation.matched_opportunity_ids_json != "[]",
+                    SavedConsultation.matched_count > 0
+                ).order_by(SavedConsultation.created_at.desc(), SavedConsultation.id.desc()).all()
+                for cand in candidates:
+                    if normalize_prompt_fingerprint(cand.description) == canonical_fp:
+                        cached_consultation = cand
+                        break
+            except Exception as e_cache_find:
+                logger.warning(f"Error comprobando caché de consultas previas: {e_cache_find}")
+            finally:
+                if db is None:
+                    check_db.close()
+
+        if cached_consultation:
+            logger.info(
+                f"[Ahorro Tokens] Reutilizando consulta #{cached_consultation.id} (usuario original: {cached_consultation.user_name}) "
+                f"para '{user_name}' sin consumir tokens de Gemini."
+            )
+            try:
+                cached_ids = json.loads(cached_consultation.matched_opportunity_ids_json or "[]")
+            except Exception:
+                cached_ids = []
+
+            all_opps = self.get_live_catalog_opportunities(db=db)
+            opps_map = {str(o.get("id")).strip().upper(): o for o in all_opps}
+            matched_opps = [opps_map[str(oid).strip().upper()] for oid in cached_ids if str(oid).strip().upper() in opps_map]
+
+            # Fallback en caso de que alguna oportunidad esté solo en BD
+            if not matched_opps and cached_ids:
+                from app.db.models import Opportunity
+                fetch_db = db if db is not None else SessionLocal()
+                try:
+                    db_opps = fetch_db.query(Opportunity).filter(Opportunity.id.in_(cached_ids)).all()
+                    for o in db_opps:
+                        opp_dict = {
+                            "id": o.id,
+                            "title": o.title or "Inmueble",
+                            "price": o.price or 0,
+                            "market_reference_price": o.market_reference_price or o.price,
+                            "discount_pct": o.discount_pct or 0,
+                            "locality": o.locality or "N/D",
+                            "province": o.province or "N/D",
+                            "hivex_score": o.hivex_score or 75,
+                            "images": [o.main_image] if o.main_image else [],
+                            "rental_yield": o.rental_yield or 0,
+                            "estimated_monthly_rent": o.estimated_monthly_rent or 0,
+                            "potential_gross_profit": o.potential_gross_profit or 0,
+                            "url": o.portal_url or f"{self.platform_url}/?opp_id={o.id}"
+                        }
+                        matched_opps.append(opp_dict)
+                except Exception as e_fetch_opps:
+                    logger.warning(f"Error recuperando oportunidades en BD para caché: {e_fetch_opps}")
+                finally:
+                    if db is None:
+                        fetch_db.close()
+
+            # Parsear criterios cacheados
+            try:
+                criteria = json.loads(cached_consultation.criteria_json or "{}")
+            except Exception:
+                criteria = {"query_type": "SEARCH_OPPORTUNITIES", "target_count": len(matched_opps) or 20}
+
+            response_text, title, ai_summary, intro_text = self.generate_advisor_response(
+                user_name=user_name,
+                criteria=criteria,
+                matched_opps=matched_opps,
+                is_relaxed=False
+            )
+
+            # Persistencia: nueva línea para nuevo usuario (con fecha actual) o actualización in-place si es el mismo usuario
+            saved_consultation_id = None
+            target_db = db if db is not None else SessionLocal()
+            try:
+                db_user = None
+                if telegram_user_id:
+                    db_user = target_db.query(User).filter(User.telegram_id == str(telegram_user_id)).first()
+                if not db_user and user_name:
+                    db_user = target_db.query(User).filter(User.username.ilike(user_name.strip())).first()
+
+                # Guardar mensaje de conversación (conocimiento HIVEX)
+                msg_user = TelegramConversationMessage(
+                    telegram_chat_id=str(telegram_chat_id),
+                    telegram_user_id=str(telegram_user_id) if telegram_user_id else None,
+                    user_id=db_user.id if db_user else None,
+                    role="user",
+                    content_type="voice" if is_voice else "text",
+                    content=final_prompt,
+                    transcription=transcription,
+                    duration_seconds=audio_duration
+                )
+                target_db.add(msg_user)
+
+                msg_assistant = TelegramConversationMessage(
+                    telegram_chat_id=str(telegram_chat_id),
+                    telegram_user_id=str(telegram_user_id) if telegram_user_id else None,
+                    user_id=db_user.id if db_user else None,
+                    role="assistant",
+                    content_type="query_result",
+                    content=response_text
+                )
+                target_db.add(msg_assistant)
+
+                is_same_user = (cached_consultation.user_name or "").strip().lower() == user_name.strip().lower()
+                if is_same_user:
+                    # Mismo usuario: actualizar in-place y subir a primera posición
+                    cached_consultation.title = title
+                    cached_consultation.matched_opportunity_ids_json = json.dumps([o.get("id") for o in matched_opps[:20]])
+                    cached_consultation.matched_count = len(matched_opps)
+                    cached_consultation.ai_summary = ai_summary
+                    cached_consultation.is_active = True
+                    cached_consultation.updated_at = datetime.utcnow()
+                    cached_consultation.created_at = datetime.utcnow()
+                    target_db.commit()
+                    target_db.refresh(cached_consultation)
+                    saved_consultation_id = cached_consultation.id
+                    logger.info(f"Consulta ID #{saved_consultation_id} del mismo usuario {user_name} re-posicionada arriba.")
+                else:
+                    # Usuario diferente: crear nueva línea con fecha actual y mismas fichas
+                    new_consultation = SavedConsultation(
+                        user_id=db_user.id if db_user else None,
+                        user_name=user_name,
+                        telegram_chat_id=str(telegram_chat_id),
+                        title=title,
+                        description=final_prompt,
+                        query_type=cached_consultation.query_type or "SEARCH_OPPORTUNITIES",
+                        criteria_json=cached_consultation.criteria_json,
+                        matched_opportunity_ids_json=cached_consultation.matched_opportunity_ids_json,
+                        matched_count=len(matched_opps),
+                        ai_summary=ai_summary,
+                        is_alert=cached_consultation.is_alert,
+                        alert_frequency=cached_consultation.alert_frequency or "DAILY",
+                        is_active=True,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
+                    target_db.add(new_consultation)
+                    target_db.commit()
+                    target_db.refresh(new_consultation)
+                    saved_consultation_id = new_consultation.id
+                    logger.info(f"Nueva línea #{saved_consultation_id} creada para usuario '{user_name}' reutilizando fichas de #{cached_consultation.id}.")
+            except Exception as e_pers_cache:
+                logger.error(f"Error persistiendo consulta desde caché: {e_pers_cache}")
+                try: target_db.rollback()
+                except Exception: pass
+            finally:
+                if db is None:
+                    target_db.close()
+
+            return {
+                "success": True,
+                "title": title,
+                "response_text": response_text,
+                "intro_text": intro_text,
+                "ai_summary": ai_summary,
+                "criteria": criteria,
+                "matched_opportunities": matched_opps,
+                "matched_count": len(matched_opps),
+                "saved_consultation_id": saved_consultation_id,
+                "should_display_cards": True,
+                "from_cache": True,
+                "tokens_consumed": 0
+            }
+
+        # 1. Parse de criterios con Cascada Descendente Gemini Flash (solo si no existe en caché)
         criteria = await self.parse_query_intent(final_prompt)
         # Límite por defecto es hasta 20 fichas si no se especifica explícitamente en la consulta
         target_count = int(criteria.get("target_count") or 20)
@@ -2245,29 +2432,38 @@ class AdvisorEngine:
                 )
                 target_db.add(msg_assistant)
 
-                # Guardar en repositorio de Consultas & Alertas con DEDUPLICACIÓN INTELIGENTE
-                matched_ids = [o.get("id") for o in matched_opps[:20]]
-                canonical_fp = normalize_prompt_fingerprint(final_prompt)
+                # REQUISITO 2: Las consultas que no implican entregar fichas en Telegram, no se guardan en el módulo de oportunidades.
+                # Todo el resto de preguntas de negocio persisten en la base de conocimiento (TelegramConversationMessage),
+                # pero no pueblan SavedConsultation.
+                should_save_to_visual_module = should_display_cards and matched_opps and len(matched_opps) > 0
 
-                existing_consultation = None
-                if canonical_fp:
-                    from sqlalchemy import or_
-                    query_filters = []
-                    if telegram_chat_id:
-                        query_filters.append(SavedConsultation.telegram_chat_id == str(telegram_chat_id))
-                    if db_user:
-                        query_filters.append(SavedConsultation.user_id == db_user.id)
-                    if user_name:
-                        query_filters.append(SavedConsultation.user_name.ilike(user_name.strip()))
+                if not should_save_to_visual_module:
+                    target_db.commit()
+                    logger.info("Consulta sin fichas de oportunidad persistida en base de conocimiento pero excluida del módulo visual de oportunidades.")
+                else:
+                    # Guardar en repositorio visual de Consultas & Alertas con DEDUPLICACIÓN INTELIGENTE
+                    matched_ids = [o.get("id") for o in matched_opps[:20]]
+                    canonical_fp = normalize_prompt_fingerprint(final_prompt)
 
-                    filter_cond = or_(*query_filters) if query_filters else True
-                    candidate_consultations = target_db.query(SavedConsultation).filter(filter_cond).order_by(SavedConsultation.id.desc()).all()
+                    existing_consultation = None
+                    if canonical_fp:
+                        from sqlalchemy import or_
+                        query_filters = []
+                        if telegram_chat_id:
+                            query_filters.append(SavedConsultation.telegram_chat_id == str(telegram_chat_id))
+                        if db_user:
+                            query_filters.append(SavedConsultation.user_id == db_user.id)
+                        if user_name:
+                            query_filters.append(SavedConsultation.user_name.ilike(user_name.strip()))
 
-                    for cand in candidate_consultations:
-                        cand_fp = normalize_prompt_fingerprint(cand.description)
-                        if cand_fp and cand_fp == canonical_fp:
-                            existing_consultation = cand
-                            break
+                        filter_cond = or_(*query_filters) if query_filters else True
+                        candidate_consultations = target_db.query(SavedConsultation).filter(filter_cond).order_by(SavedConsultation.id.desc()).all()
+
+                        for cand in candidate_consultations:
+                            cand_fp = normalize_prompt_fingerprint(cand.description)
+                            if cand_fp and cand_fp == canonical_fp:
+                                existing_consultation = cand
+                                break
 
                     # Fallback de seguridad: si no se encontró con los filtros de usuario/chat pero hay una consulta exactamente igual en el repositorio reciente
                     if not existing_consultation and user_name:
