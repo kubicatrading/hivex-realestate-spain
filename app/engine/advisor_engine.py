@@ -2588,3 +2588,4 @@ class AdvisorEngine:
         }
 
 advisor_engine = AdvisorEngine()
+RealEstateAdvisorEngine = AdvisorEngine
