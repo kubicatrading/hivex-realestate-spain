@@ -10,6 +10,7 @@ import json
 import html
 import unicodedata
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -2007,7 +2008,10 @@ class AdvisorEngine:
             if not is_rustic_query and avg_yield > 0:
                 clean_yield = min(18.0, avg_yield)
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{clean_yield:.1f}% Yield</b>")
-            intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
+            if is_relaxed:
+                intro_lines.append(f"\n⚠️ <i>No constan activos exactos registrados en <b>{html.escape(zone_title)}</b>. Hemos ampliado la búsqueda al ámbito de la provincia / área contigua para servirte las mejores <b>{len(matched_opps)} oportunidades</b>:</i>")
+            else:
+                intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
         else:
             internal_m = self.get_hivex_internal_zone_metrics(prov, criteria.get("zone_or_neighborhood"))
             p_m2 = internal_m.get("price_sale_sqm", 0)
@@ -2409,6 +2413,24 @@ class AdvisorEngine:
                 if len(matched_opps) >= target_count:
                     is_relaxed = True
 
+                # Si aún faltan oportunidades porque la micro-zona o código postal no arroja activos en catálogo,
+                # ampliar al ámbito de la provincia o área metropolitana para garantizar el servicio de 20 oportunidades
+                if len(matched_opps) < target_count and (relaxed_criteria.get("zone_or_neighborhood") or relaxed_criteria.get("postal_code")):
+                    relaxed_criteria_broad = dict(relaxed_criteria)
+                    relaxed_criteria_broad.pop("zone_or_neighborhood", None)
+                    relaxed_criteria_broad.pop("postal_code", None)
+                    if not relaxed_criteria_broad.get("province"):
+                        relaxed_criteria_broad["province"] = criteria.get("province") or "Madrid"
+                    broad_opps = self.filter_opportunities(all_opps, relaxed_criteria_broad)
+                    for bo in broad_opps:
+                        if str(bo.get("id")) not in seen_ids:
+                            matched_opps.append(bo)
+                            seen_ids.add(str(bo.get("id")))
+                            if len(matched_opps) >= target_count:
+                                break
+                    if matched_opps:
+                        is_relaxed = True
+
             # Recortar al top solicitado (hasta target_count, máximo 20)
             matched_opps = matched_opps[:target_count]
             should_display_cards = is_explicit_listing_request and len(matched_opps) > 0
@@ -2511,56 +2533,56 @@ class AdvisorEngine:
                                     existing_consultation = cand
                                     break
 
-                if existing_consultation:
-                    # Actualizar la consulta existente en lugar de crear un duplicado redundante
-                    logger.info(
-                        f"[Deduplicación] Reutilizando y actualizando consulta existente ID #{existing_consultation.id} "
-                        f"para usuario '{user_name}' con prompt «{final_prompt[:60]}...» (evitando duplicado redundante)."
-                    )
-                    existing_consultation.title = title
-                    existing_consultation.description = final_prompt
-                    existing_consultation.query_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
-                    existing_consultation.criteria_json = json.dumps(criteria, ensure_ascii=False)
-                    existing_consultation.matched_opportunity_ids_json = json.dumps(matched_ids)
-                    existing_consultation.matched_count = len(matched_opps)
-                    existing_consultation.ai_summary = ai_summary
-                    if criteria.get("is_alert"):
-                        existing_consultation.is_alert = True
-                        existing_consultation.alert_frequency = "DAILY"
-                    existing_consultation.is_active = True
-                    existing_consultation.updated_at = datetime.utcnow()
-                    existing_consultation.created_at = datetime.utcnow()  # Re-posicionar arriba como la más reciente
-                    target_db.commit()
-                    target_db.refresh(existing_consultation)
-                    saved_consultation_id = existing_consultation.id
-                    existing_consultation.title = self.format_consultation_title(criteria, consultation_id=existing_consultation.id)
-                    title = existing_consultation.title
-                    target_db.commit()
-                    logger.info(f"Consulta ID #{saved_consultation_id} actualizada correctamente con {len(matched_opps)} oportunidades y título '{title}'.")
-                else:
-                    consultation = SavedConsultation(
-                        user_id=db_user.id if db_user else None,
-                        user_name=user_name,
-                        telegram_chat_id=str(telegram_chat_id),
-                        title=title,
-                        description=final_prompt,
-                        query_type=criteria.get("query_type", "SEARCH_OPPORTUNITIES"),
-                        criteria_json=json.dumps(criteria, ensure_ascii=False),
-                        matched_opportunity_ids_json=json.dumps(matched_ids),
-                        matched_count=len(matched_opps),
-                        ai_summary=ai_summary,
-                        is_alert=criteria.get("is_alert", False),
-                        alert_frequency="DAILY" if criteria.get("is_alert") else None,
-                        is_active=True
-                    )
-                    target_db.add(consultation)
-                    target_db.commit()
-                    target_db.refresh(consultation)
-                    saved_consultation_id = consultation.id
-                    consultation.title = self.format_consultation_title(criteria, consultation_id=consultation.id)
-                    title = consultation.title
-                    target_db.commit()
-                    logger.info(f"Nueva consulta persistida con éxito en BD con ID #{saved_consultation_id} y título '{title}'")
+                    if existing_consultation:
+                        # Actualizar la consulta existente en lugar de crear un duplicado redundante
+                        logger.info(
+                            f"[Deduplicación] Reutilizando y actualizando consulta existente ID #{existing_consultation.id} "
+                            f"para usuario '{user_name}' con prompt «{final_prompt[:60]}...» (evitando duplicado redundante)."
+                        )
+                        existing_consultation.title = title
+                        existing_consultation.description = final_prompt
+                        existing_consultation.query_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
+                        existing_consultation.criteria_json = json.dumps(criteria, ensure_ascii=False)
+                        existing_consultation.matched_opportunity_ids_json = json.dumps(matched_ids)
+                        existing_consultation.matched_count = len(matched_opps)
+                        existing_consultation.ai_summary = ai_summary
+                        if criteria.get("is_alert"):
+                            existing_consultation.is_alert = True
+                            existing_consultation.alert_frequency = "DAILY"
+                        existing_consultation.is_active = True
+                        existing_consultation.updated_at = datetime.utcnow()
+                        existing_consultation.created_at = datetime.utcnow()  # Re-posicionar arriba como la más reciente
+                        target_db.commit()
+                        target_db.refresh(existing_consultation)
+                        saved_consultation_id = existing_consultation.id
+                        existing_consultation.title = self.format_consultation_title(criteria, consultation_id=existing_consultation.id)
+                        title = existing_consultation.title
+                        target_db.commit()
+                        logger.info(f"Consulta ID #{saved_consultation_id} actualizada correctamente con {len(matched_opps)} oportunidades y título '{title}'.")
+                    else:
+                        consultation = SavedConsultation(
+                            user_id=db_user.id if db_user else None,
+                            user_name=user_name,
+                            telegram_chat_id=str(telegram_chat_id),
+                            title=title,
+                            description=final_prompt,
+                            query_type=criteria.get("query_type", "SEARCH_OPPORTUNITIES"),
+                            criteria_json=json.dumps(criteria, ensure_ascii=False),
+                            matched_opportunity_ids_json=json.dumps(matched_ids),
+                            matched_count=len(matched_opps),
+                            ai_summary=ai_summary,
+                            is_alert=criteria.get("is_alert", False),
+                            alert_frequency="DAILY" if criteria.get("is_alert") else None,
+                            is_active=True
+                        )
+                        target_db.add(consultation)
+                        target_db.commit()
+                        target_db.refresh(consultation)
+                        saved_consultation_id = consultation.id
+                        consultation.title = self.format_consultation_title(criteria, consultation_id=consultation.id)
+                        title = consultation.title
+                        target_db.commit()
+                        logger.info(f"Nueva consulta persistida con éxito en BD con ID #{saved_consultation_id} y título '{title}'")
             except Exception as e_save:
                 logger.error(f"Error al persistir consulta y conversación en BD: {e_save}")
                 try:
