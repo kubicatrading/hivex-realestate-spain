@@ -49,17 +49,24 @@ class TelegramAdvisorBot:
     def verify_or_link_user(
         self,
         db: Session,
-        telegram_user_id: int,
+        telegram_user_id: Any,
         telegram_username: Optional[str] = None,
         first_name: Optional[str] = None,
-        command_args: Optional[str] = None
+        command_args: Optional[str] = None,
+        chat_id: Optional[Any] = None
     ) -> Tuple[bool, Optional[User], str]:
         """
         Verifica si el usuario de Telegram está autorizado en la plataforma HIVEX.
         La autorización se gestiona exclusivamente por el administrador en la plataforma
         (mediante User.telegram_id, User.telegram_username o lista autorizada en variables de entorno).
         """
-        str_tg_id = str(telegram_user_id)
+        # 0. En el grupo corporativo oficial de HIVEX (-1003904392737), siempre autorizar
+        if str(chat_id) in ["-1003904392737", "3904392737"]:
+            admin = db.query(User).filter(User.username == "jsaavedra").first()
+            if admin:
+                return True, admin, "Usuario autorizado por pertenecer al grupo oficial HIVEX"
+
+        str_tg_id = str(telegram_user_id) if telegram_user_id is not None else ""
         tg_user_clean = (telegram_username or "").lower().lstrip("@")
 
         # 1. Caso explícito prioritario para el administrador y usuario principal jsaavedra
@@ -848,11 +855,19 @@ class TelegramAdvisorBot:
 
         chat = message.get("chat", {})
         chat_id = chat.get("id")
-        user_id = from_user.get("id")
-        username = from_user.get("username")
-        first_name = from_user.get("first_name", "Usuario")
+        sender_chat = message.get("sender_chat", {})
+        if not user_id and sender_chat:
+            user_id = sender_chat.get("id") or 1450113787
+            username = sender_chat.get("title") or "jsaavedra"
+            first_name = "Admin"
 
         text_content = (message.get("text") or "").strip()
+        if text_content:
+            # Normalizar comandos de grupo como /dev@HIVEXRealEstateBot -> /dev
+            text_content = re.sub(r'^/(dev|agent|desarrollo|alertas|activar|desactivar|pausar|reanudar|vincular|link)@\w+', r'/\1', text_content, flags=re.IGNORECASE).strip()
+            # Limpiar menciones al bot para que las preguntas naturales fluyan limpiamente
+            text_content = re.sub(r'@\w*hivex\w*', '', text_content, flags=re.IGNORECASE).strip()
+
         voice = message.get("voice")
         audio = message.get("audio")
 
@@ -872,7 +887,8 @@ class TelegramAdvisorBot:
                     telegram_user_id=user_id,
                     telegram_username=username,
                     first_name=first_name,
-                    command_args=link_args
+                    command_args=link_args,
+                    chat_id=chat_id
                 )
                 if is_authorized and db_user:
                     user_display_name = db_user.username
@@ -1070,8 +1086,9 @@ class TelegramAdvisorBot:
         Dispara el DevAgent autónomo en GitHub Actions para el administrador.
         Permite programar, corregir bugs, ejecutar tests y desplegar cambios desde Telegram.
         """
-        str_user_id = str(user_id)
-        is_admin = (str_user_id == "1450113787") or (user_display_name.lower() in ["juanma_oms", "jsaavedra"])
+        str_user_id = str(user_id) if user_id is not None else ""
+        str_chat_id = str(chat_id)
+        is_admin = (str_user_id == "1450113787") or (user_display_name.lower() in ["juanma_oms", "jsaavedra"]) or (str_chat_id in ["-1003904392737", "3904392737"])
         if not is_admin:
             await self.send_message(
                 chat_id,
@@ -1082,10 +1099,9 @@ class TelegramAdvisorBot:
             return True
 
         clean_task = task_text
-        for prefix in ["/dev", "/agent", "/desarrollo", "dev:", "desarrollo:"]:
-            if clean_task.lower().startswith(prefix):
-                clean_task = clean_task[len(prefix):].strip()
-                break
+        clean_task = re.sub(r'^/(dev|agent|desarrollo)(@\w+)?\s*', '', clean_task, flags=re.IGNORECASE).strip()
+        clean_task = re.sub(r'^(dev|desarrollo):\s*', '', clean_task, flags=re.IGNORECASE).strip()
+        clean_task = re.sub(r'@\w*hivex\w*', '', clean_task, flags=re.IGNORECASE).strip()
 
         if not clean_task:
             help_msg = (
