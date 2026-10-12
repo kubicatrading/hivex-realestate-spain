@@ -349,6 +349,15 @@ def startup_event():
     except Exception as e_tg:
         print(f"Advertencia al iniciar Polling de Telegram: {e_tg}")
 
+    # 4. Deduplicar consultas redundantes en la base de datos para sanear el repositorio
+    try:
+        from app.db.session import SessionLocal
+        from app.engine.advisor_engine import AdvisorEngine
+        with SessionLocal() as db_session:
+            AdvisorEngine.deduplicate_saved_consultations(db_session)
+    except Exception as e_dedup:
+        print(f"Advertencia al ejecutar deduplicación de consultas en startup: {e_dedup}")
+
 @app.get("/")
 @app.get("/api/index.py")
 def serve_dashboard():
@@ -973,18 +982,31 @@ def get_saved_consultations(
 ):
     """
     Recupera el repositorio de consultas y alertas creadas desde Telegram o web,
-    enriqueciendo cada registro con las tarjetas completas de las oportunidades encontradas.
+    enriqueciendo cada registro con las tarjetas completas de las oportunidades encontradas
+    y deduplicando consultas idénticas por usuario y prompt canónico.
     """
     try:
-        from app.engine.advisor_engine import advisor_engine
-        consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc()).all()
+        from app.engine.advisor_engine import advisor_engine, normalize_prompt_fingerprint
+        consultations = db.query(SavedConsultation).order_by(SavedConsultation.created_at.desc(), SavedConsultation.id.desc()).all()
+
+        # Deduplicar en memoria para garantizar que el usuario nunca vea tarjetas idénticas redundantes
+        seen_keys = set()
+        unique_consultations = []
+        for c in consultations:
+            u_key = (c.user_name or "").strip().lower()
+            fp = normalize_prompt_fingerprint(c.description)
+            key = (u_key, fp) if fp else ("id", c.id)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_consultations.append(c)
 
         # Pre-cargar catálogo de oportunidades para indexar rápido por ID
         all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
         opps_by_id = {str(o.get("id")).strip().upper(): o for o in all_opps}
 
         result = []
-        for c in consultations:
+        for c in unique_consultations:
             matched_ids = []
             if c.matched_opportunity_ids_json:
                 try:
@@ -1033,13 +1055,34 @@ def delete_consultation(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_optional)
 ):
-    """Elimina una consulta o alerta del repositorio."""
+    """Elimina una consulta o alerta del repositorio y limpia cualquier duplicado residual idéntico."""
     item = db.query(SavedConsultation).filter(SavedConsultation.id == consultation_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Consulta no encontrada")
+
+    from app.engine.advisor_engine import normalize_prompt_fingerprint
+    target_fp = normalize_prompt_fingerprint(item.description)
+    user_key = (item.user_name or "").strip().lower()
+
     db.delete(item)
+    if target_fp:
+        others = db.query(SavedConsultation).filter(SavedConsultation.id != consultation_id).all()
+        for o in others:
+            if (o.user_name or "").strip().lower() == user_key and normalize_prompt_fingerprint(o.description) == target_fp:
+                db.delete(o)
+
     db.commit()
     return {"status": "success", "deleted_id": consultation_id}
+
+@app.post("/api/v1/consultations/deduplicate")
+def trigger_deduplicate_consultations(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Ejecuta la deduplicación y limpieza de consultas redundantes en la base de datos."""
+    from app.engine.advisor_engine import AdvisorEngine
+    removed = AdvisorEngine.deduplicate_saved_consultations(db)
+    return {"status": "success", "duplicates_removed": removed}
 
 @app.post("/api/v1/consultations/{consultation_id}/refresh")
 async def refresh_consultation(

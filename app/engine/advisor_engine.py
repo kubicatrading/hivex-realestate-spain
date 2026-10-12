@@ -8,6 +8,7 @@ import os
 import re
 import json
 import html
+import unicodedata
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -96,12 +97,97 @@ SPANISH_ZONE_DEFINITIONS = [
     ("Carretera de Cádiz", "Málaga", ["carretera de cádiz", "carretera de cadiz", "29004", "29003"]),
 ]
 
+def normalize_prompt_fingerprint(text: str) -> str:
+    """
+    Genera una huella canónica normalizada para deduplicar consultas:
+    - Minúsculas y strip
+    - Remoción de bloques de contexto previo inyectados
+    - Normalización NFD y remoción de acentos/tildes diacríticas
+    - Remoción de puntos separadores de miles entre dígitos (ej: 25.000 -> 25000)
+    - Remoción de comillas y signos de puntuación decorativa
+    - Reducción de espacios y saltos de línea a espacio único
+    """
+    if not text:
+        return ""
+    s = text.strip().lower()
+    # Limpiar posibles envoltorios conversacionales
+    s = re.sub(r'\(contexto previo:.*?\)', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'\[contexto conversacional:.*?\]', '', s, flags=re.IGNORECASE)
+    # Quitar puntos de miles entre números (ej. 25.000 -> 25000)
+    s = re.sub(r'(?<=\d)\.(?=\d)', '', s)
+    # Quitar comillas tipográficas
+    for q in ['«', '»', '"', "'", '`', '“', '”', '‘', '’']:
+        s = s.replace(q, '')
+    # Normalizar diacríticos (tildes)
+    s = unicodedata.normalize('NFD', s)
+    s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+    # Quitar puntuación y caracteres especiales no alfanuméricos
+    s = re.sub(r'[^a-z0-9\s]', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
 class AdvisorEngine:
     """
     Motor del Asesor Inmobiliario Conversacional HIVEX.
     Permite consultar oportunidades, analizar distritos, calcular ROI/BTL,
     generar scoring y programar alertas a través de Telegram y Web.
     """
+
+    @staticmethod
+    def normalize_prompt_fingerprint(text: str) -> str:
+        return normalize_prompt_fingerprint(text)
+
+    @staticmethod
+    def deduplicate_saved_consultations(db: Session) -> int:
+        """
+        Escanea la tabla saved_consultations y elimina registros redundantes
+        que compartan el mismo prompt canónico para el mismo usuario,
+        conservando únicamente la consulta más reciente y actualizada.
+        Retorna la cantidad de registros duplicados eliminados.
+        """
+        try:
+            consultations = db.query(SavedConsultation).order_by(
+                SavedConsultation.id.desc()
+            ).all()
+
+            seen_groups = {}
+            duplicates_to_delete = []
+
+            for c in consultations:
+                user_key = (c.user_name or "").strip().lower()
+                fp = normalize_prompt_fingerprint(c.description)
+                group_key = (user_key, fp)
+
+                if not fp:
+                    continue
+
+                if group_key not in seen_groups:
+                    # El primero que vemos es el más reciente (ordenado por id.desc())
+                    seen_groups[group_key] = c
+                else:
+                    # Duplicado más antiguo
+                    primary = seen_groups[group_key]
+                    # Si el primario no tenía oportunidades pero el duplicado sí, enriquecer el primario
+                    if (not primary.matched_opportunity_ids_json or primary.matched_opportunity_ids_json == "[]") and (c.matched_opportunity_ids_json and c.matched_opportunity_ids_json != "[]"):
+                        primary.matched_opportunity_ids_json = c.matched_opportunity_ids_json
+                        primary.matched_count = c.matched_count
+                    if not primary.ai_summary and c.ai_summary:
+                        primary.ai_summary = c.ai_summary
+                    duplicates_to_delete.append(c)
+
+            deleted_count = len(duplicates_to_delete)
+            if deleted_count > 0:
+                for dup in duplicates_to_delete:
+                    db.delete(dup)
+                db.commit()
+                logger.info(f"[Deduplicación BD] Se eliminaron {deleted_count} consultas duplicadas redundantes.")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error al deduplicar consultas en BD: {e}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return 0
 
     GEMINI_FLASH_CASCADE = [
         "gemini-3.8-flash",
@@ -2159,28 +2245,85 @@ class AdvisorEngine:
                 )
                 target_db.add(msg_assistant)
 
-                # Guardar en repositorio de Consultas & Alertas
+                # Guardar en repositorio de Consultas & Alertas con DEDUPLICACIÓN INTELIGENTE
                 matched_ids = [o.get("id") for o in matched_opps[:20]]
-                consultation = SavedConsultation(
-                    user_id=db_user.id if db_user else None,
-                    user_name=user_name,
-                    telegram_chat_id=str(telegram_chat_id),
-                    title=title,
-                    description=final_prompt,
-                    query_type=criteria.get("query_type", "SEARCH_OPPORTUNITIES"),
-                    criteria_json=json.dumps(criteria, ensure_ascii=False),
-                    matched_opportunity_ids_json=json.dumps(matched_ids),
-                    matched_count=len(matched_opps),
-                    ai_summary=ai_summary,
-                    is_alert=criteria.get("is_alert", False),
-                    alert_frequency="DAILY" if criteria.get("is_alert") else None,
-                    is_active=True
-                )
-                target_db.add(consultation)
-                target_db.commit()
-                target_db.refresh(consultation)
-                saved_consultation_id = consultation.id
-                logger.info(f"Consulta persistida con éxito en BD con ID #{saved_consultation_id}")
+                canonical_fp = normalize_prompt_fingerprint(final_prompt)
+
+                existing_consultation = None
+                if canonical_fp:
+                    from sqlalchemy import or_
+                    query_filters = []
+                    if telegram_chat_id:
+                        query_filters.append(SavedConsultation.telegram_chat_id == str(telegram_chat_id))
+                    if db_user:
+                        query_filters.append(SavedConsultation.user_id == db_user.id)
+                    if user_name:
+                        query_filters.append(SavedConsultation.user_name.ilike(user_name.strip()))
+
+                    filter_cond = or_(*query_filters) if query_filters else True
+                    candidate_consultations = target_db.query(SavedConsultation).filter(filter_cond).order_by(SavedConsultation.id.desc()).all()
+
+                    for cand in candidate_consultations:
+                        cand_fp = normalize_prompt_fingerprint(cand.description)
+                        if cand_fp and cand_fp == canonical_fp:
+                            existing_consultation = cand
+                            break
+
+                    # Fallback de seguridad: si no se encontró con los filtros de usuario/chat pero hay una consulta exactamente igual en el repositorio reciente
+                    if not existing_consultation and user_name:
+                        recent_all = target_db.query(SavedConsultation).order_by(SavedConsultation.id.desc()).limit(50).all()
+                        for cand in recent_all:
+                            cand_u = (cand.user_name or "").strip().lower()
+                            if cand_u == user_name.strip().lower():
+                                cand_fp = normalize_prompt_fingerprint(cand.description)
+                                if cand_fp and cand_fp == canonical_fp:
+                                    existing_consultation = cand
+                                    break
+
+                if existing_consultation:
+                    # Actualizar la consulta existente en lugar de crear un duplicado redundante
+                    logger.info(
+                        f"[Deduplicación] Reutilizando y actualizando consulta existente ID #{existing_consultation.id} "
+                        f"para usuario '{user_name}' con prompt «{final_prompt[:60]}...» (evitando duplicado redundante)."
+                    )
+                    existing_consultation.title = title
+                    existing_consultation.description = final_prompt
+                    existing_consultation.query_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
+                    existing_consultation.criteria_json = json.dumps(criteria, ensure_ascii=False)
+                    existing_consultation.matched_opportunity_ids_json = json.dumps(matched_ids)
+                    existing_consultation.matched_count = len(matched_opps)
+                    existing_consultation.ai_summary = ai_summary
+                    if criteria.get("is_alert"):
+                        existing_consultation.is_alert = True
+                        existing_consultation.alert_frequency = "DAILY"
+                    existing_consultation.is_active = True
+                    existing_consultation.updated_at = datetime.utcnow()
+                    existing_consultation.created_at = datetime.utcnow()  # Re-posicionar arriba como la más reciente
+                    target_db.commit()
+                    target_db.refresh(existing_consultation)
+                    saved_consultation_id = existing_consultation.id
+                    logger.info(f"Consulta ID #{saved_consultation_id} actualizada correctamente con {len(matched_opps)} oportunidades.")
+                else:
+                    consultation = SavedConsultation(
+                        user_id=db_user.id if db_user else None,
+                        user_name=user_name,
+                        telegram_chat_id=str(telegram_chat_id),
+                        title=title,
+                        description=final_prompt,
+                        query_type=criteria.get("query_type", "SEARCH_OPPORTUNITIES"),
+                        criteria_json=json.dumps(criteria, ensure_ascii=False),
+                        matched_opportunity_ids_json=json.dumps(matched_ids),
+                        matched_count=len(matched_opps),
+                        ai_summary=ai_summary,
+                        is_alert=criteria.get("is_alert", False),
+                        alert_frequency="DAILY" if criteria.get("is_alert") else None,
+                        is_active=True
+                    )
+                    target_db.add(consultation)
+                    target_db.commit()
+                    target_db.refresh(consultation)
+                    saved_consultation_id = consultation.id
+                    logger.info(f"Nueva consulta persistida con éxito en BD con ID #{saved_consultation_id}")
             except Exception as e_save:
                 logger.error(f"Error al persistir consulta y conversación en BD: {e_save}")
                 try:

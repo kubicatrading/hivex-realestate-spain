@@ -3579,6 +3579,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window._savedConsultations = [];
 
+    function getCanonicalPromptKey(desc) {
+        if (!desc) return '';
+        try {
+            return String(desc)
+                .toLowerCase()
+                .replace(/\(contexto previo:.*?\)/gi, '')
+                .replace(/\[contexto conversacional:.*?\]/gi, '')
+                .replace(/(\d)\.(\d)/g, '$1$2')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[«»"'`“”‘’]/g, '')
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        } catch (e) {
+            return String(desc).toLowerCase().trim();
+        }
+    }
+
     function getLocalConsultations() {
         try {
             return JSON.parse(localStorage.getItem('hivex_local_consultations') || '[]');
@@ -3590,7 +3609,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function saveLocalConsultation(c) {
         try {
             const list = getLocalConsultations();
-            const filtered = list.filter(item => String(item.id) !== String(c.id));
+            const newFp = getCanonicalPromptKey(c.description);
+            const newUser = (c.user_name || '').toLowerCase().trim();
+
+            // Filtrar tanto por ID como por prompt canónico idéntico del mismo usuario
+            const filtered = list.filter(item => {
+                if (String(item.id) === String(c.id)) return false;
+                if (newFp) {
+                    const itemFp = getCanonicalPromptKey(item.description);
+                    const itemUser = (item.user_name || '').toLowerCase().trim();
+                    if (itemUser === newUser && itemFp === newFp) return false;
+                }
+                return true;
+            });
+
             filtered.unshift(c);
             localStorage.setItem('hivex_local_consultations', JSON.stringify(filtered.slice(0, 50)));
         } catch (e) {
@@ -3601,7 +3633,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function removeLocalConsultation(id) {
         try {
             const list = getLocalConsultations();
-            const filtered = list.filter(item => String(item.id) !== String(id));
+            const target = list.find(item => String(item.id) === String(id));
+            const targetFp = target ? getCanonicalPromptKey(target.description) : null;
+            const targetUser = target ? (target.user_name || '').toLowerCase().trim() : null;
+
+            const filtered = list.filter(item => {
+                if (String(item.id) === String(id)) return false;
+                if (targetFp && targetUser) {
+                    const itemFp = getCanonicalPromptKey(item.description);
+                    const itemUser = (item.user_name || '').toLowerCase().trim();
+                    if (itemUser === targetUser && itemFp === targetFp) return false;
+                }
+                return true;
+            });
             localStorage.setItem('hivex_local_consultations', JSON.stringify(filtered));
         } catch (e) {
             console.warn('No se pudo borrar consulta local:', e);
@@ -3641,13 +3685,41 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ordenar por fecha descendente
             merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
-            window._savedConsultations = merged;
-
-            if (countBadge) {
-                countBadge.textContent = `${merged.length} consulta${merged.length !== 1 ? 's' : ''}`;
+            // Deduplicar unificado (servidor + local) por usuario y huella canónica del prompt
+            const seenKeys = new Set();
+            const dedupedMerged = [];
+            for (const item of merged) {
+                const userKey = (item.user_name || 'usuario').toLowerCase().trim();
+                const fp = getCanonicalPromptKey(item.description);
+                const dedupKey = fp ? `${userKey}:::${fp}` : `id:::${item.id}`;
+                if (seenKeys.has(dedupKey)) continue;
+                seenKeys.add(dedupKey);
+                dedupedMerged.push(item);
             }
 
-            if (merged.length === 0) {
+            // Saneamiento proactivo de localStorage: eliminar duplicados acumulados históricamente
+            const cleanLocal = [];
+            const cleanLocalKeys = new Set();
+            for (const loc of localConsultations) {
+                const u = (loc.user_name || 'usuario').toLowerCase().trim();
+                const fp = getCanonicalPromptKey(loc.description);
+                const k = fp ? `${u}:::${fp}` : String(loc.id);
+                if (!cleanLocalKeys.has(k)) {
+                    cleanLocalKeys.add(k);
+                    cleanLocal.push(loc);
+                }
+            }
+            try {
+                localStorage.setItem('hivex_local_consultations', JSON.stringify(cleanLocal));
+            } catch (e) {}
+
+            window._savedConsultations = dedupedMerged;
+
+            if (countBadge) {
+                countBadge.textContent = `${dedupedMerged.length} consulta${dedupedMerged.length !== 1 ? 's' : ''}`;
+            }
+
+            if (dedupedMerged.length === 0) {
                 repoList.innerHTML = `
                     <div class="empty-repo-state">
                         <i data-lucide="inbox"></i>
