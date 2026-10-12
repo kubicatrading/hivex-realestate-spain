@@ -879,8 +879,20 @@ class TelegramAdvisorBot:
                 return {"status": "already_authorized", "user": username}
 
             # 2. PROCESAR MENSAJE (TEXTO O AUDIO)
-            # REQUISITO 3: El bot es capaz de activar o inactivar una alerta/búsqueda desde el propio grupo de Telegram
             if text_content:
+                # Comprobar si es comando para el DevAgent (/dev, /agent, /desarrollo)
+                if text_content.lower().startswith(("/dev", "/agent", "/desarrollo")):
+                    dev_handled = await self.handle_dev_agent_command(
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        user_display_name=user_display_name,
+                        task_text=text_content,
+                        message_id=message_id
+                    )
+                    if dev_handled:
+                        return {"status": "dev_agent_triggered", "user": user_display_name}
+
+                # REQUISITO 3: El bot es capaz de activar o inactivar una alerta/búsqueda desde el propio grupo de Telegram
                 alert_handled = await self.handle_toggle_alert_command(
                     chat_id=chat_id,
                     user_id=user_id,
@@ -938,8 +950,31 @@ class TelegramAdvisorBot:
                     await self.send_message(chat_id, "❌ No se pudo descargar el audio. Por favor intenta enviarlo nuevamente.")
                     return {"status": "audio_download_failed"}
 
+                # Comprobar si la nota de voz es una instrucción para el DevAgent
+                try:
+                    voice_transcription = await advisor_engine.transcribe_audio(audio_bytes)
+                    if voice_transcription:
+                        clean_vt = voice_transcription.strip().lower()
+                        if clean_vt.startswith(("/dev", "dev", "desarrollo", "modo dev", "código", "programar")):
+                            dev_handled = await self.handle_dev_agent_command(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                user_display_name=user_display_name,
+                                task_text=voice_transcription,
+                                message_id=message_id
+                            )
+                            if dev_handled:
+                                return {"status": "dev_agent_triggered", "user": user_display_name}
+                        prompt_to_process = voice_transcription
+                except Exception as e_tr:
+                    logger.warning(f"Error procesando nota de voz para DevAgent: {e_tr}")
+
             # Si es comando /start o /help
             if text_content in ("/start", "/help", "/ayuda"):
+                admin_help = ""
+                if str(user_id) == "1450113787" or user_display_name.lower() in ["juanma_oms", "jsaavedra"]:
+                    admin_help = "• *Modo Desarrollo (DevAgent):* «`/dev Corrige el bug X y corre los tests`»\n"
+
                 welcome_msg = (
                     f"👋 **¡Hola {db_user.username if db_user else first_name}!**\n\n"
                     f"Soy tu **Asesor Inmobiliario Conversacional HIVEX**.\n\n"
@@ -949,7 +984,8 @@ class TelegramAdvisorBot:
                     f"• *Análisis de Zonas:* «Cómo está el distrito centro de Madrid y qué precios m² hay»\n"
                     f"• *Cálculo de ROI / BTL:* «Qué rentabilidad de alquiler puedo esperar en Alicante»\n"
                     f"• *Scoring y Comparativa:* «Cuáles son las 3 mejores oportunidades en Zaragoza por score»\n"
-                    f"• *Alertas Programadas:* «Avísame cuando salga una vivienda en Málaga con yield > 8%»\n\n"
+                    f"• *Alertas Programadas:* «Avísame cuando salga una vivienda en Málaga con yield > 8%»\n"
+                    f"{admin_help}\n"
                     f"📂 *Todas tus consultas quedan guardadas automáticamente en tu panel web de HIVEX.*"
                 )
                 await self.send_message(chat_id, welcome_msg, reply_to_message_id=message_id)
@@ -1003,6 +1039,101 @@ class TelegramAdvisorBot:
             logger.error(f"Error procesando update de Telegram: {e}", exc_info=True)
             await self.send_message(chat_id, f"⚠️ Ocurrió un error al procesar tu solicitud: {str(e)}")
             return {"status": "error", "error": str(e)}
+
+    async def handle_dev_agent_command(
+        self,
+        chat_id: Any,
+        user_id: Any,
+        user_display_name: str,
+        task_text: str,
+        message_id: Optional[int] = None
+    ) -> bool:
+        """
+        Dispara el DevAgent autónomo en GitHub Actions para el administrador.
+        Permite programar, corregir bugs, ejecutar tests y desplegar cambios desde Telegram.
+        """
+        str_user_id = str(user_id)
+        is_admin = (str_user_id == "1450113787") or (user_display_name.lower() in ["juanma_oms", "jsaavedra"])
+        if not is_admin:
+            await self.send_message(
+                chat_id,
+                "⛔ <i>El modo de desarrollo autónomo (DevAgent) está reservado exclusivamente para el administrador principal de la plataforma.</i>",
+                parse_mode="HTML",
+                reply_to_message_id=message_id
+            )
+            return True
+
+        clean_task = task_text
+        for prefix in ["/dev", "/agent", "/desarrollo", "dev:", "desarrollo:"]:
+            if clean_task.lower().startswith(prefix):
+                clean_task = clean_task[len(prefix):].strip()
+                break
+
+        if not clean_task:
+            help_msg = (
+                "🛠️ <b>HIVEX DevAgent (Modo Desarrollo Autónomo)</b>\n\n"
+                "Puedes pedirme cualquier cambio en el código, corrección de bugs, nuevas funciones o ejecución de pruebas.\n\n"
+                "💡 <b>Ejemplos de uso:</b>\n"
+                "• <code>/dev Revisa tests/ y comprueba que pasen todos</code>\n"
+                "• <code>/dev En advisor_engine.py mejora la detección de zonas periféricas</code>\n"
+                "• <i>(O grábame un audio de voz empezando por 'desarrollo: ...')</i>\n\n"
+                "🚀 El agente arrancará en GitHub Actions, editará los archivos, correrá pytest y subirá el commit a <code>main</code>."
+            )
+            await self.send_message(chat_id, help_msg, parse_mode="HTML", reply_to_message_id=message_id)
+            return True
+
+        gh_token = getattr(settings, "GITHUB_TOKEN", "") or os.getenv("GITHUB_TOKEN", "")
+        repo = getattr(settings, "GITHUB_REPO", "") or os.getenv("GITHUB_REPO", "kubicatrading/hivex-realestate-spain")
+
+        if not gh_token:
+            missing_msg = (
+                "⚠️ <b>Falta configurar GITHUB_TOKEN</b>\n\n"
+                "Para poder disparar el DevAgent autónomo en GitHub Actions desde Telegram, es necesario añadir un "
+                "<b>Personal Access Token (Classic)</b> con permisos <code>repo</code> y <code>workflow</code> en las variables de entorno de Vercel.\n\n"
+                "1. En GitHub: <b>Settings ➔ Developer Settings ➔ Personal access tokens ➔ Tokens (classic)</b>\n"
+                "2. Genera un token marcando <code>repo</code> y <code>workflow</code>\n"
+                "3. Añádelo como <code>GITHUB_TOKEN</code> en Vercel."
+            )
+            await self.send_message(chat_id, missing_msg, parse_mode="HTML", reply_to_message_id=message_id)
+            return True
+
+        # Disparar workflow en GitHub Actions vía API REST
+        url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
+        headers = {
+            "Authorization": f"Bearer {gh_token}",
+            "Accept": "application/vnd.github.v3+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        payload = {
+            "ref": "main",
+            "inputs": {
+                "task": clean_task,
+                "telegram_chat_id": str(chat_id),
+                "telegram_message_id": str(message_id) if message_id else ""
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(url, json=payload, headers=headers)
+                if res.status_code == 204:
+                    confirm_msg = (
+                        f"🚀 <b>¡DevAgent activado en GitHub Actions!</b>\n\n"
+                        f"🎯 <b>Tarea:</b> <i>{html.escape(clean_task)}</i>\n\n"
+                        f"📦 <b>Entorno:</b> GitHub Actions (Ubuntu Cloud Runner)\n"
+                        f"⏳ El agente está clonando el repositorio, analizando el código y preparando los cambios...\n\n"
+                        f"📲 <i>Te notificaré por este mismo chat en cuanto termine la ejecución y los tests pasen.</i>"
+                    )
+                    await self.send_message(chat_id, confirm_msg, parse_mode="HTML", reply_to_message_id=message_id)
+                    return True
+                else:
+                    err_msg = f"❌ Error comunicando con GitHub Actions ({res.status_code}):\n<code>{html.escape(res.text[:200])}</code>"
+                    await self.send_message(chat_id, err_msg, parse_mode="HTML", reply_to_message_id=message_id)
+                    return True
+        except Exception as e_gh:
+            logger.error(f"Error disparando GitHub Actions: {e_gh}")
+            await self.send_message(chat_id, f"❌ Error disparando DevAgent: {html.escape(str(e_gh))}", parse_mode="HTML", reply_to_message_id=message_id)
+            return True
 
     async def handle_toggle_alert_command(
         self,

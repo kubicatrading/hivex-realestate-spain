@@ -311,3 +311,67 @@ def test_specific_consultation_title_formatting_and_id():
     title_3 = advisor.format_consultation_title(criteria_3, consultation_id=7)
     assert title_3 == "🔍 Búsqueda #7: Chalet en Valencia"
 
+
+@pytest.mark.asyncio
+async def test_dev_agent_command_dispatch(monkeypatch):
+    """
+    Verifica que el comando /dev para el administrador dispara la solicitud
+    hacia GitHub Actions para el DevAgent y que los usuarios no autorizados son rechazados.
+    """
+    from app.services.telegram_advisor_bot import telegram_advisor_bot
+    from app.core.config import settings
+
+    sent_messages = []
+    async def mock_send(chat_id, text, **kwargs):
+        sent_messages.append({"chat_id": chat_id, "text": text})
+        return True
+
+    monkeypatch.setattr(telegram_advisor_bot, "send_message", mock_send)
+
+    # 1. Usuario no autorizado
+    res_unauth = await telegram_advisor_bot.handle_dev_agent_command(
+        chat_id=999,
+        user_id=999,
+        user_display_name="impostor",
+        task_text="/dev borra todo"
+    )
+    assert res_unauth is True
+    assert "reservado exclusivamente para el administrador" in sent_messages[-1]["text"]
+
+    # 2. Administrador solicita ayuda o tarea vacía
+    res_help = await telegram_advisor_bot.handle_dev_agent_command(
+        chat_id=1450113787,
+        user_id=1450113787,
+        user_display_name="jsaavedra",
+        task_text="/dev"
+    )
+    assert res_help is True
+    assert "HIVEX DevAgent" in sent_messages[-1]["text"]
+
+    # 3. Administrador envía tarea con GITHUB_TOKEN configurado (mockeando httpx)
+    monkeypatch.setattr(settings, "GITHUB_TOKEN", "mock_gh_token_123")
+    dispatched_payload = []
+
+    class MockResponse:
+        status_code = 204
+        text = ""
+
+    async def mock_post(client, url, json=None, headers=None, **kwargs):
+        dispatched_payload.append({"url": url, "json": json, "headers": headers})
+        return MockResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    res_dispatch = await telegram_advisor_bot.handle_dev_agent_command(
+        chat_id=1450113787,
+        user_id=1450113787,
+        user_display_name="jsaavedra",
+        task_text="/dev Añade un nuevo test unitario y corre pytest"
+    )
+    assert res_dispatch is True
+    assert len(dispatched_payload) == 1
+    assert "dev_agent.yml/dispatches" in dispatched_payload[0]["url"]
+    assert dispatched_payload[0]["json"]["inputs"]["task"] == "Añade un nuevo test unitario y corre pytest"
+    assert "¡DevAgent activado en GitHub Actions!" in sent_messages[-1]["text"]
+
+
