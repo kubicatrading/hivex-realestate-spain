@@ -1,0 +1,176 @@
+name: HIVEX DevAgent - Autonomous Coding Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Instrucción o tarea técnica para el DevAgent'
+        required: true
+        type: string
+      telegram_chat_id:
+        description: 'Chat ID de Telegram para notificaciones'
+        required: false
+        type: string
+        default: '1450113787'
+      telegram_message_id:
+        description: 'Message ID para hacer reply en Telegram'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  run-dev-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Notificar Inicio en Telegram
+        if: ${{ inputs.telegram_chat_id != '' }}
+        run: |
+          python -c "
+          import httpx, os, html
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
+          chat_id = '${{ inputs.telegram_chat_id }}'
+          msg_id = '${{ inputs.telegram_message_id }}'
+          task = html.escape('''${{ inputs.task }}''')
+          text = f'⚙️ <b>DevAgent iniciado en GitHub Actions</b>\n\n🎯 <b>Tarea:</b> <i>{task}</i>\n\nAnalizando repositorio y preparando solución...'
+          if token and chat_id:
+              try:
+                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
+                      'chat_id': chat_id,
+                      'text': text,
+                      'parse_mode': 'HTML',
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                  }, timeout=10.0)
+              except Exception as e:
+                  print(f'Error: {e}')
+          "
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      - name: Ejecutar Autonomous DevAgent
+        id: dev_agent
+        run: |
+          python scripts/dev_agent.py --task "${{ inputs.task }}"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Ejecutar Tests de Verificación
+        run: |
+          pytest tests/ -q
+
+      - name: Comprobar cambios y hacer Commit & Push
+        id: git_push
+        run: |
+          git config user.name "HIVEX DevAgent"
+          git config user.email "devagent@hivex.internal"
+          
+          if [[ -n $(git status -s) ]]; then
+            git add -A
+            DIFF_STAT=$(git diff --staged --stat | head -n 12)
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            git commit -m "feat(dev-agent): ${{ inputs.task }}"
+            git push origin main
+            COMMIT_HASH=$(git rev-parse --short HEAD)
+            echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+            echo "diff_stat<<EOF" >> $GITHUB_OUTPUT
+            echo "$DIFF_STAT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected."
+          fi
+
+      - name: Notificar Resultado Exitoso en Telegram
+        if: success() && ${{ inputs.telegram_chat_id != '' }}
+        run: |
+          python -c "
+          import httpx, os, html
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
+          chat_id = '${{ inputs.telegram_chat_id }}'
+          msg_id = '${{ inputs.telegram_message_id }}'
+          task = html.escape('''${{ inputs.task }}''')
+          has_changes = '${{ steps.git_push.outputs.has_changes }}' == 'true'
+          commit = '${{ steps.git_push.outputs.commit_hash }}'
+          diff = html.escape('''${{ steps.git_push.outputs.diff_stat }}''')
+          
+          if has_changes:
+              msg = (
+                  f'✅ <b>DevAgent: Tarea completada con éxito</b>\n\n'
+                  f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
+                  f'🚀 <b>Commit:</b> <code>{commit}</code> subido a <code>main</code>\n'
+                  f'🧪 <b>Tests:</b> Verificación completada sin fallos.\n\n'
+                  f'<pre>{diff}</pre>\n\n'
+                  f'🌐 Vercel ha iniciado el despliegue automático.'
+              )
+          else:
+              msg = (
+                  f'ℹ️ <b>DevAgent: Análisis completado sin modificaciones</b>\n\n'
+                  f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
+                  f'El agente concluyó la tarea sin requerir modificaciones de código.'
+              )
+          
+          if token and chat_id:
+              try:
+                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
+                      'chat_id': chat_id,
+                      'text': msg,
+                      'parse_mode': 'HTML',
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                  }, timeout=15.0)
+              except Exception as e:
+                  print(f'Error: {e}')
+          "
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      - name: Notificar Error en Telegram
+        if: failure() && ${{ inputs.telegram_chat_id != '' }}
+        run: |
+          python -c "
+          import httpx, os, html
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
+          chat_id = '${{ inputs.telegram_chat_id }}'
+          msg_id = '${{ inputs.telegram_message_id }}'
+          task = html.escape('''${{ inputs.task }}''')
+          msg = (
+              f'❌ <b>DevAgent: Error durante la ejecución</b>\n\n'
+              f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
+              f'La tarea no pudo completarse o los tests fallaron.\n'
+              f'🔗 Revisa la pestaña Actions en GitHub para ver los logs.'
+          )
+          if token and chat_id:
+              try:
+                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
+                      'chat_id': chat_id,
+                      'text': msg,
+                      'parse_mode': 'HTML',
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                  }, timeout=15.0)
+              except Exception as e:
+                  print(f'Error: {e}')
+          "
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
