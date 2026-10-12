@@ -70,8 +70,10 @@ class TelegramAdvisorBot:
                     admin = User(
                         username="jsaavedra",
                         email="juanma@hivex.internal",
-                        role="admin",
+                        hashed_password="admin_default_hash",
+                        salt="admin_default_salt",
                         is_active=True,
+                        is_admin=True,
                         telegram_id="1450113787",
                         telegram_username="Juanma_OMS"
                     )
@@ -1033,24 +1035,12 @@ class TelegramAdvisorBot:
                 else:
                     await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
 
-                is_group = str(chat_id).startswith("-")
                 target_count = int(res.get("criteria", {}).get("target_count") or 20)
-                # En grupos máximo 3 fichas para no saturar; en privado máximo 5 para evitar timeouts de serverless
-                max_cards = 3 if is_group else min(target_count, 5)
-                cards_to_send = matched_opps[:max_cards]
-
+                # Enviar exactamente las oportunidades solicitadas (hasta 20 por defecto)
+                cards_to_send = matched_opps[:target_count]
                 for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.25)
-
-                if len(matched_opps) > len(cards_to_send):
-                    cid = res.get("saved_consultation_id")
-                    portal_link = f"{self.platform_url}/?consultation_id={cid}" if cid else self.platform_url
-                    footer_msg = (
-                        f"📊 <i>Mostrando {len(cards_to_send)} de {len(matched_opps)} oportunidades verificadas.</i>\n\n"
-                        f"🔗 <a href=\"{portal_link}\"><b>Ver todas las {len(matched_opps)} oportunidades en el Panel Web HIVEX →</b></a>"
-                    )
-                    await self.send_message(chat_id, footer_msg, parse_mode="HTML")
+                    await asyncio.sleep(0.35)
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
