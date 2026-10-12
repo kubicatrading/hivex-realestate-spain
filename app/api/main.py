@@ -1026,12 +1026,35 @@ def get_saved_consultations(
                 except Exception:
                     pass
 
-            # Obtener las oportunidades completas para renderizar tarjetas en el frontend
+            # Obtener las oportunidades completas para renderizar tarjetas en el frontend (todas las vinculadas)
             matched_cards = []
-            for mid in matched_ids[:12]:
+            for mid in matched_ids:
                 clean_mid = str(mid).strip().upper()
                 if clean_mid in opps_by_id:
                     matched_cards.append(opps_by_id[clean_mid])
+
+            # Fallback en caso de que alguna ID no esté en el catálogo vivo pero sí en BD
+            missing_ids = [str(mid).strip() for mid in matched_ids if str(mid).strip().upper() not in opps_by_id]
+            if missing_ids:
+                from app.db.models import Opportunity
+                try:
+                    db_opps = db.query(Opportunity).filter(Opportunity.id.in_(missing_ids)).all()
+                    for o in db_opps:
+                        matched_cards.append({
+                            "id": o.id,
+                            "title": o.title or "Inmueble",
+                            "listing_price": o.price or 0,
+                            "estimated_reference_value": o.market_reference_price or o.price or 0,
+                            "discount_percentage": o.discount_pct or 0,
+                            "locality": o.locality or "N/D",
+                            "province": o.province or "N/D",
+                            "overall_score": o.hivex_score or 75,
+                            "images": [o.main_image] if o.main_image else [],
+                            "rental_yield": o.rental_yield or 0,
+                            "portal_url": o.portal_url
+                        })
+                except Exception as e_miss:
+                    logger.warning(f"Aviso recuperando oportunidades complementarias de BD: {e_miss}")
 
             criteria = {}
             if c.criteria_json:

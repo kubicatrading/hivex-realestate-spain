@@ -3733,6 +3733,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const favsSet = getFavoritesSet();
 
+            window._collapsedConsultationIds = window._collapsedConsultationIds || new Set();
+
             repoList.innerHTML = merged.map(c => {
                 const isAlert = Boolean(c.is_alert);
                 const queryTypeLabel = isAlert ? 'Alerta Programada' : (
@@ -3746,68 +3748,84 @@ document.addEventListener('DOMContentLoaded', () => {
                 }) : '';
 
                 const opps = c.opportunities || [];
+                const isCollapsed = window._collapsedConsultationIds.has(String(c.id));
 
-                const oppsHtml = opps.length > 0 ? `
-                    <div class="group-opportunities-grid">
-                        ${opps.map(opp => {
-                            const oppIdUpper = String(opp.id || '').trim().toUpperCase();
-                            const isFav = favsSet.has(oppIdUpper);
-                            const price = opp.listing_price || 0;
-                            const mktVal = opp.estimated_reference_value || price;
-                            const discRaw = parseFloat(opp.discount_percentage || 0);
+                const oppsCardsHtml = opps.map(opp => {
+                    const oppIdUpper = String(opp.id || '').trim().toUpperCase();
+                    const isFav = favsSet.has(oppIdUpper);
+                    const price = opp.listing_price || 0;
+                    const mktVal = opp.estimated_reference_value || price;
+                    const discRaw = parseFloat(opp.discount_percentage || 0);
 
-                            // Formato de porcentaje vs mercado: (-15%) si está por debajo, (+15%) si está por encima
-                            let pctLabel = '';
-                            let pctClass = '';
-                            if (!isNaN(discRaw) && Math.abs(discRaw) > 0.01) {
-                                if (discRaw > 0) {
-                                    pctLabel = `(-${discRaw.toFixed(1)}%)`;
-                                    pctClass = 'discount-negative';
-                                } else {
-                                    pctLabel = `(+${Math.abs(discRaw).toFixed(1)}%)`;
-                                    pctClass = 'discount-positive';
-                                }
-                            }
+                    // Formato de porcentaje vs mercado: (-15%) si está por debajo, (+15%) si está por encima
+                    let pctLabel = '';
+                    let pctClass = '';
+                    if (!isNaN(discRaw) && Math.abs(discRaw) > 0.01) {
+                        if (discRaw > 0) {
+                            pctLabel = `(-${discRaw.toFixed(1)}%)`;
+                            pctClass = 'discount-negative';
+                        } else {
+                            pctLabel = `(+${Math.abs(discRaw).toFixed(1)}%)`;
+                            pctClass = 'discount-positive';
+                        }
+                    }
 
-                            const imgSrc = (opp.images && opp.images.length > 0) ? opp.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80';
-                            const yieldVal = parseFloat(opp.rental_yield || 0);
-                            const scoreVal = parseFloat(opp.overall_score || 80);
+                    const imgSrc = (opp.images && opp.images.length > 0) ? opp.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80';
+                    const yieldVal = parseFloat(opp.rental_yield || 0);
+                    const scoreVal = parseFloat(opp.overall_score || 80);
 
-                            return `
-                                <div class="mini-opp-card" data-id="${escapeHtml(opp.id)}">
-                                    <button class="btn-fav-card ${isFav ? 'is-favorite' : ''}" data-id="${escapeHtml(opp.id)}" title="${isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}">
-                                        <svg class="heart-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="${isFav ? 'currentColor' : 'none'}">
-                                            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
-                                        </svg>
-                                    </button>
-                                    <div class="mini-opp-thumb-wrapper">
-                                        <img src="${escapeHtml(imgSrc)}" class="mini-opp-thumb" alt="${escapeHtml(opp.title)}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80'">
+                    return `
+                        <div class="mini-opp-card" data-id="${escapeHtml(opp.id)}">
+                            <button class="btn-fav-card ${isFav ? 'is-favorite' : ''}" data-id="${escapeHtml(opp.id)}" title="${isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}">
+                                <svg class="heart-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="${isFav ? 'currentColor' : 'none'}">
+                                    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+                                </svg>
+                            </button>
+                            <div class="mini-opp-thumb-wrapper">
+                                <img src="${escapeHtml(imgSrc)}" class="mini-opp-thumb" alt="${escapeHtml(opp.title)}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80'">
+                            </div>
+                            <div class="mini-opp-content">
+                                <h4 class="mini-opp-title" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h4>
+                                <span class="mini-opp-location">
+                                    <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> ${escapeHtml(opp.locality || opp.province || 'España')}
+                                </span>
+                                <div class="mini-opp-pricing">
+                                    <div class="mini-opp-price-row">
+                                        <span class="mini-opp-price">${price.toLocaleString('es-ES')} €</span>
+                                        <span class="mini-opp-discount ${pctClass}">${pctLabel}</span>
                                     </div>
-                                    <div class="mini-opp-content">
-                                        <h4 class="mini-opp-title" title="${escapeHtml(opp.title)}">${escapeHtml(opp.title)}</h4>
-                                        <span class="mini-opp-location">
-                                            <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> ${escapeHtml(opp.locality || opp.province || 'España')}
-                                        </span>
-                                        <div class="mini-opp-pricing">
-                                            <div class="mini-opp-price-row">
-                                                <span class="mini-opp-price">${price.toLocaleString('es-ES')} €</span>
-                                                <span class="mini-opp-discount ${pctClass}">${pctLabel}</span>
-                                            </div>
-                                            <div class="mini-opp-market-val">Ref. Mercado: ${mktVal.toLocaleString('es-ES')} €</div>
-                                        </div>
-                                        <div class="mini-opp-metrics-chips">
-                                            ${yieldVal > 0 ? `<span class="mini-chip yield">Yield ${yieldVal.toFixed(1)}%</span>` : ''}
-                                            <span class="mini-chip score">Score ${scoreVal.toFixed(0)}/100</span>
-                                        </div>
-                                        <div class="mini-opp-footer">
-                                            <button class="btn btn-secondary btn-sm btn-view-consultation-opp" data-id="${escapeHtml(opp.id)}" style="width: 100%; justify-content: center;">
-                                                <i data-lucide="external-link" style="width: 14px; height: 14px;"></i> Ver Ficha
-                                            </button>
-                                        </div>
-                                    </div>
+                                    <div class="mini-opp-market-val">Ref. Mercado: ${mktVal.toLocaleString('es-ES')} €</div>
                                 </div>
-                            `;
-                        }).join('')}
+                                <div class="mini-opp-metrics-chips">
+                                    ${yieldVal > 0 ? `<span class="mini-chip yield">Yield ${yieldVal.toFixed(1)}%</span>` : ''}
+                                    <span class="mini-chip score">Score ${scoreVal.toFixed(0)}/100</span>
+                                </div>
+                                <div class="mini-opp-footer">
+                                    <button class="btn btn-secondary btn-sm btn-view-consultation-opp" data-id="${escapeHtml(opp.id)}" style="width: 100%; justify-content: center;">
+                                        <i data-lucide="external-link" style="width: 14px; height: 14px;"></i> Ver Ficha
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const oppsBlockHtml = opps.length > 0 ? `
+                    <div class="group-collapsed-summary-bar" data-id="${c.id}" title="Hacer clic para desplegar u ocultar fichas" style="display: ${isCollapsed ? 'flex' : 'none'};">
+                        <div class="summary-info">
+                            <i data-lucide="layers" style="width: 16px; height: 16px; color: #818cf8;"></i>
+                            <span><strong>${opps.length} activos encontrados</strong> en esta búsqueda agrupada</span>
+                        </div>
+                        <div class="summary-cta">
+                            <span>Desplegar fichas</span>
+                            <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                        </div>
+                    </div>
+
+                    <div class="group-opportunities-collapsible ${isCollapsed ? 'collapsed' : 'expanded'}" id="opps-collapse-${c.id}">
+                        <div class="group-opportunities-grid">
+                            ${oppsCardsHtml}
+                        </div>
                     </div>
                 ` : `
                     <div style="background: rgba(15, 23, 42, 0.4); border-radius: 6px; padding: 12px; font-size: 0.82rem; color: #94a3b8; text-align: center;">
@@ -3818,7 +3836,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isActive = c.is_active !== false;
 
                 return `
-                    <div class="consultation-group-card ${isAlert ? 'is-alert-group' : 'is-search-group'}" data-consultation-id="${c.id}">
+                    <div class="consultation-group-card ${isAlert ? 'is-alert-group' : 'is-search-group'}" data-consultation-id="${c.id}" data-opps-count="${opps.length}">
                         <div class="group-header">
                             <div class="group-title-area">
                                 <h3 class="group-title">
@@ -3836,6 +3854,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             </div>
                             <div class="group-actions">
+                                ${opps.length > 0 ? `
+                                    <button class="btn-group-action btn-toggle-collapse ${isCollapsed ? 'is-collapsed' : ''}" data-id="${c.id}" title="${isCollapsed ? 'Desplegar grupo de oportunidades' : 'Plegar oportunidades'}">
+                                        <i data-lucide="${isCollapsed ? 'chevron-down' : 'chevron-up'}" style="width: 14px; height: 14px;"></i>
+                                        <span class="collapse-label">${isCollapsed ? `Desplegar (${opps.length})` : `Plegar (${opps.length})`}</span>
+                                    </button>
+                                ` : ''}
                                 <button class="btn-group-action btn-toggle-active" data-id="${c.id}" title="${isActive ? 'Pausar búsqueda y alertas' : 'Activar búsqueda y alertas'}" style="color: ${isActive ? '#fde047' : '#4ade80'};">
                                     <i data-lucide="${isActive ? 'pause' : 'play'}" style="width: 14px; height: 14px;"></i> ${isActive ? 'Pausar' : 'Activar'}
                                 </button>
@@ -3862,7 +3886,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         ` : ''}
 
-                        ${oppsHtml}
+                        ${oppsBlockHtml}
                     </div>
                 `;
             }).join('');
@@ -3940,6 +3964,111 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             });
+
+            // Gestión de colapso y despliegue por grupo
+            function toggleConsultationCollapse(cid) {
+                const strId = String(cid);
+                const isNowCollapsed = !window._collapsedConsultationIds.has(strId);
+                if (isNowCollapsed) {
+                    window._collapsedConsultationIds.add(strId);
+                } else {
+                    window._collapsedConsultationIds.delete(strId);
+                }
+                const card = repoList.querySelector(`.consultation-group-card[data-consultation-id="${cid}"]`);
+                if (!card) return;
+                const collapsible = card.querySelector('.group-opportunities-collapsible');
+                const summaryBar = card.querySelector('.group-collapsed-summary-bar');
+                const btn = card.querySelector('.btn-toggle-collapse');
+                const count = card.dataset.oppsCount || '0';
+
+                if (collapsible) {
+                    collapsible.classList.toggle('collapsed', isNowCollapsed);
+                    collapsible.classList.toggle('expanded', !isNowCollapsed);
+                }
+                if (summaryBar) {
+                    summaryBar.style.display = isNowCollapsed ? 'flex' : 'none';
+                }
+                if (btn) {
+                    btn.classList.toggle('is-collapsed', isNowCollapsed);
+                    const lbl = btn.querySelector('.collapse-label');
+                    if (lbl) lbl.textContent = isNowCollapsed ? `Desplegar (${count})` : `Plegar (${count})`;
+                    const icon = btn.querySelector('i');
+                    if (icon) icon.setAttribute('data-lucide', isNowCollapsed ? 'chevron-down' : 'chevron-up');
+                }
+                if (window.lucide) lucide.createIcons();
+                updateGlobalCollapseBtn();
+            }
+
+            function updateGlobalCollapseBtn() {
+                const btnToggleAll = document.getElementById('btn-toggle-all-consultations');
+                const labelToggleAll = document.getElementById('label-toggle-all');
+                if (!btnToggleAll || !labelToggleAll) return;
+                const allCards = repoList.querySelectorAll('.consultation-group-card');
+                if (allCards.length === 0) return;
+                const allCollapsed = Array.from(allCards).every(card => window._collapsedConsultationIds.has(String(card.dataset.consultationId)));
+                labelToggleAll.textContent = allCollapsed ? 'Desplegar todas' : 'Plegar todas';
+                const icon = btnToggleAll.querySelector('i');
+                if (icon) icon.setAttribute('data-lucide', allCollapsed ? 'chevrons-down' : 'chevrons-up');
+                if (window.lucide) lucide.createIcons();
+            }
+
+            // Listeners para botones de colapso en tarjetas
+            repoList.querySelectorAll('.btn-toggle-collapse').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleConsultationCollapse(btn.dataset.id);
+                });
+            });
+
+            // Listener para barra resumen cuando está colapsado
+            repoList.querySelectorAll('.group-collapsed-summary-bar').forEach(bar => {
+                bar.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleConsultationCollapse(bar.dataset.id);
+                });
+            });
+
+            // Botón global desplegar / plegar todas
+            const btnToggleAll = document.getElementById('btn-toggle-all-consultations');
+            if (btnToggleAll && !btnToggleAll._bound) {
+                btnToggleAll._bound = true;
+                btnToggleAll.addEventListener('click', () => {
+                    const allCards = repoList.querySelectorAll('.consultation-group-card');
+                    if (allCards.length === 0) return;
+                    const allCollapsed = Array.from(allCards).every(card => window._collapsedConsultationIds.has(String(card.dataset.consultationId)));
+                    allCards.forEach(card => {
+                        const cid = card.dataset.consultationId;
+                        if (allCollapsed) {
+                            window._collapsedConsultationIds.delete(String(cid));
+                        } else {
+                            window._collapsedConsultationIds.add(String(cid));
+                        }
+                        const collapsible = card.querySelector('.group-opportunities-collapsible');
+                        const summaryBar = card.querySelector('.group-collapsed-summary-bar');
+                        const btn = card.querySelector('.btn-toggle-collapse');
+                        const count = card.dataset.oppsCount || '0';
+                        const shouldCollapse = !allCollapsed;
+
+                        if (collapsible) {
+                            collapsible.classList.toggle('collapsed', shouldCollapse);
+                            collapsible.classList.toggle('expanded', !shouldCollapse);
+                        }
+                        if (summaryBar) {
+                            summaryBar.style.display = shouldCollapse ? 'flex' : 'none';
+                        }
+                        if (btn) {
+                            btn.classList.toggle('is-collapsed', shouldCollapse);
+                            const lbl = btn.querySelector('.collapse-label');
+                            if (lbl) lbl.textContent = shouldCollapse ? `Desplegar (${count})` : `Plegar (${count})`;
+                            const icon = btn.querySelector('i');
+                            if (icon) icon.setAttribute('data-lucide', shouldCollapse ? 'chevron-down' : 'chevron-up');
+                        }
+                    });
+                    if (window.lucide) lucide.createIcons();
+                    updateGlobalCollapseBtn();
+                });
+            }
+            updateGlobalCollapseBtn();
 
         } catch (err) {
             console.error('Error fetching consultations:', err);

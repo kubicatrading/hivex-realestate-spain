@@ -2893,6 +2893,83 @@ table.two-cols-table td {
     line-height: 1.5;
 }
 
+/* Collapsible Opportunities Section */
+.group-opportunities-collapsible {
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, margin-top 0.25s ease;
+    overflow: hidden;
+}
+
+.group-opportunities-collapsible.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+    margin-top: 0;
+    pointer-events: none;
+}
+
+.group-opportunities-collapsible.expanded {
+    max-height: 15000px;
+    opacity: 1;
+    margin-top: 14px;
+}
+
+/* Collapsed Summary Bar */
+.group-collapsed-summary-bar {
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px dashed rgba(99, 102, 241, 0.35);
+    border-radius: 8px;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.group-collapsed-summary-bar:hover {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.6);
+    transform: translateY(-1px);
+}
+
+.group-collapsed-summary-bar .summary-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    color: #cbd5e1;
+    font-weight: 500;
+}
+
+.group-collapsed-summary-bar .summary-cta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: #818cf8;
+    font-weight: 600;
+}
+
+/* Botón de Colapsar / Desplegar en la cabecera */
+.btn-group-action.btn-toggle-collapse {
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    color: #c7d2fe;
+    font-weight: 600;
+}
+
+.btn-group-action.btn-toggle-collapse:hover {
+    background: rgba(99, 102, 241, 0.3);
+    color: #ffffff;
+    border-color: rgba(99, 102, 241, 0.6);
+}
+
+.btn-group-action.btn-toggle-collapse.is-collapsed {
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+}
+
 /* Opportunities Grid inside Consultation */
 .group-opportunities-grid {
     display: grid;

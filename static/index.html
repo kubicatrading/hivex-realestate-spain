@@ -316,8 +316,15 @@
             <!-- Repositorio de Grupos de Consultas -->
             <section class="consultations-repository-section">
                 <div class="repository-section-header">
-                    <h3><i data-lucide="folder-git-2"></i> Repositorio de Consultas &amp; Alertas Guardadas</h3>
-                    <span id="repository-count-badge" class="badge-count">0 consultas</span>
+                    <div class="repository-header-title" style="display: flex; align-items: center; gap: 12px;">
+                        <h3><i data-lucide="folder-git-2"></i> Repositorio de Consultas &amp; Alertas Guardadas</h3>
+                        <span id="repository-count-badge" class="badge-count">0 consultas</span>
+                    </div>
+                    <div class="repository-header-actions" style="display: flex; gap: 10px; align-items: center;">
+                        <button id="btn-toggle-all-consultations" class="btn btn-secondary btn-sm" title="Plegar / Desplegar todas las alertas">
+                            <i data-lucide="chevrons-up-down" style="width: 14px; height: 14px;"></i> <span id="label-toggle-all">Plegar todas</span>
+                        </button>
+                    </div>
                 </div>
                 <div id="consultations-repository-list" class="consultations-repository-list">
                     <div class="empty-repo-state">
