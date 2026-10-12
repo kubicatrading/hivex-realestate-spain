@@ -65,12 +65,28 @@ class TelegramAdvisorBot:
         # 1. Caso explícito prioritario para el administrador y usuario principal jsaavedra
         if str_tg_id == "1450113787" or tg_user_clean in ["juanma_oms", "jsaavedra"]:
             admin = db.query(User).filter(User.username == "jsaavedra").first()
-            if admin:
+            if not admin:
+                try:
+                    admin = User(
+                        username="jsaavedra",
+                        email="juanma@hivex.internal",
+                        role="admin",
+                        is_active=True,
+                        telegram_id="1450113787",
+                        telegram_username="Juanma_OMS"
+                    )
+                    db.add(admin)
+                    db.commit()
+                    db.refresh(admin)
+                except Exception as e_add_admin:
+                    db.rollback()
+                    logger.warning(f"Error creando usuario jsaavedra: {e_add_admin}")
+            else:
                 if admin.telegram_id != "1450113787" or admin.telegram_username != "Juanma_OMS":
                     admin.telegram_id = "1450113787"
                     admin.telegram_username = "Juanma_OMS"
                     db.commit()
-                return True, admin, f"Usuario autenticado como jsaavedra (Juanma)"
+            return True, admin, f"Usuario autenticado como jsaavedra (Juanma)"
 
         # 2. Búsqueda por telegram_id ya registrado en BD
         user = db.query(User).filter(User.telegram_id == str_tg_id).first()
@@ -1017,12 +1033,24 @@ class TelegramAdvisorBot:
                 else:
                     await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
 
+                is_group = str(chat_id).startswith("-")
                 target_count = int(res.get("criteria", {}).get("target_count") or 20)
-                # Enviar exactamente las oportunidades solicitadas
-                cards_to_send = matched_opps[:target_count]
+                # En grupos máximo 3 fichas para no saturar; en privado máximo 5 para evitar timeouts de serverless
+                max_cards = 3 if is_group else min(target_count, 5)
+                cards_to_send = matched_opps[:max_cards]
+
                 for opp in cards_to_send:
                     await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.85)
+                    await asyncio.sleep(0.25)
+
+                if len(matched_opps) > len(cards_to_send):
+                    cid = res.get("saved_consultation_id")
+                    portal_link = f"{self.platform_url}/?consultation_id={cid}" if cid else self.platform_url
+                    footer_msg = (
+                        f"📊 <i>Mostrando {len(cards_to_send)} de {len(matched_opps)} oportunidades verificadas.</i>\n\n"
+                        f"🔗 <a href=\"{portal_link}\"><b>Ver todas las {len(matched_opps)} oportunidades en el Panel Web HIVEX →</b></a>"
+                    )
+                    await self.send_message(chat_id, footer_msg, parse_mode="HTML")
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico

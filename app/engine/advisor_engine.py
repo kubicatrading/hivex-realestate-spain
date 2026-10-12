@@ -202,12 +202,9 @@ class AdvisorEngine:
             return 0
 
     GEMINI_FLASH_CASCADE = [
-        "gemini-3.8-flash",
-        "gemini-3.5-flash",
-        "gemini-3.0-flash",
         "gemini-2.5-flash",
         "gemini-flash-latest",
-        "gemini-2.5-flash-lite",
+        "gemini-pro-latest",
     ]
 
     def __init__(self):
@@ -2181,19 +2178,20 @@ class AdvisorEngine:
                 is_same_user = (cached_consultation.user_name or "").strip().lower() == user_name.strip().lower()
                 if is_same_user:
                     # Mismo usuario: actualizar in-place y subir a primera posición
-                    cached_consultation.matched_opportunity_ids_json = json.dumps([o.get("id") for o in matched_opps[:20]])
-                    cached_consultation.matched_count = len(matched_opps)
-                    cached_consultation.ai_summary = ai_summary
-                    cached_consultation.is_active = True
-                    cached_consultation.updated_at = datetime.utcnow()
-                    cached_consultation.created_at = datetime.utcnow()
-                    target_db.commit()
-                    target_db.refresh(cached_consultation)
-                    saved_consultation_id = cached_consultation.id
-                    cached_consultation.title = self.format_consultation_title(criteria, consultation_id=cached_consultation.id)
-                    target_db.commit()
-                    title = cached_consultation.title
-                    logger.info(f"Consulta ID #{saved_consultation_id} del mismo usuario {user_name} re-posicionada arriba con título: {title}")
+                    existing_item = target_db.query(SavedConsultation).filter(SavedConsultation.id == cached_consultation.id).first()
+                    if existing_item:
+                        existing_item.matched_opportunity_ids_json = json.dumps([o.get("id") for o in matched_opps[:20]])
+                        existing_item.matched_count = len(matched_opps)
+                        existing_item.ai_summary = ai_summary
+                        existing_item.is_active = True
+                        existing_item.updated_at = datetime.utcnow()
+                        existing_item.created_at = datetime.utcnow()
+                        existing_item.title = self.format_consultation_title(criteria, consultation_id=existing_item.id)
+                        target_db.commit()
+                        target_db.refresh(existing_item)
+                        saved_consultation_id = existing_item.id
+                        title = existing_item.title
+                        logger.info(f"Consulta ID #{saved_consultation_id} del mismo usuario {user_name} re-posicionada arriba con título: {title}")
                 else:
                     # Usuario diferente: crear nueva línea con fecha actual y mismas fichas
                     new_consultation = SavedConsultation(
