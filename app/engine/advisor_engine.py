@@ -71,7 +71,7 @@ SPANISH_ZONE_DEFINITIONS = [
     # Municipios Madrid
     ("La Moraleja - Alcobendas - Colegio Suizo", "Madrid", ["la moraleja", "moraleja", "el soto", "el soto de la moraleja", "el encinar", "el encinar de los reyes", "alcobendas", "colegio suizo", "colegio suizo de madrid", "28109", "28100", "28108"]),
     ("Ciudalcampo - San Sebastián de los Reyes Norte", "Madrid", ["ciudalcampo", "fuente del fresno", "santo domingo", "la granjilla", "club de campo", "valdelagua", "28707", "28708", "28120"]),
-    ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas"]),
+    ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas", "avenida de las vegas", "avda de las vegas", "urbanización las vegas", "urbanizacion las vegas", "urbanización avenida de las vegas", "urbanizacion avenida de las vegas", "santa maría", "santa maria", "28229"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
     ("Eje Guadalix de la Sierra - Algete - Colmenar Viejo", "Madrid", ["guadalix de la sierra", "guadalix", "gualix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "miraflores de la sierra", "28794", "28770", "28791", "28792"]),
     ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "paracuellos", "paracuellos de jarama", "paracuellos del jarama", "jarama", "rio jarama", "río jarama", "valpuercos", "28110", "28140", "28701", "28702", "28703", "28860"]),
@@ -834,10 +834,15 @@ class AdvisorEngine:
             target_zone = criteria["zone_or_neighborhood"].strip().lower()
             zone_keys = [target_zone]
 
+            # Si target_zone contiene un código postal (ej: 28229), añadirlo a las claves de coincidencia
+            postal_matches = re.findall(r'\b\d{5}\b', target_zone)
+            if postal_matches:
+                zone_keys.extend(postal_matches)
+
             matched_zone_def = None
             for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
                 if z_name.lower() == target_zone or target_zone in [t.lower() for t in z_tokens] or any(t.lower() in target_zone for t in z_tokens):
-                    zone_keys = list(set([target_zone] + [t.lower() for t in z_tokens]))
+                    zone_keys = list(set(zone_keys + [t.lower() for t in z_tokens]))
                     matched_zone_def = (z_name, z_prov)
                     break
 
@@ -1897,7 +1902,8 @@ class AdvisorEngine:
         criteria: Dict[str, Any],
         matched_opps: List[Dict[str, Any]],
         conversation_context: Optional[List[Dict[str, str]]] = None,
-        is_relaxed: bool = False
+        is_relaxed: bool = False,
+        exact_zone_count: int = 0
     ) -> Tuple[str, str, str, str]:
         """
         Genera la respuesta del Asesor Inmobiliario formateada en Markdown para Telegram,
@@ -2009,7 +2015,10 @@ class AdvisorEngine:
                 clean_yield = min(18.0, avg_yield)
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{clean_yield:.1f}% Yield</b>")
             if is_relaxed:
-                intro_lines.append(f"\n⚠️ <i>No constan activos exactos registrados en <b>{html.escape(zone_title)}</b>. Hemos ampliado la búsqueda al ámbito de la provincia / área contigua para servirte las mejores <b>{len(matched_opps)} oportunidades</b>:</i>")
+                if exact_zone_count == 0:
+                    intro_lines.append(f"\n⚠️ <i>No constan activos exactos registrados en <b>{html.escape(zone_title)}</b>. Hemos ampliado la búsqueda al ámbito de la provincia / área contigua para servirte las mejores <b>{len(matched_opps)} oportunidades</b>:</i>")
+                else:
+                    intro_lines.append(f"\n🎯 <i>Hemos localizado <b>{exact_zone_count} oportunidades exclusivas</b> en <b>{html.escape(zone_title)}</b>. Para completar tu solicitud hasta las <b>{len(matched_opps)} mejores oportunidades</b>, hemos añadido las más destacadas del área metropolitana:</i>")
             else:
                 intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
         else:
@@ -2243,6 +2252,8 @@ class AdvisorEngine:
                 "matched_count": len(matched_opps),
                 "saved_consultation_id": saved_consultation_id,
                 "should_display_cards": True,
+                "is_relaxed": False,
+                "exact_zone_count": len(matched_opps),
                 "from_cache": True,
                 "tokens_consumed": 0
             }
@@ -2306,6 +2317,7 @@ class AdvisorEngine:
         should_display_cards = False
         intro_text = None
         is_relaxed = False
+        exact_zone_count = 0
 
         if is_quantitative_query:
             # 2A. Consulta Cuantitativa: Responder con datos y números exactos SIN enviar fichas
@@ -2396,6 +2408,8 @@ class AdvisorEngine:
                         except Exception as e_pers_opps:
                             logger.debug(f"Aviso persistiendo conocimiento externo de oportunidades: {e_pers_opps}")
 
+            exact_zone_count = len(matched_opps)
+
             # Si el filtro ultraestricto arrojó menos de target_count (20) oportunidades,
             # relajar criterios secundarios para completar el cupo normativo de 20 fichas de HIVEX
             if len(matched_opps) < target_count:
@@ -2410,7 +2424,7 @@ class AdvisorEngine:
                         seen_ids.add(str(ro.get("id")))
                         if len(matched_opps) >= target_count:
                             break
-                if len(matched_opps) >= target_count:
+                if len(matched_opps) >= target_count and exact_zone_count == 0:
                     is_relaxed = True
 
                 # Si aún faltan oportunidades porque la micro-zona o código postal no arroja activos en catálogo,
@@ -2440,7 +2454,8 @@ class AdvisorEngine:
                 user_name=user_name,
                 criteria=criteria,
                 matched_opps=matched_opps,
-                is_relaxed=is_relaxed
+                is_relaxed=is_relaxed,
+                exact_zone_count=exact_zone_count
             )
 
         # 4. Persistir en Base de Datos de manera segura con sesión corta
@@ -2603,6 +2618,8 @@ class AdvisorEngine:
             "matched_count": len(matched_opps),
             "matched_opportunities": matched_opps[:20],
             "should_display_cards": should_display_cards,
+            "is_relaxed": is_relaxed,
+            "exact_zone_count": exact_zone_count,
             "saved_consultation_id": saved_consultation_id,
             "transcription": transcription,
             "is_voice": is_voice

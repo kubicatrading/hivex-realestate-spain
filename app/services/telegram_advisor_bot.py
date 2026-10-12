@@ -478,26 +478,27 @@ class TelegramAdvisorBot:
                     data["reply_to_message_id"] = str(reply_to_message_id)
 
                 async with httpx.AsyncClient(timeout=45.0) as client:
-                    res = await client.post(photo_url, data=data, files=files)
-                    if res.status_code == 429:
-                        try:
-                            retry_sec = int(res.json().get("parameters", {}).get("retry_after", 3))
-                        except Exception:
-                            retry_sec = 3
-                        logger.warning(f"sendPhoto rate-limited (429). Pausando {retry_sec}s y reintentando...")
-                        await asyncio.sleep(min(retry_sec, 6))
-                        files_retry = {"photo": ("hivex_card.png", card_bytes, "image/png")}
-                        res = await client.post(photo_url, data=data, files=files_retry)
-
-                    if res.status_code == 200:
-                        res_data = res.json().get("result", {})
-                        sent_msg_id = res_data.get("message_id")
-                        if sent_msg_id:
-                            # Añadir reacción de corazón al pie del mensaje (igual que en WhatsApp)
-                            await self.set_message_reaction(chat_id=chat_id, message_id=sent_msg_id, emoji="❤️")
-                        return True
-                    else:
-                        logger.warning(f"sendPhoto devolvió {res.status_code}: {res.text}. Intentando fallback...")
+                    for attempt in range(3):
+                        res = await client.post(photo_url, data=data, files=files)
+                        if res.status_code == 200:
+                            res_data = res.json().get("result", {})
+                            sent_msg_id = res_data.get("message_id")
+                            if sent_msg_id:
+                                # Añadir reacción de corazón al pie del mensaje (igual que en WhatsApp)
+                                await self.set_message_reaction(chat_id=chat_id, message_id=sent_msg_id, emoji="❤️")
+                            return True
+                        elif res.status_code == 429:
+                            try:
+                                retry_sec = int(res.json().get("parameters", {}).get("retry_after", 3))
+                            except Exception:
+                                retry_sec = 3
+                            logger.warning(f"sendPhoto rate-limited (429, intento {attempt+1}/3). Pausando {retry_sec + 1}s...")
+                            await asyncio.sleep(retry_sec + 1)
+                            files = {"photo": ("hivex_card.png", card_bytes, "image/png")}
+                        else:
+                            logger.warning(f"sendPhoto devolvió {res.status_code}: {res.text}. Reintentando...")
+                            await asyncio.sleep(1.0)
+                            files = {"photo": ("hivex_card.png", card_bytes, "image/png")}
         except Exception as e_card:
             logger.warning(f"Excepción renderizando tarjeta gráfica WhatsApp: {repr(e_card)}", exc_info=True)
 
@@ -1049,18 +1050,46 @@ class TelegramAdvisorBot:
             intro_text = res.get("intro_text")
 
             if matched_opps and should_display_cards:
-                # 1. Enviar resumen diagnóstico introductorio
-                if intro_text:
+                target_count = int(res.get("criteria", {}).get("target_count") or 20)
+                cards_to_send = matched_opps[:target_count]
+
+                # 1. Notificación previa: si hubo ampliación geográfica (is_relaxed), enviar aviso explícito FIRST
+                if res.get("is_relaxed"):
+                    crit = res.get("criteria", {})
+                    zone_label = crit.get("zone_or_neighborhood") or crit.get("postal_code") or "la micro-zona solicitada"
+                    prov_label = crit.get("province") or "Madrid"
+                    exact_count = res.get("exact_zone_count", 0)
+                    if exact_count == 0:
+                        warning_msg = (
+                            f"⚠️ <b>Aviso de Búsqueda HIVEX</b>\n\n"
+                            f"No constan activos exactos registrados en la micro-dirección: <b>{zone_label}</b>.\n\n"
+                            f"Para satisfacer tu petición y no dejar la consulta vacía, hemos ampliado la búsqueda al ámbito de la provincia / corona metropolitana de <b>{prov_label}</b>, seleccionando las <b>{len(cards_to_send)} mejores oportunidades</b> disponibles por scoring de rentabilidad y descuento.\n\n"
+                            f"<i>A continuación volcamos las {len(cards_to_send)} fichas interactivas completas:</i>"
+                        )
+                    else:
+                        warning_msg = (
+                            f"🎯 <b>Resultados de Búsqueda HIVEX</b>\n\n"
+                            f"Se han localizado <b>{exact_count} oportunidades exclusivas</b> en la micro-zona de <b>{zone_label}</b>.\n\n"
+                            f"Para completar tu solicitud con las <b>{len(cards_to_send)} mejores opciones</b> del mercado, hemos añadido las más rentables de la corona metropolitana de <b>{prov_label}</b>.\n\n"
+                            f"<i>A continuación volcamos las {len(cards_to_send)} fichas interactivas (las {exact_count} primeras corresponden a la micro-zona exacta):</i>"
+                        )
+                    await self.send_message(chat_id, warning_msg, parse_mode="HTML", reply_to_message_id=message_id)
+                    await asyncio.sleep(1.2)
+                elif intro_text:
                     await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
+                    await asyncio.sleep(0.5)
                 else:
                     await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
+                    await asyncio.sleep(0.5)
 
-                target_count = int(res.get("criteria", {}).get("target_count") or 20)
-                # Enviar exactamente las oportunidades solicitadas (hasta 20 por defecto)
-                cards_to_send = matched_opps[:target_count]
-                for opp in cards_to_send:
-                    await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.35)
+                # 2. Despachar exactamente las oportunidades solicitadas garantizando la entrega íntegra
+                for idx, opp in enumerate(cards_to_send):
+                    sent = await self.send_photo_card(chat_id=chat_id, opp=opp)
+                    if not sent:
+                        logger.warning(f"[Advisor Bot] Tarjeta {idx+1}/{len(cards_to_send)} ({opp.get('id')}) falló en primer intento. Reintentando...")
+                        await asyncio.sleep(1.2)
+                        await self.send_photo_card(chat_id=chat_id, opp=opp)
+                    await asyncio.sleep(0.85)
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
