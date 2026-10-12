@@ -2832,6 +2832,14 @@ table.two-cols-table td {
     border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
+.meta-badge.id-badge {
+    background: rgba(139, 92, 246, 0.18);
+    color: #c084fc;
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
 .group-actions {
     display: flex;
     gap: 8px;

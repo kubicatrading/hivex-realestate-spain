@@ -1063,9 +1063,25 @@ def get_saved_consultations(
                 except Exception:
                     pass
 
+            title = c.title or "Búsqueda"
+            if criteria:
+                from app.engine.advisor_engine import RealEstateAdvisorEngine
+                specific_zone = criteria.get("zone_or_neighborhood")
+                needs_format = (
+                    f"#{c.id}" not in title
+                    or (specific_zone and specific_zone.strip() and specific_zone.strip().lower() not in title.lower())
+                )
+                if needs_format:
+                    title = RealEstateAdvisorEngine.format_consultation_title(criteria, consultation_id=c.id)
+                    try:
+                        c.title = title
+                        db.commit()
+                    except Exception:
+                        pass
+
             result.append({
                 "id": c.id,
-                "title": c.title,
+                "title": title,
                 "user_name": c.user_name,
                 "description": c.description,
                 "query_type": c.query_type,

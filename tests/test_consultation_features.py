@@ -271,3 +271,43 @@ async def test_consultation_alerts_worker_daily_scan(in_memory_db, monkeypatch):
     assert "OPP_2" in delivered_ids
     assert cons.matched_count == 2
     assert cons.last_alert_at is not None
+
+def test_specific_consultation_title_formatting_and_id():
+    """
+    Verifica que la generación de títulos de búsquedas y alertas especifique
+    la zona geográfica concreta (e.g. eje, barrio o localidad) y añada el número de ID.
+    """
+    advisor = AdvisorEngine()
+
+    # Caso 1: Eje específico con tipo Rústico / Terreno y ID #21
+    criteria_1 = {
+        "query_type": "SEARCH_OPPORTUNITIES",
+        "property_type": "Rústico / Terreno",
+        "zone_or_neighborhood": "Eje Guadalix de la Sierra - Algete - Colmenar Viejo",
+        "province": "Madrid"
+    }
+    title_1 = advisor.format_consultation_title(criteria_1, consultation_id=21)
+    assert title_1 == "🔍 Búsqueda #21: Rústico / Eje Guadalix de la Sierra - Algete - Colmenar Viejo"
+
+    # Caso 2: Alerta con barrio específico y límite de precio
+    criteria_2 = {
+        "query_type": "SEARCH_OPPORTUNITIES",
+        "property_type": "Piso / Apartamento",
+        "zone_or_neighborhood": "Chamberí",
+        "province": "Madrid",
+        "max_price": 450000,
+        "is_alert": True
+    }
+    title_2 = advisor.format_consultation_title(criteria_2, consultation_id=105)
+    assert title_2 == "🔔 Alerta #105: Piso / Chamberí (< 450.000€)"
+
+    # Caso 3: Consulta general sin zona específica (fallback a provincia)
+    criteria_3 = {
+        "query_type": "SEARCH_OPPORTUNITIES",
+        "property_type": "Chalet",
+        "province": "Valencia",
+        "is_alert": False
+    }
+    title_3 = advisor.format_consultation_title(criteria_3, consultation_id=7)
+    assert title_3 == "🔍 Búsqueda #7: Chalet en Valencia"
+

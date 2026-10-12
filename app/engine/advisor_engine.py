@@ -1846,6 +1846,52 @@ class AdvisorEngine:
     # --------------------------------------------------------------------------
     # 8. GENERACIÓN DE ANÁLISIS Y RESPUESTA ASESORA
     # --------------------------------------------------------------------------
+    @classmethod
+    def format_consultation_title(
+        cls,
+        criteria: Dict[str, Any],
+        consultation_id: Optional[int] = None
+    ) -> str:
+        """
+        Genera un título descriptivo y específico para la consulta/alerta.
+        Especifica la zona exacta (barrio, municipio o eje) y el ID para su identificación unívoca.
+        Ejemplo: '🔍 Búsqueda #21: Rústico / Eje Guadalix de la Sierra - Algete - Colmenar Viejo'
+        """
+        q_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
+        prov = criteria.get("province") or "España"
+        specific_zone = criteria.get("zone_or_neighborhood")
+        raw_type = criteria.get("property_type") or "Oportunidades"
+
+        # ID tag si está disponible
+        id_tag = f" #{consultation_id}" if consultation_id else ""
+
+        # Prefijo según tipo
+        if criteria.get("is_alert"):
+            prefix = f"🔔 Alerta{id_tag}"
+        elif q_type == "DISTRICT_ANALYSIS":
+            prefix = f"📊 Análisis de Zona{id_tag}"
+        elif q_type == "ROI_BTL_CALC":
+            prefix = f"📈 Rentabilidad BTL{id_tag}"
+        elif q_type == "SCORING_CROSSREF":
+            prefix = f"🌟 Scoring Top{id_tag}"
+        else:
+            prefix = f"🔍 Búsqueda{id_tag}"
+
+        # Descriptor de tipo y zona
+        if specific_zone and specific_zone.strip() and specific_zone.strip().lower() != prov.strip().lower():
+            # Limpiar el tipo para evitar duplicar barras (e.g. 'Rústico / Terreno' -> 'Rústico')
+            clean_type = raw_type.split("/")[0].strip() if "/" in raw_type else raw_type.strip()
+            descriptor = f"{clean_type} / {specific_zone.strip()}"
+        else:
+            descriptor = f"{raw_type} en {prov}"
+
+        if criteria.get("max_price"):
+            descriptor += f" (< {int(criteria['max_price']):,}€)".replace(",", ".")
+        if criteria.get("min_discount"):
+            descriptor += f" (dto ≥ {int(criteria['min_discount'])}%)"
+
+        return f"{prefix}: {descriptor}"
+
     def generate_advisor_response(
         self,
         user_name: str,
@@ -1863,23 +1909,8 @@ class AdvisorEngine:
         zone_title = criteria.get("zone_or_neighborhood") or prov
         count = len(matched_opps)
 
-        # Generar Título amigable para el Repositorio de la plataforma
-        if criteria.get("is_alert"):
-            title = f"🔔 Alerta: {criteria.get('property_type') or 'Inmuebles'} en {prov}"
-            if criteria.get("max_price"):
-                title += f" < {int(criteria['max_price']):,}€".replace(",", ".")
-            if criteria.get("min_discount"):
-                title += f" (dto ≥ {int(criteria['min_discount'])}%)"
-        elif q_type == "DISTRICT_ANALYSIS":
-            title = f"📊 Análisis de Barrio / Zona: {prov}"
-        elif q_type == "ROI_BTL_CALC":
-            title = f"📈 Rentabilidad BTL & Retorno en {prov}"
-        elif q_type == "SCORING_CROSSREF":
-            title = f"🌟 Scoring & Comparativa Top en {prov}"
-        else:
-            title = f"🔍 Búsqueda: {criteria.get('property_type') or 'Oportunidades'} en {prov}"
-            if criteria.get("max_price"):
-                title += f" (< {int(criteria['max_price']):,}€)".replace(",", ".")
+        # Generar Título amigable y específico para el Repositorio de la plataforma
+        title = self.format_consultation_title(criteria, consultation_id=None)
 
         # Construcción del Mensaje Conversacional de Telegram
         lines = []
@@ -2150,7 +2181,6 @@ class AdvisorEngine:
                 is_same_user = (cached_consultation.user_name or "").strip().lower() == user_name.strip().lower()
                 if is_same_user:
                     # Mismo usuario: actualizar in-place y subir a primera posición
-                    cached_consultation.title = title
                     cached_consultation.matched_opportunity_ids_json = json.dumps([o.get("id") for o in matched_opps[:20]])
                     cached_consultation.matched_count = len(matched_opps)
                     cached_consultation.ai_summary = ai_summary
@@ -2160,7 +2190,10 @@ class AdvisorEngine:
                     target_db.commit()
                     target_db.refresh(cached_consultation)
                     saved_consultation_id = cached_consultation.id
-                    logger.info(f"Consulta ID #{saved_consultation_id} del mismo usuario {user_name} re-posicionada arriba.")
+                    cached_consultation.title = self.format_consultation_title(criteria, consultation_id=cached_consultation.id)
+                    target_db.commit()
+                    title = cached_consultation.title
+                    logger.info(f"Consulta ID #{saved_consultation_id} del mismo usuario {user_name} re-posicionada arriba con título: {title}")
                 else:
                     # Usuario diferente: crear nueva línea con fecha actual y mismas fichas
                     new_consultation = SavedConsultation(
@@ -2184,7 +2217,10 @@ class AdvisorEngine:
                     target_db.commit()
                     target_db.refresh(new_consultation)
                     saved_consultation_id = new_consultation.id
-                    logger.info(f"Nueva línea #{saved_consultation_id} creada para usuario '{user_name}' reutilizando fichas de #{cached_consultation.id}.")
+                    new_consultation.title = self.format_consultation_title(criteria, consultation_id=new_consultation.id)
+                    target_db.commit()
+                    title = new_consultation.title
+                    logger.info(f"Nueva línea #{saved_consultation_id} creada para usuario '{user_name}' con título: {title}")
             except Exception as e_pers_cache:
                 logger.error(f"Error persistiendo consulta desde caché: {e_pers_cache}")
                 try: target_db.rollback()
@@ -2498,7 +2534,10 @@ class AdvisorEngine:
                     target_db.commit()
                     target_db.refresh(existing_consultation)
                     saved_consultation_id = existing_consultation.id
-                    logger.info(f"Consulta ID #{saved_consultation_id} actualizada correctamente con {len(matched_opps)} oportunidades.")
+                    existing_consultation.title = self.format_consultation_title(criteria, consultation_id=existing_consultation.id)
+                    title = existing_consultation.title
+                    target_db.commit()
+                    logger.info(f"Consulta ID #{saved_consultation_id} actualizada correctamente con {len(matched_opps)} oportunidades y título '{title}'.")
                 else:
                     consultation = SavedConsultation(
                         user_id=db_user.id if db_user else None,
@@ -2519,7 +2558,10 @@ class AdvisorEngine:
                     target_db.commit()
                     target_db.refresh(consultation)
                     saved_consultation_id = consultation.id
-                    logger.info(f"Nueva consulta persistida con éxito en BD con ID #{saved_consultation_id}")
+                    consultation.title = self.format_consultation_title(criteria, consultation_id=consultation.id)
+                    title = consultation.title
+                    target_db.commit()
+                    logger.info(f"Nueva consulta persistida con éxito en BD con ID #{saved_consultation_id} y título '{title}'")
             except Exception as e_save:
                 logger.error(f"Error al persistir consulta y conversación en BD: {e_save}")
                 try:

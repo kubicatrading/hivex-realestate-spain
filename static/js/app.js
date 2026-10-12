@@ -3844,6 +3844,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ${escapeHtml(c.title)}
                                 </h3>
                                 <div class="group-meta-badges">
+                                    <span class="meta-badge id-badge">#${c.id}</span>
                                     <span class="meta-badge author"><i data-lucide="user" style="width: 12px; height: 12px;"></i> ${escapeHtml(c.user_name || 'Usuario')}</span>
                                     <span class="meta-badge date"><i data-lucide="calendar" style="width: 12px; height: 12px;"></i> ${dateStr}</span>
                                     <span class="meta-badge ${isAlert ? 'type-alert' : 'type-search'}">${queryTypeLabel}</span>
