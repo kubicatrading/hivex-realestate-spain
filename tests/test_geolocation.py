@@ -123,3 +123,68 @@ def test_market_catalog_images_integrity():
     assert twenty_count >= 5, f"Expected at least 5 listings with 20 real photos, found {twenty_count}"
 
 
+def test_universal_zone_matching_and_portal_fallback():
+    """Valida la regla común para cualquier tipo de zona (barrio, urbanización, PAU, ensanche, pueblo, CP) y fallback a portales."""
+    from app.engine.advisor_engine import AdvisorEngine
+
+    engine = AdvisorEngine()
+
+    # 1. Extracción de entidades de zona diversas
+    c_urb = engine._parse_query_intent_heuristics("Busca en la Urbanización Las Vegas de Villanueva del Pardillo 28229")
+    assert "Las Vegas" in (c_urb.get("zone_or_neighborhood") or "")
+    assert c_urb.get("postal_code") == "28229"
+
+    # Urbanización no listada en diccionarios previos
+    c_unlisted_urb = engine._parse_query_intent_heuristics("busca chalets en la Urbanización Cotos de Monterrey")
+    assert "Urbanización Cotos De Monterrey" in (c_unlisted_urb.get("zone_or_neighborhood") or "")
+
+    c_pau = engine._parse_query_intent_heuristics("encuentra chollos en el PAU de Vallecas")
+    assert "PAU de Vallecas" in (c_pau.get("zone_or_neighborhood") or "")
+
+    c_ens = engine._parse_query_intent_heuristics("oportunidades en el Ensanche de Barajas")
+    assert "Ensanche de Barajas" in (c_ens.get("zone_or_neighborhood") or "")
+
+    c_pueblo = engine._parse_query_intent_heuristics("casas en el pueblo de Alpedrete")
+    assert "Alpedrete" in (c_pueblo.get("zone_or_neighborhood") or "")
+
+    c_cp = engine._parse_query_intent_heuristics("oportunidades en el 46005")
+    assert c_cp.get("postal_code") == "46005" or "46005" in (c_cp.get("zone_or_neighborhood") or "")
+
+    # 2. Filtrado estricto por coincidencia en texto de portales sin autocompletar con zonas ajenas
+    mock_opps = [
+        {
+            "id": "OPP-1",
+            "title": "Chalet independiente en Urbanización Las Vegas",
+            "description": "Preciosa vivienda en zona residencial tranquila",
+            "locality": "Villanueva del Pardillo",
+            "postal_code": "28229",
+            "province": "Madrid",
+            "portal": "idealista"
+        },
+        {
+            "id": "OPP-2",
+            "title": "Piso reformado en Chamberí",
+            "description": "Excelente rentabilidad en el centro",
+            "locality": "Madrid",
+            "postal_code": "28010",
+            "province": "Madrid",
+            "portal": "idealista"
+        },
+        {
+            "id": "OPP-3",
+            "title": "Ático con terraza en Eixample",
+            "description": "Vistas panorámicas en Barcelona",
+            "locality": "Barcelona",
+            "postal_code": "08007",
+            "province": "Barcelona",
+            "portal": "fotocasa"
+        }
+    ]
+
+    res = engine.filter_opportunities(mock_opps, c_urb)
+    assert len(res) == 1
+    assert res[0]["id"] == "OPP-1"
+    assert res[0]["postal_code"] == "28229"
+
+
+

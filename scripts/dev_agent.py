@@ -13,8 +13,34 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Any
 import httpx
+import html
+from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+def send_telegram_update(
+    text: str,
+    chat_id: Optional[str] = None,
+    bot_token: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None
+) -> None:
+    """Envía actualizaciones de progreso en tiempo real al chat de Telegram del usuario."""
+    token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
+    if not chat_id or not token:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = int(reply_to_message_id)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            client.post(url, json=payload)
+    except Exception as e:
+        print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
 
 # -----------------------------------------------------------------------------
 # HERRAMIENTAS (TOOLS) DEL DEVAGENT
@@ -228,7 +254,14 @@ Reglas fundamentales de trabajo:
 5. Al concluir, presenta un resumen conciso y profesional de los cambios implementados y los tests pasados.
 """
 
-def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
+def execute_agent_loop(
+    task: str,
+    api_key: str,
+    max_steps: int = 15,
+    chat_id: Optional[str] = None,
+    bot_token: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None
+) -> str:
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
         "gemini-2.5-flash",
@@ -245,6 +278,10 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
     ]
 
     print(f"🚀 Iniciando HIVEX DevAgent para la tarea: {task}")
+    send_telegram_update(
+        f"🤖 <b>DevAgent Activo:</b> Comenzando investigación autónoma para:\n<i>{html.escape(task)}</i>",
+        chat_id, bot_token, reply_to_message_id
+    )
     
     for step in range(1, max_steps + 1):
         print(f"\n--- [Paso {step}/{max_steps}] Razonando con Gemini ---")
@@ -277,7 +314,9 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
                 continue
 
         if not resp_data:
-            return "Error: No se pudo obtener respuesta válida de Gemini API tras evaluar la cascada de modelos."
+            err_msg = "Error: No se pudo obtener respuesta válida de Gemini API tras evaluar la cascada de modelos."
+            send_telegram_update(f"❌ {err_msg}", chat_id, bot_token, reply_to_message_id)
+            return err_msg
 
         candidate = resp_data.get("candidates", [{}])[0]
         content = candidate.get("content", {})
@@ -294,7 +333,8 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
 
         if not function_calls:
             print("✅ El DevAgent ha completado la tarea sin más llamadas a herramientas.")
-            return "\n".join(text_parts)
+            final_summary = "\n".join(text_parts)
+            return final_summary
 
         # Ejecutar function calls solicitadas
         function_response_parts = []
@@ -302,6 +342,29 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
             fname = fc.get("name")
             fargs = fc.get("args") or {}
             print(f"🔧 Ejecutando herramienta: {fname}({json.dumps(fargs, ensure_ascii=False)})")
+
+            # Notificar acción a Telegram
+            icons = {
+                "read_file": "🔍",
+                "replace_file_content": "✏️",
+                "write_file": "📝",
+                "run_command": "⚡",
+                "search_code": "🔎",
+                "list_files": "📁"
+            }
+            icon = icons.get(fname, "🔧")
+            target_desc = ""
+            if fname in ("read_file", "replace_file_content", "write_file"):
+                target_desc = f"<code>{fargs.get('path', '')}</code>"
+            elif fname == "run_command":
+                target_desc = f"<code>{fargs.get('command', '')}</code>"
+            elif fname == "search_code":
+                target_desc = f"«{html.escape(fargs.get('query', ''))}»"
+
+            send_telegram_update(
+                f"{icon} <b>[Paso {step}/{max_steps}]</b> {fname} {target_desc}",
+                chat_id, bot_token, reply_to_message_id
+            )
             
             tool_func = TOOLS_MAP.get(fname)
             if not tool_func:
@@ -311,6 +374,15 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
                     result_str = tool_func(**fargs)
                 except Exception as ex:
                     result_str = f"Error en ejecución: {ex}"
+
+            # Si es ejecución de comando (ej: pytest) y falló, reportar a Telegram para feedback transparente
+            if fname == "run_command" and ("FAILED" in result_str or "AssertionError" in result_str or "exit code 1" in result_str.lower()):
+                err_lines = [l for l in result_str.splitlines() if "FAILED" in l or "AssertionError" in l or "Error:" in l][:4]
+                err_summary = "\n".join(err_lines)
+                send_telegram_update(
+                    f"⚠️ <b>Aviso en tests:</b>\n<pre>{html.escape(err_summary)}</pre>\n<i>DevAgent analizando el fallo para autocorregirlo...</i>",
+                    chat_id, bot_token, reply_to_message_id
+                )
 
             # Truncar salida si es excesiva
             if len(result_str) > 8000:
@@ -329,11 +401,16 @@ def execute_agent_loop(task: str, api_key: str, max_steps: int = 15) -> str:
             "parts": function_response_parts
         })
 
-    return "DevAgent alcanzó el límite de pasos máximos (15). Por favor revisa los logs."
+    limit_msg = "DevAgent alcanzó el límite de pasos máximos (15). Por favor revisa los logs."
+    send_telegram_update(f"⏳ {limit_msg}", chat_id, bot_token, reply_to_message_id)
+    return limit_msg
 
 def main():
     parser = argparse.ArgumentParser(description="HIVEX DevAgent Autonomous Runner")
     parser.add_argument("--task", type=str, required=True, help="Descripción de la tarea de desarrollo")
+    parser.add_argument("--chat-id", type=str, default="", help="Chat ID de Telegram para actualizaciones en vivo")
+    parser.add_argument("--message-id", type=str, default="", help="Message ID de Telegram para responder")
+    parser.add_argument("--telegram-token", type=str, default="", help="Token del bot de Telegram")
     args = parser.parse_args()
 
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -341,7 +418,16 @@ def main():
         print("Error: Se requiere GEMINI_API_KEY o GOOGLE_API_KEY en el entorno.", file=sys.stderr)
         sys.exit(1)
 
-    result = execute_agent_loop(args.task, api_key)
+    bot_token = args.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
+    msg_id = int(args.message_id) if args.message_id and args.message_id.isdigit() else None
+
+    result = execute_agent_loop(
+        task=args.task,
+        api_key=api_key,
+        chat_id=args.chat_id or None,
+        bot_token=bot_token or None,
+        reply_to_message_id=msg_id
+    )
     print("\n" + "="*60)
     print("RESUMEN FINAL DEVAGENT:")
     print("="*60)

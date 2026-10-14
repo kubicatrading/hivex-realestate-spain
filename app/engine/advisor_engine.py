@@ -376,10 +376,10 @@ class AdvisorEngine:
                 "Extrae los parámetros de la consulta del usuario en formato JSON con las siguientes claves: "
                 "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT), "
                 "province (nombre de la provincia o null), "
-                "zone_or_neighborhood (barrio, zona, calle o subdistrito concreto, ej: 'Madrid Río - Avenida de Portugal' o null), "
+                "zone_or_neighborhood (extrae cualquier micro-zona geográfica concreta solicitada por el usuario, sin importar su escala: puede ser un barrio, una urbanización, un P.A.U., un ensanche urbanístico, un código postal, un pueblo o municipio, o una calle/subdistrito. Si no se solicita ninguna zona concreta, devuelve null), "
+                "postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null), "
                 "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 10 para '10 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 20), "
                 "sort_by ('rental_yield', 'overall_score', 'discount' o 'price'), "
-
                 "strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD' o null), "
                 "min_price (float o null), max_price (float o null), "
                 "min_discount (float o null), min_yield (float o null), is_alert (bool)."
@@ -394,6 +394,8 @@ class AdvisorEngine:
                             criteria["province"] = parsed["province"]
                         if parsed.get("zone_or_neighborhood"):
                             criteria["zone_or_neighborhood"] = parsed["zone_or_neighborhood"]
+                        if parsed.get("postal_code"):
+                            criteria["postal_code"] = str(parsed["postal_code"]).strip()
                         if parsed.get("target_count") and isinstance(parsed["target_count"], int):
                             criteria["target_count"] = parsed["target_count"]
                         if parsed.get("sort_by"):
@@ -440,14 +442,65 @@ class AdvisorEngine:
             if prov_clean == "guipúzcoa" and ("gipuzkoa" in q_lower or "san sebastián" in q_lower or "donostia" in q_lower): matched_province = "Guipúzcoa"; break
             if prov_clean == "madrid" and ("madrid" in q_lower): matched_province = "Madrid"; break
 
-        # Detección de Micro-zona o Barrio
+        # Detección de Código Postal (5 dígitos 01000 a 52999)
+        detected_postal_code = None
+        cp_match = re.search(r'\b(0[1-9]\d{3}|[1-4]\d{4}|5[0-2]\d{3})\b', q_lower)
+        if cp_match:
+            detected_postal_code = cp_match.group(1)
+
+        # Detección de Micro-zona, Barrio, Urbanización, PAU, Ensanche, Municipio o Pueblo
         zone_or_neighborhood = None
-        for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
-            if any(re.search(r'\b' + re.escape(k) + r'\b', q_lower) for k in z_tokens):
-                zone_or_neighborhood = z_name
-                if not matched_province:
+        term_pat = r'(?:(?:\s+(?:con|por|menos|m[áa]s|top|precio|barato|caro|desde|hasta|\d+\s*€|\d+\s*k))|[\.\,]|$)'
+
+        # 1. Regla Común: Extraer delimitación explícita si el prompt define tipología de zona:
+        # A) Urbanización
+        urb_m = re.search(r'\b(?:urbanizaci[oó]n|urb\.?)\s+([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+        if urb_m and len(urb_m.group(1).strip()) >= 3:
+            zone_or_neighborhood = "Urbanización " + urb_m.group(1).strip().title()
+
+        # B) P.A.U. / PAU
+        if not zone_or_neighborhood:
+            pau_m = re.search(r'\b(?:p\.?a\.?u\.?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+            if pau_m and len(pau_m.group(1).strip()) >= 3:
+                zone_or_neighborhood = "PAU de " + pau_m.group(1).strip().title()
+
+        # C) Ensanche
+        if not zone_or_neighborhood:
+            ens_m = re.search(r'\b(?:ensanche(?:\s+urban[ií]stico)?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+            if ens_m and len(ens_m.group(1).strip()) >= 3:
+                zone_or_neighborhood = "Ensanche de " + ens_m.group(1).strip().title()
+
+        # D) Barrio
+        if not zone_or_neighborhood:
+            barrio_m = re.search(r'\b(?:barrio)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+            if barrio_m and len(barrio_m.group(1).strip()) >= 3:
+                zone_or_neighborhood = "Barrio de " + barrio_m.group(1).strip().title()
+
+        # E) Pueblo o Municipio
+        if not zone_or_neighborhood:
+            pueblo_m = re.search(r'\b(?:pueblo|municipio|localidad)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+            if pueblo_m and len(pueblo_m.group(1).strip()) >= 3:
+                zone_or_neighborhood = pueblo_m.group(1).strip().title()
+
+        # 2. Si no se especificó un prefijo explícito, buscar en definiciones de zonas conocidas:
+        if not zone_or_neighborhood:
+            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+                if any(re.search(r'\b' + re.escape(k) + r'\b', q_lower) for k in z_tokens):
+                    zone_or_neighborhood = z_name
+                    if not matched_province:
+                        matched_province = z_prov
+                    break
+
+        # 3. Fallback a Código Postal
+        if not zone_or_neighborhood and detected_postal_code:
+            zone_or_neighborhood = f"CP {detected_postal_code}"
+
+        # Si aún no tenemos provincia pero la zona o texto coincide con una provincia conocida de una zona
+        if not matched_province and zone_or_neighborhood:
+            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+                if z_name.lower() in zone_or_neighborhood.lower() or any(t.lower() in zone_or_neighborhood.lower() for t in z_tokens):
                     matched_province = z_prov
-                break
+                    break
 
         # Detección de Número de Fichas (ej: "top five", "top 5", "las 3 mejores", "10 pisos")
         # Si el prompt no da un límite numérico, por defecto son hasta 20 oportunidades
@@ -649,6 +702,7 @@ class AdvisorEngine:
             "query_type": query_type,
             "province": matched_province,
             "zone_or_neighborhood": zone_or_neighborhood,
+            "postal_code": detected_postal_code,
             "target_count": target_count,
             "sort_by": sort_by,
             "property_type": property_type,
@@ -829,54 +883,119 @@ class AdvisorEngine:
         """Filtra y ordena oportunidades según los criterios extraídos."""
         filtered = opportunities
 
-        # Micro-zona o Barrio
-        if criteria.get("zone_or_neighborhood"):
-            target_zone = criteria["zone_or_neighborhood"].strip().lower()
-            zone_keys = [target_zone]
+        # Micro-zona, Barrio, Urbanización, P.A.U., Ensanche Urbanístico, Código Postal o Pueblo
+        target_zone_str = criteria.get("zone_or_neighborhood")
+        postal_code_str = criteria.get("postal_code")
 
-            # Si target_zone contiene un código postal (ej: 28229), añadirlo a las claves de coincidencia
-            postal_matches = re.findall(r'\b\d{5}\b', target_zone)
-            if postal_matches:
-                zone_keys.extend(postal_matches)
+        if target_zone_str or postal_code_str:
+            raw_target_zone = (target_zone_str or "").strip().lower()
 
+            # Extraer códigos postales (5 dígitos)
+            found_cps = set()
+            if postal_code_str:
+                found_cps.add(str(postal_code_str).strip())
+            for cp in re.findall(r'\b(0[1-9]\d{3}|[1-4]\d{4}|5[0-2]\d{3})\b', raw_target_zone):
+                found_cps.add(cp)
+
+            # Generar frases clave y componentes distintivos
+            key_phrases = []
+            if raw_target_zone and len(raw_target_zone) >= 3:
+                key_phrases.append(raw_target_zone)
+
+            # Eliminar prefijos tipológicos comunes ("urbanización", "barrio de", "pau de", "ensanche de", etc.)
+            clean_without_prefix = re.sub(
+                r'^(?:urbanizaci[oó]n|urb\.?|barrio\s+de|barrio|p\.?a\.?u\.?\s+de|pau|ensanche\s+(?:urban[ií]stico\s+)?de|ensanche|pueblo\s+de|municipio\s+de|localidad\s+de|cp)\s+',
+                '',
+                raw_target_zone
+            ).strip()
+            if clean_without_prefix and clean_without_prefix != raw_target_zone and len(clean_without_prefix) >= 3:
+                key_phrases.append(clean_without_prefix)
+
+            # Segmentar por separadores comunes (guiones, comas, barras)
+            sub_parts = [p.strip() for p in re.split(r'[-–—,;/]', raw_target_zone) if p.strip()]
+            for p in sub_parts:
+                p_clean = re.sub(
+                    r'\b(?:urbanizaci[oó]n|urb\.?|barrio\s+de|barrio|p\.?a\.?u\.?\s+de|pau|ensanche\s+de|ensanche|pueblo\s+de|municipio\s+de|cp|\d{5})\b',
+                    '',
+                    p
+                ).strip()
+                if p_clean and len(p_clean) >= 3:
+                    key_phrases.append(p_clean)
+
+            # Tokens individuales significativos (omitiendo palabras vacías comunes)
+            stop_words = {
+                "en", "de", "del", "la", "las", "el", "los", "y", "o", "a", "al", "para", "por", "con",
+                "urbanizacion", "urbanización", "urb", "barrio", "pau", "p.a.u.", "ensanche",
+                "pueblo", "municipio", "localidad", "zona", "distrito", "sector", "madrid", "espana", "españa"
+            }
+            raw_tokens = re.findall(r'[a-záéíóúñ0-9]+', raw_target_zone)
+            core_tokens = [t for t in raw_tokens if t not in stop_words and len(t) >= 3 and not t.isdigit()]
+
+            # Integrar alias de SPANISH_ZONE_DEFINITIONS si coinciden
             matched_zone_def = None
+            zone_keys = list(set([k.lower() for k in key_phrases] + core_tokens + list(found_cps)))
             for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
-                if z_name.lower() == target_zone or target_zone in [t.lower() for t in z_tokens] or any(t.lower() in target_zone for t in z_tokens):
+                if z_name.lower() in raw_target_zone or any(t.lower() in raw_target_zone for t in z_tokens):
                     zone_keys = list(set(zone_keys + [t.lower() for t in z_tokens]))
                     matched_zone_def = (z_name, z_prov)
                     break
 
-            # Si se buscan rústicos cerca de La Moraleja / Colegio Suizo / Alcobendas / Jarama / Guadalix / Colmenar, ampliar al cinturón rústico contiguo
+            # Si se buscan rústicos cerca de La Moraleja / Jarama / Colmenar, ampliar al cinturón rústico contiguo
             if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama", "guadalix", "gualix", "colmenar"]):
                 zone_keys.extend(["guadalix", "guadalix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "algete", "fuente el saz", "el molar", "talamanca", "paracuellos", "paracuellos de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno", "jarama", "zarzalejo", "quijorna", "brunete", "valdemorillo", "villa del prado", "el álamo", "alamo"])
                 zone_keys = list(set(zone_keys))
 
             def _matches_target_zone(o: Dict[str, Any]) -> bool:
+                # 1. Coincidencia por Código Postal
+                o_cp = str(o.get("postal_code") or "").strip()
+                if found_cps and o_cp and o_cp in found_cps:
+                    return True
+
+                # 2. Coincidencia en campos estructurados de ubicación
                 census_dist = ""
                 if isinstance(o.get("census_tract_data"), dict):
                     census_dist = str(o.get("census_tract_data", {}).get("district", ""))
-                o_text = (
-                    str(o.get("address", "")) + " " +
-                    str(o.get("title", "")) + " " +
-                    str(o.get("locality", "")) + " " +
-                    str(o.get("postal_code", "")) + " " +
-                    str(o.get("description", "")) + " " +
-                    census_dist + " " +
-                    str(o.get("meso_label", "")) + " " +
-                    str(o.get("area_m2_price_label", ""))
-                ).lower()
+                structured_loc = " ".join([
+                    str(o.get("zone_or_neighborhood") or ""),
+                    str(o.get("district") or ""),
+                    str(o.get("locality") or ""),
+                    str(o.get("municipality") or ""),
+                    str(o.get("address") or ""),
+                    census_dist,
+                    str(o.get("meso_label") or ""),
+                    str(o.get("area_m2_price_label") or "")
+                ]).lower()
 
-                if not any(k in o_text for k in zone_keys):
-                    return False
+                if any(k in structured_loc for k in zone_keys if len(k) >= 3):
+                    return True
 
-                if matched_zone_def:
-                    _, expected_prov = matched_zone_def
-                    prov_field = str(o.get("province", "")).lower()
-                    loc_field = str(o.get("locality", "")).lower()
-                    if prov_field and expected_prov.lower() not in prov_field and expected_prov.lower() not in loc_field:
-                        return False
+                # 3. REGLA UNIVERSAL DE PORTALES (COINCIDENCIAS DE TEXTO DENTRO DE PORTALES):
+                # Si las keywords no fueran suficientes en campos estructurados, busca por
+                # coincidencias de texto dentro del título, descripción, URL o datos crudos de los portales
+                portal_text = " ".join([
+                    str(o.get("title") or ""),
+                    str(o.get("description") or ""),
+                    str(o.get("address") or ""),
+                    str(o.get("url") or ""),
+                    str(o.get("portal_url") or ""),
+                    str(o.get("raw_data") or ""),
+                    str(o.get("portal_data") or "")
+                ]).lower()
 
-                return True
+                # Coincidencia de frases compuestas o códigos postales en texto del portal
+                if any(phrase in portal_text for phrase in key_phrases if len(phrase) >= 3):
+                    return True
+                if found_cps and any(cp in portal_text for cp in found_cps):
+                    return True
+
+                # Coincidencia de tokens distintivos
+                if core_tokens:
+                    matches = sum(1 for tok in core_tokens if tok in portal_text or tok in structured_loc)
+                    required = len(core_tokens) if len(core_tokens) <= 2 else int(len(core_tokens) * 0.6)
+                    if matches >= required and matches > 0:
+                        return True
+
+                return False
 
             filtered = [o for o in filtered if _matches_target_zone(o)]
         elif criteria.get("province"):
@@ -2015,12 +2134,9 @@ class AdvisorEngine:
                 clean_yield = min(18.0, avg_yield)
                 intro_lines.append(f"• <b>Rentabilidad media BTL estimada:</b> <b>{clean_yield:.1f}% Yield</b>")
             if is_relaxed:
-                if exact_zone_count == 0:
-                    intro_lines.append(f"\n⚠️ <i>No constan activos exactos registrados en <b>{html.escape(zone_title)}</b>. Hemos ampliado la búsqueda al ámbito de la provincia / área contigua para servirte las mejores <b>{len(matched_opps)} oportunidades</b>:</i>")
-                else:
-                    intro_lines.append(f"\n🎯 <i>Hemos localizado <b>{exact_zone_count} oportunidades exclusivas</b> en <b>{html.escape(zone_title)}</b>. Para completar tu solicitud hasta las <b>{len(matched_opps)} mejores oportunidades</b>, hemos añadido las más destacadas del área metropolitana:</i>")
+                intro_lines.append(f"\n⚠️ <i>Búsqueda ampliada al ámbito provincial / metropolitano para servirte <b>{len(matched_opps)} oportunidades</b>:</i>")
             else:
-                intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas:")
+                intro_lines.append(f"\nA continuación tienes las <b>{len(matched_opps)} oportunidades verificadas</b> localizadas en <b>{html.escape(zone_title)}</b>:")
         else:
             internal_m = self.get_hivex_internal_zone_metrics(prov, criteria.get("zone_or_neighborhood"))
             p_m2 = internal_m.get("price_sale_sqm", 0)
@@ -2030,6 +2146,7 @@ class AdvisorEngine:
             if p_m2 > 0:
                 intro_lines.append(f"• <b>Compra Mkt Ref:</b> {p_m2:,.0f} €/m² | <b>Renta Ref:</b> {r_m2:.1f} €/m² | <b>Yield:</b> {y_btl:.1f}%")
             intro_lines.append(f"🔔 <i>He registrado tu alerta para avisarte de inmediato si ingresa una oportunidad aquí.</i>")
+            intro_lines.append(f"\n💡 <i>Si deseas ampliar la búsqueda al área metropolitana o resto de {html.escape(prov)}, indícamelo expresamente (ej: «Amplía la búsqueda a {html.escape(prov)}»).</i>")
         intro_text = "\n".join(intro_lines)
 
 
@@ -2410,40 +2527,51 @@ class AdvisorEngine:
 
             exact_zone_count = len(matched_opps)
 
-            # Si el filtro ultraestricto arrojó menos de target_count (20) oportunidades,
-            # relajar criterios secundarios para completar el cupo normativo de 20 fichas de HIVEX
-            if len(matched_opps) < target_count:
-                seen_ids = {str(o.get("id")) for o in matched_opps}
-                relaxed_criteria = dict(criteria)
-                relaxed_criteria.pop("keywords_include", None)
-                relaxed_criteria.pop("min_sqm", None)
-                relaxed_opps = self.filter_opportunities(all_opps, relaxed_criteria)
-                for ro in relaxed_opps:
-                    if str(ro.get("id")) not in seen_ids:
-                        matched_opps.append(ro)
-                        seen_ids.add(str(ro.get("id")))
-                        if len(matched_opps) >= target_count:
-                            break
-                if len(matched_opps) >= target_count and exact_zone_count == 0:
-                    is_relaxed = True
+            # Detectar si el usuario solicitó explícitamente una microzona, barrio o código postal
+            has_microzone = bool(criteria.get("zone_or_neighborhood") or criteria.get("postal_code"))
+            explicit_expansion_requested = any(
+                phrase in final_prompt.lower()
+                for phrase in [
+                    "amplia", "amplía", "ampliar", "alrededor", "alrededores",
+                    "cercan", "corona", "metropolitana", "limítrofe", "limitrofe",
+                    "radio", "en toda la provincia", "en todo madrid", "si no hay busca en"
+                ]
+            )
 
-                # Si aún faltan oportunidades porque la micro-zona o código postal no arroja activos en catálogo,
-                # ampliar al ámbito de la provincia o área metropolitana para garantizar el servicio de 20 oportunidades
-                if len(matched_opps) < target_count and (relaxed_criteria.get("zone_or_neighborhood") or relaxed_criteria.get("postal_code")):
-                    relaxed_criteria_broad = dict(relaxed_criteria)
-                    relaxed_criteria_broad.pop("zone_or_neighborhood", None)
-                    relaxed_criteria_broad.pop("postal_code", None)
-                    if not relaxed_criteria_broad.get("province"):
-                        relaxed_criteria_broad["province"] = criteria.get("province") or "Madrid"
-                    broad_opps = self.filter_opportunities(all_opps, relaxed_criteria_broad)
-                    for bo in broad_opps:
-                        if str(bo.get("id")) not in seen_ids:
-                            matched_opps.append(bo)
-                            seen_ids.add(str(bo.get("id")))
+            # REGLA ESTRICTA DE PRODUCTO: Si el usuario especificó una zona o código postal y NO pidió ampliación explícita,
+            # NUNCA se completa con oportunidades de otras zonas o coronas metropolitanas. Es el usuario quien decide.
+            if not has_microzone or explicit_expansion_requested:
+                if len(matched_opps) < target_count:
+                    seen_ids = {str(o.get("id")) for o in matched_opps}
+                    relaxed_criteria = dict(criteria)
+                    relaxed_criteria.pop("keywords_include", None)
+                    relaxed_criteria.pop("min_sqm", None)
+                    relaxed_opps = self.filter_opportunities(all_opps, relaxed_criteria)
+                    for ro in relaxed_opps:
+                        if str(ro.get("id")) not in seen_ids:
+                            matched_opps.append(ro)
+                            seen_ids.add(str(ro.get("id")))
                             if len(matched_opps) >= target_count:
                                 break
-                    if matched_opps:
+                    if len(matched_opps) >= target_count and exact_zone_count == 0:
                         is_relaxed = True
+
+                    # Si el usuario autorizó explícitamente ampliación, permitir volcado metropolitano/provincial
+                    if len(matched_opps) < target_count and explicit_expansion_requested:
+                        relaxed_criteria_broad = dict(relaxed_criteria)
+                        relaxed_criteria_broad.pop("zone_or_neighborhood", None)
+                        relaxed_criteria_broad.pop("postal_code", None)
+                        if not relaxed_criteria_broad.get("province"):
+                            relaxed_criteria_broad["province"] = criteria.get("province") or "Madrid"
+                        broad_opps = self.filter_opportunities(all_opps, relaxed_criteria_broad)
+                        for bo in broad_opps:
+                            if str(bo.get("id")) not in seen_ids:
+                                matched_opps.append(bo)
+                                seen_ids.add(str(bo.get("id")))
+                                if len(matched_opps) >= target_count:
+                                    break
+                        if matched_opps:
+                            is_relaxed = True
 
             # Recortar al top solicitado (hasta target_count, máximo 20)
             matched_opps = matched_opps[:target_count]

@@ -841,8 +841,9 @@ class TelegramAdvisorBot:
             return {"status": "ignored", "reason": "No message or callback_query in update"}
 
         from_user = message.get("from", {})
-        # Ignorar mensajes enviados por bots (incluyendo el propio bot) para evitar bucles
-        if from_user.get("is_bot", False):
+        is_anonymous_group_admin = from_user.get("is_bot", False) and from_user.get("username") == "GroupAnonymousBot"
+        # Ignorar mensajes enviados por bots ajenos (incluyendo el propio bot) para evitar bucles
+        if from_user.get("is_bot", False) and not is_anonymous_group_admin:
             return {"status": "ignored", "reason": "Message from bot"}
 
         message_id = message.get("message_id")
@@ -861,7 +862,7 @@ class TelegramAdvisorBot:
         first_name = from_user.get("first_name", "Usuario")
 
         sender_chat = message.get("sender_chat", {})
-        if not user_id and sender_chat:
+        if (not user_id or is_anonymous_group_admin) and sender_chat:
             user_id = sender_chat.get("id") or 1450113787
             username = sender_chat.get("title") or "jsaavedra"
             first_name = "Admin"
