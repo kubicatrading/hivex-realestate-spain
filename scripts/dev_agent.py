@@ -257,8 +257,9 @@ MAPA DE ARQUITECTURA DEL REPOSITORIO HIVEX:
 - `tests/`: Suite de tests unitarios e integración con `pytest`.
 
 PROTOCOLO ESTRICTO DE INGENIERÍA (ANTI-ALUCINACIONES):
-1. DIAGNÓSTICO REAL ANTES DE TOCAR CÓDIGO:
-   - Usa `search_code` y `read_file` para localizar exactamente la causa raíz antes de proponer cualquier cambio.
+1. DIAGNÓSTICO REAL ANTES DE TOCAR CÓDIGO (CÓDIGO + PRODUCCIÓN EN VIVO):
+   - Usa `search_code` y `read_file` para localizar exactamente la causa raíz en el código antes de proponer cualquier cambio.
+   - Si el usuario reporta que el bot de Telegram, una búsqueda o la web en producción no responde o falla, NO te limites a leer código estático: usa `run_command` para inspeccionar el estado real en producción (`curl -s https://hivex-realestate-spain.vercel.app/api/v1/telegram/status`, `curl -s https://hivex-realestate-spain.vercel.app/api/v1/consultations | head -c 2000`, etc.) y contrasta los datos reales con el código.
    - Nunca adivines nombres de funciones, variables ni rutas; compruébalos leyendo el archivo.
 2. CAMBIOS QUIRÚRGICOS Y LIMPIOS:
    - Usa `replace_file_content` únicamente en las líneas necesarias.
@@ -290,7 +291,13 @@ def execute_agent_loop(
         "gemini-flash-latest",
         "gemini-2.5-pro",
     ]
-    unavailable_models = set()
+    candidate_keys: List[str] = []
+    for k in [os.getenv("PAID_GEMINI_API_KEY", ""), api_key, os.getenv("GEMINI_API_KEY", ""), os.getenv("GOOGLE_API_KEY", "")]:
+        k_clean = (k or "").strip()
+        if k_clean and k_clean not in candidate_keys:
+            candidate_keys.append(k_clean)
+
+    unavailable_pairs = set()
     active_model = models_to_try[0]
     
     contents: List[Dict[str, Any]] = [
@@ -298,8 +305,9 @@ def execute_agent_loop(
             "role": "user",
             "parts": [{"text": (
                 f"TAREA DE DESARROLLO SOLICITADA POR EL USUARIO DESDE TELEGRAM:\n{task}\n\n"
-                "Sigue el protocolo estricto: 1) Investiga el código real, 2) Identifica la causa raíz sin alucinar, "
-                "3) Aplica el cambio quirúrgico, 4) Corre pytest, 5) Limpia cualquier archivo colateral en app/data/ o hivex_local.db con git checkout si no era parte de la tarea, "
+                "Sigue el protocolo estricto: 1) Investiga el código real y el estado en vivo de producción si aplica, "
+                "2) Identifica la causa raíz sin alucinar, 3) Aplica el cambio quirúrgico, 4) Corre pytest, "
+                "5) Limpia cualquier archivo colateral en app/data/ o hivex_local.db con git checkout si no era parte de la tarea, "
                 "y 6) Devuelve un informe claro y detallado de la solución."
             )}]
         }
@@ -326,28 +334,31 @@ def execute_agent_loop(
 
         resp_data = None
         for model in models_to_try:
-            if model in unavailable_models:
-                continue
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            try:
-                with httpx.Client(timeout=90.0) as client:
-                    r = client.post(url, json=payload)
-                    if r.status_code == 200:
-                        resp_data = r.json()
-                        active_model = model
-                        print(f"✅ Respuesta obtenida con modelo: {active_model}")
-                        break
-                    elif r.status_code in (429, 503):
-                        continue
-                    elif r.status_code in (403, 404):
-                        print(f"Aviso API ({model} no habilitado en el tier de esta API Key - {r.status_code}): saltando al siguiente modelo.")
-                        unavailable_models.add(model)
-                        continue
-                    else:
-                        print(f"Aviso API ({model}): {r.status_code} - {r.text[:150]}")
-            except Exception as e:
-                print(f"Error de red con modelo {model}: {e}")
-                continue
+            if resp_data is not None:
+                break
+            for key_idx, cand_key in enumerate(candidate_keys):
+                if (model, key_idx) in unavailable_pairs:
+                    continue
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={cand_key}"
+                try:
+                    with httpx.Client(timeout=90.0) as client:
+                        r = client.post(url, json=payload)
+                        if r.status_code == 200:
+                            resp_data = r.json()
+                            active_model = model
+                            print(f"✅ Respuesta obtenida con modelo: {active_model} (key #{key_idx + 1})")
+                            break
+                        elif r.status_code in (429, 503):
+                            continue
+                        elif r.status_code in (403, 404):
+                            print(f"Aviso API ({model} con key #{key_idx + 1} devolvió {r.status_code}): probando siguiente credencial/modelo.")
+                            unavailable_pairs.add((model, key_idx))
+                            continue
+                        else:
+                            print(f"Aviso API ({model}): {r.status_code} - {r.text[:150]}")
+                except Exception as e:
+                    print(f"Error de red con modelo {model}: {e}")
+                    continue
 
         if not resp_data:
             err_msg = "Error: No se pudo obtener respuesta válida de Gemini API tras evaluar la cascada de modelos."
@@ -449,7 +460,7 @@ def execute_agent_loop(
             "parts": function_response_parts
         })
 
-    limit_msg = "DevAgent alcanzó el límite de pasos máximos (15). Por favor revisa los logs."
+    limit_msg = "DevAgent alcanzó el límite de pasos máximos (25). Por favor revisa los logs."
     send_telegram_update(f"⏳ {limit_msg}", chat_id, bot_token, reply_to_message_id)
     return limit_msg
 
@@ -461,11 +472,7 @@ def main():
     parser.add_argument("--telegram-token", type=str, default="", help="Token del bot de Telegram")
     args = parser.parse_args()
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        print("Error: Se requiere GEMINI_API_KEY o GOOGLE_API_KEY en el entorno.", file=sys.stderr)
-        sys.exit(1)
-
+    api_key = os.getenv("PAID_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
     bot_token = args.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
     msg_id = int(args.message_id) if args.message_id and args.message_id.isdigit() else None
 

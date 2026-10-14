@@ -43,6 +43,18 @@ class TelegramAdvisorBot:
         self._cached_opportunities: Dict[str, Dict[str, Any]] = {}
         self._load_catalog_cache()
 
+    def _ensure_token(self) -> str:
+        """Garantiza que el token de Telegram esté cargado dinámicamente desde settings o variables de entorno."""
+        if not self.token:
+            self.token = (
+                os.getenv("TELEGRAM_BOT_TOKEN")
+                or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+                or ""
+            ).strip()
+            if self.token:
+                self.api_base = f"https://api.telegram.org/bot{self.token}"
+        return self.token
+
     # --------------------------------------------------------------------------
     # 1. VERIFICACIÓN Y VINCULACIÓN DE USUARIOS
     # --------------------------------------------------------------------------
@@ -141,7 +153,7 @@ class TelegramAdvisorBot:
     # --------------------------------------------------------------------------
     async def download_telegram_file(self, file_id: str) -> Optional[bytes]:
         """Descarga el binario de audio de una nota de voz mediante la API de Telegram."""
-        if not self.token:
+        if not self._ensure_token():
             return None
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -178,7 +190,7 @@ class TelegramAdvisorBot:
         reply_markup: Optional[Dict[str, Any]] = None
     ) -> bool:
         """Envía un mensaje de texto a un chat o grupo de Telegram."""
-        if not self.token:
+        if not self._ensure_token():
             logger.warning("TELEGRAM_BOT_TOKEN no configurado. Mensaje no enviado.")
             return False
 
@@ -262,7 +274,7 @@ class TelegramAdvisorBot:
 
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
         """Envía una acción de chat (ej: typing) a Telegram."""
-        if not self.token:
+        if not self._ensure_token():
             return False
         url = f"{self.api_base}/sendChatAction"
         try:
@@ -338,7 +350,7 @@ class TelegramAdvisorBot:
         show_alert: bool = False
     ) -> bool:
         """Responde a un callback_query de Telegram mostrando toast o alerta."""
-        if not self.token:
+        if not self._ensure_token():
             return False
         url = f"{self.api_base}/answerCallbackQuery"
         payload = {"callback_query_id": str(callback_query_id)}
@@ -361,7 +373,7 @@ class TelegramAdvisorBot:
         reply_markup: Dict[str, Any]
     ) -> bool:
         """Actualiza los botones interactivos de un mensaje existente en Telegram."""
-        if not self.token:
+        if not self._ensure_token():
             return False
         url = f"{self.api_base}/editMessageReplyMarkup"
         payload = {
@@ -384,7 +396,7 @@ class TelegramAdvisorBot:
         emoji: str = "❤️"
     ) -> bool:
         """Añade o quita una reacción nativa (ej. ❤️) al mensaje de la ficha en Telegram."""
-        if not self.token:
+        if not self._ensure_token():
             return False
         url = f"{self.api_base}/setMessageReaction"
         payload = {
@@ -409,7 +421,7 @@ class TelegramAdvisorBot:
         reply_markup: Dict[str, Any]
     ) -> bool:
         """Actualiza la imagen y los botones de una ficha en Telegram en tiempo real."""
-        if not self.token:
+        if not self._ensure_token():
             return False
         url = f"{self.api_base}/editMessageMedia"
         media_obj = {
@@ -444,7 +456,7 @@ class TelegramAdvisorBot:
         3. Botonera integrada: 'Ver Ficha en HIVEX' y 'Visitar Portal'.
         4. Corazón pulsable e interactivo (toggle favoritos en DB y reacción nativa ❤️).
         """
-        if not self.token:
+        if not self._ensure_token():
             return False
 
         opp_id = str(opp.get("id", "")).strip()

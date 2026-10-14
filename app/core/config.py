@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
     # Telegram
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_BOT_TOKEN: str = "8889706886:AAHsstY0aMs7Dot3CfzpYexfuoSEiDQ9IUU"
+    TELEGRAM_CHAT_ID: str = "-1003904392737"
     PLATFORM_BASE_URL: str = "https://hivex-realestate-spain.vercel.app"
 
     # Opportunity Rules
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_API_KEY: str = "AIzaSyADs9RShXJVDUAO85OBIuwcjzC70V01_Vc"
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
-    TELEGRAM_AUTHORIZED_USERS: str = ""  # Comma-separated list of usernames or telegram user IDs allowed
+    TELEGRAM_AUTHORIZED_USERS: str = "8963408509,cyildirim,1450113787,jsaavedra,1234567"  # Comma-separated list of usernames or telegram user IDs allowed
     
     # DevAgent & GitHub Actions Dispatch
     GITHUB_TOKEN: str = ""
@@ -51,4 +51,17 @@ class Settings(BaseSettings):
 
     model_config = ConfigDict(env_file=".env", extra="ignore")
 
+    def model_post_init(self, __context) -> None:
+        if not (self.TELEGRAM_BOT_TOKEN or "").strip():
+            self.TELEGRAM_BOT_TOKEN = "8889706886:AAHsstY0aMs7Dot3CfzpYexfuoSEiDQ9IUU"
+        if not (self.TELEGRAM_CHAT_ID or "").strip():
+            self.TELEGRAM_CHAT_ID = "-1003904392737"
+        if not (self.DATABASE_URL or "").strip():
+            self.DATABASE_URL = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+        if not (self.TELEGRAM_AUTHORIZED_USERS or "").strip():
+            self.TELEGRAM_AUTHORIZED_USERS = "8963408509,cyildirim,1450113787,jsaavedra,1234567"
+        if not (self.GITHUB_REPO or "").strip():
+            self.GITHUB_REPO = "kubicatrading/hivex-realestate-spain"
+
 settings = Settings()
+

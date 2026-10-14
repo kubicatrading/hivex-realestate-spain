@@ -45,7 +45,7 @@ connect_args = {}
 if "postgresql" in db_url:
     if "sslmode" not in db_url:
         connect_args["sslmode"] = "require"
-    connect_args["connect_timeout"] = 3
+    connect_args["connect_timeout"] = 10
 
 try:
     if "postgresql" in db_url:
@@ -55,9 +55,17 @@ try:
             poolclass=NullPool,
             echo=False
         )
-        # Test connection immediately
-        with engine.connect() as conn:
-            pass
+        # Test connection immediately with retry for serverless cold starts
+        last_err = None
+        for _attempt in range(2):
+            try:
+                with engine.connect() as conn:
+                    last_err = None
+                    break
+            except Exception as _e:
+                last_err = _e
+        if last_err is not None:
+            raise last_err
         ACTIVE_DB_ENGINE = "PostgreSQL (Producción Pooler IPv4)"
         DB_STATUS_INFO = {
             "engine": "PostgreSQL (Producción Pooler IPv4)",

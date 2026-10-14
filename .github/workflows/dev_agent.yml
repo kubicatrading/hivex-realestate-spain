@@ -77,13 +77,14 @@ jobs:
             --chat-id "${{ inputs.telegram_chat_id }}" \
             --message-id "${{ inputs.telegram_message_id }}"
         env:
+          PAID_GEMINI_API_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Ejecutar Tests de Verificación
         run: |
-          git checkout -- hivex_local.db app/data/supadata_backfill_quota.json 2>/dev/null || true
+          git checkout -- hivex_local.db app/data/verified_market_catalog.json app/data/supadata_backfill_quota.json 2>/dev/null || true
           git add -A
           pytest tests/ -q 2>&1 | tee /tmp/pytest_run.log
           git checkout -- . 2>/dev/null || true
