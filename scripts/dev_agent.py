@@ -281,11 +281,14 @@ def execute_agent_loop(
 ) -> str:
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
+        "gemini-4-argon",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
         "gemini-1.5-pro"
     ]
+    unavailable_models = set()
+    active_model = models_to_try[0]
     
     contents: List[Dict[str, Any]] = [
         {
@@ -301,7 +304,7 @@ def execute_agent_loop(
 
     print(f"🚀 Iniciando HIVEX DevAgent para la tarea: {task}")
     send_telegram_update(
-        f"🤖 <b>DevAgent Activo (Gemini 2.5 Pro):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
+        f"🤖 <b>DevAgent Activo (Gemini 4 Argon / 2.5 Pro):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
         chat_id, bot_token, reply_to_message_id
     )
     
@@ -320,14 +323,22 @@ def execute_agent_loop(
 
         resp_data = None
         for model in models_to_try:
+            if model in unavailable_models:
+                continue
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
                 with httpx.Client(timeout=90.0) as client:
                     r = client.post(url, json=payload)
                     if r.status_code == 200:
                         resp_data = r.json()
+                        active_model = model
+                        print(f"✅ Respuesta obtenida con modelo: {active_model}")
                         break
                     elif r.status_code in (429, 503):
+                        continue
+                    elif r.status_code in (403, 404):
+                        print(f"Aviso API ({model} no habilitado en el tier de esta API Key - {r.status_code}): saltando al siguiente modelo.")
+                        unavailable_models.add(model)
                         continue
                     else:
                         print(f"Aviso API ({model}): {r.status_code} - {r.text[:150]}")
@@ -365,7 +376,7 @@ def execute_agent_loop(
             final_summary = "\n".join(text_parts).strip()
             if final_summary:
                 send_telegram_update(
-                    f"📋 <b>Informe Técnico de DevAgent:</b>\n\n{html.escape(final_summary[:3500])}",
+                    f"📋 <b>Informe Técnico de DevAgent ({html.escape(active_model)}):</b>\n\n{html.escape(final_summary[:3500])}",
                     chat_id, bot_token, reply_to_message_id
                 )
             return final_summary
@@ -396,7 +407,7 @@ def execute_agent_loop(
                 target_desc = f"«{html.escape(fargs.get('query', ''))}»"
 
             send_telegram_update(
-                f"{icon} <b>[Paso {step}/{max_steps}]</b> {fname} {target_desc}",
+                f"{icon} <b>[Paso {step}/{max_steps} · {html.escape(active_model)}]</b> {fname} {target_desc}",
                 chat_id, bot_token, reply_to_message_id
             )
             
