@@ -282,10 +282,13 @@ def execute_agent_loop(
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
         "gemini-4-argon",
-        "gemini-2.5-pro",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro"
+        "gemini-flash-latest",
+        "gemini-2.5-pro",
     ]
     unavailable_models = set()
     active_model = models_to_try[0]
@@ -304,7 +307,7 @@ def execute_agent_loop(
 
     print(f"🚀 Iniciando HIVEX DevAgent para la tarea: {task}")
     send_telegram_update(
-        f"🤖 <b>DevAgent Activo (Gemini 4 Argon / 2.5 Pro):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
+        f"🤖 <b>DevAgent Activo (Gemini 4 Argon):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
         chat_id, bot_token, reply_to_message_id
     )
     
