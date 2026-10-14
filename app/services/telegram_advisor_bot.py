@@ -61,7 +61,7 @@ class TelegramAdvisorBot:
         (mediante User.telegram_id, User.telegram_username o lista autorizada en variables de entorno).
         """
         # 0. En el grupo corporativo oficial de HIVEX (-1003904392737), siempre autorizar
-        if str(chat_id) in ["-1003904392737", "3904392737"]:
+        if str(chat_id) == "-1003904392737": # Solo el chat_id negativo es el grupo oficial
             admin = db.query(User).filter(User.username == "jsaavedra").first()
             if admin:
                 return True, admin, "Usuario autorizado por pertenecer al grupo oficial HIVEX"
