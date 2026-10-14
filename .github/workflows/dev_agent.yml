@@ -72,14 +72,18 @@ jobs:
       - name: Ejecutar Autonomous DevAgent
         id: dev_agent
         run: |
-          python scripts/dev_agent.py --task "${{ inputs.task }}"
+          python scripts/dev_agent.py \
+            --task "${{ inputs.task }}" \
+            --chat-id "${{ inputs.telegram_chat_id }}" \
+            --message-id "${{ inputs.telegram_message_id }}"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Ejecutar Tests de Verificación
         run: |
-          pytest tests/ -q
+          pytest tests/ -q 2>&1 | tee /tmp/pytest_run.log
 
       - name: Comprobar cambios y hacer Commit & Push
         id: git_push
@@ -104,7 +108,7 @@ jobs:
           fi
 
       - name: Notificar Resultado Exitoso en Telegram
-        if: success() && ${{ inputs.telegram_chat_id != '' }}
+        if: success() && inputs.telegram_chat_id != ''
         run: |
           python -c "
           import httpx, os, html
@@ -147,7 +151,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Notificar Error en Telegram
-        if: failure() && ${{ inputs.telegram_chat_id != '' }}
+        if: failure() && inputs.telegram_chat_id != ''
         run: |
           python -c "
           import httpx, os, html
