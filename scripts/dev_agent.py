@@ -243,43 +243,65 @@ GEMINI_TOOLS_DECLARATION = [{
     ]
 }]
 
-SYSTEM_INSTRUCTION = """Eres HIVEX DevAgent, un ingeniero senior autónomo de software e IA.
-Tu objetivo es resolver con precisión y pulcritud las tareas de desarrollo, corrección de bugs, nuevas features y refactorización solicitadas por Juanma.
+SYSTEM_INSTRUCTION = """Eres HIVEX DevAgent (núcleo autónomo equivalente a Antigravity), un Ingeniero Principal de Software e IA encargado de mantener, depurar y evolucionar la plataforma HIVEX Real Estate Spain en producción.
 
-Reglas fundamentales de trabajo:
-1. Explora y lee siempre el código antes de modificarlo para entender el contexto existente.
-2. Realiza cambios quirúrgicos y limpios con replace_file_content.
-3. Tras modificar código, ejecuta siempre la suite de pruebas ('pytest tests/ -q') para verificar que no hay regresiones.
-4. Si un test falla, analiza el traceback, arregla el fallo y vuelve a verificar.
-5. Al concluir, presenta un resumen conciso y profesional de los cambios implementados y los tests pasados.
+MAPA DE ARQUITECTURA DEL REPOSITORIO HIVEX:
+- `app/services/telegram_advisor_bot.py`: Bot conversacional de Telegram, autenticación (`verify_or_link_user`), manejo de grupos (`-1003904392737`), comandos (`/dev`, `/alertas`, `/vincular`), memoria conversacional y despacho de fichas visuales.
+- `app/engine/advisor_engine.py`: Motor asesor inmobiliario IA, extracción heurística y semántica de criterios (`_parse_query_intent_heuristics`), búsqueda universal de zonas (barrios, urbanizaciones, PAUs, ensanches, CPs, municipios), fallback a portales en vivo (`market_scraper`), scoring y generación de respuestas.
+- `app/services/market_scraper.py`: Conector multi-portal en tiempo real (Idealista, Fotocasa, Habitaclia, Pisos.com, Subastas BOE) y gestión de catálogo verificado.
+- `app/services/whatsapp_card_renderer.py`: Renderizado gráfico de tarjetas PNG para Telegram/WhatsApp.
+- `app/services/alert_engine.py` y `app/services/consultation_alerts_worker.py`: Motor de alertas inmobiliarias y worker diario.
+- `app/api/main.py`: Endpoints FastAPI, webhook de Telegram (`/api/v1/telegram/webhook`), endpoints de oportunidades, consultas, autenticación y panel de administración.
+- `app/db/models.py` y `app/db/session.py`: Modelos SQLAlchemy (`User`, `PropertyOpportunity`, `UserConsultation`, `TelegramConversationMessage`) y sesión PostgreSQL/SQLite.
+- `static/index.html`, `static/app.js`, `static/styles.css`: Frontend web de la plataforma HIVEX.
+- `tests/`: Suite de tests unitarios e integración con `pytest`.
+
+PROTOCOLO ESTRICTO DE INGENIERÍA (ANTI-ALUCINACIONES):
+1. DIAGNÓSTICO REAL ANTES DE TOCAR CÓDIGO:
+   - Usa `search_code` y `read_file` para localizar exactamente la causa raíz antes de proponer cualquier cambio.
+   - Nunca adivines nombres de funciones, variables ni rutas; compruébalos leyendo el archivo.
+2. CAMBIOS QUIRÚRGICOS Y LIMPIOS:
+   - Usa `replace_file_content` únicamente en las líneas necesarias.
+   - PROHIBIDO modificar archivos de datos (`app/data/*.json`, `hivex_local.db`) salvo que la tarea pida explícitamente actualizar datos estáticos.
+3. VERIFICACIÓN Y LIMPIEZA PRE-COMMIT:
+   - Ejecuta `pytest tests/ -q` mediante `run_command` para validar tus cambios.
+   - Si al correr `pytest` algún test modifica archivos colaterales como `app/data/verified_market_catalog.json`, `app/data/supadata_backfill_quota.json` o `hivex_local.db`, ejecuta `git checkout -- app/data/ hivex_local.db` antes de terminar para que el commit contenga EXCLUSIVAMENTE tu fix de código.
+   - Ejecuta `git status -s` y `git diff --stat` con `run_command` antes de finalizar para confirmar que solo quedan modificados los archivos pertinentes a la tarea.
+4. COMUNICACIÓN CLARA CON EL USUARIO:
+   - Explica siempre: (a) Cuál era la causa raíz exacta, (b) Qué archivos y líneas has modificado, y (c) Cómo lo has verificado con tests.
 """
 
 def execute_agent_loop(
     task: str,
     api_key: str,
-    max_steps: int = 15,
+    max_steps: int = 25,
     chat_id: Optional[str] = None,
     bot_token: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> str:
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
+        "gemini-2.5-pro",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash"
+        "gemini-1.5-pro"
     ]
     
     contents: List[Dict[str, Any]] = [
         {
             "role": "user",
-            "parts": [{"text": f"TAREA DE DESARROLLO:\n{task}\n\nPor favor, investiga los archivos pertinentes, aplica los cambios necesarios, corre los tests para verificar y concluye con un resumen."}]
+            "parts": [{"text": (
+                f"TAREA DE DESARROLLO SOLICITADA POR EL USUARIO DESDE TELEGRAM:\n{task}\n\n"
+                "Sigue el protocolo estricto: 1) Investiga el código real, 2) Identifica la causa raíz sin alucinar, "
+                "3) Aplica el cambio quirúrgico, 4) Corre pytest, 5) Limpia cualquier archivo colateral en app/data/ o hivex_local.db con git checkout si no era parte de la tarea, "
+                "y 6) Devuelve un informe claro y detallado de la solución."
+            )}]
         }
     ]
 
     print(f"🚀 Iniciando HIVEX DevAgent para la tarea: {task}")
     send_telegram_update(
-        f"🤖 <b>DevAgent Activo:</b> Comenzando investigación autónoma para:\n<i>{html.escape(task)}</i>",
+        f"🤖 <b>DevAgent Activo (Gemini 2.5 Pro):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
         chat_id, bot_token, reply_to_message_id
     )
     
@@ -292,7 +314,7 @@ def execute_agent_loop(
             "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 4096
+                "maxOutputTokens": 8192
             }
         }
 
@@ -300,7 +322,7 @@ def execute_agent_loop(
         for model in models_to_try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                with httpx.Client(timeout=60.0) as client:
+                with httpx.Client(timeout=90.0) as client:
                     r = client.post(url, json=payload)
                     if r.status_code == 200:
                         resp_data = r.json()
@@ -326,14 +348,26 @@ def execute_agent_loop(
         contents.append(content)
 
         function_calls = [p["functionCall"] for p in parts if "functionCall" in p]
-        text_parts = [p["text"] for p in parts if "text" in p]
+        text_parts = [p["text"] for p in parts if "text" in p and not p.get("thought")]
 
         if text_parts:
-            print("DevAgent:", " ".join(text_parts))
+            thought_text = "\n".join(text_parts).strip()
+            print("DevAgent:", thought_text)
+            if function_calls and len(thought_text) > 10:
+                short_thought = thought_text[:500] + ("..." if len(thought_text) > 500 else "")
+                send_telegram_update(
+                    f"💭 <i>{html.escape(short_thought)}</i>",
+                    chat_id, bot_token, reply_to_message_id
+                )
 
         if not function_calls:
             print("✅ El DevAgent ha completado la tarea sin más llamadas a herramientas.")
-            final_summary = "\n".join(text_parts)
+            final_summary = "\n".join(text_parts).strip()
+            if final_summary:
+                send_telegram_update(
+                    f"📋 <b>Informe Técnico de DevAgent:</b>\n\n{html.escape(final_summary[:3500])}",
+                    chat_id, bot_token, reply_to_message_id
+                )
             return final_summary
 
         # Ejecutar function calls solicitadas

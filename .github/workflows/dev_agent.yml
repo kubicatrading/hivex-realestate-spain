@@ -83,7 +83,10 @@ jobs:
 
       - name: Ejecutar Tests de Verificación
         run: |
+          git checkout -- hivex_local.db app/data/supadata_backfill_quota.json 2>/dev/null || true
+          git add -A
           pytest tests/ -q 2>&1 | tee /tmp/pytest_run.log
+          git checkout -- . 2>/dev/null || true
 
       - name: Comprobar cambios y hacer Commit & Push
         id: git_push
@@ -91,8 +94,7 @@ jobs:
           git config user.name "HIVEX DevAgent"
           git config user.email "devagent@hivex.internal"
           
-          if [[ -n $(git status -s) ]]; then
-            git add -A
+          if ! git diff --staged --quiet; then
             DIFF_STAT=$(git diff --staged --stat | head -n 12)
             echo "has_changes=true" >> $GITHUB_OUTPUT
             git commit -m "feat(dev-agent): ${{ inputs.task }}"
@@ -155,15 +157,20 @@ jobs:
         run: |
           python -c "
           import httpx, os, html
+          from pathlib import Path
           token = os.getenv('TELEGRAM_BOT_TOKEN')
           chat_id = '${{ inputs.telegram_chat_id }}'
           msg_id = '${{ inputs.telegram_message_id }}'
           task = html.escape('''${{ inputs.task }}''')
+          log_snippet = ''
+          log_path = Path('/tmp/pytest_run.log')
+          if log_path.exists():
+              raw = log_path.read_text(errors='replace')[-1200:]
+              log_snippet = f'\n\n<b>Detalle de logs:</b>\n<pre>{html.escape(raw)}</pre>'
           msg = (
               f'❌ <b>DevAgent: Error durante la ejecución</b>\n\n'
               f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
-              f'La tarea no pudo completarse o los tests fallaron.\n'
-              f'🔗 Revisa la pestaña Actions en GitHub para ver los logs.'
+              f'La tarea no pudo completarse o los tests fallaron.{log_snippet}'
           )
           if token and chat_id:
               try:
