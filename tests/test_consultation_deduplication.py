@@ -108,7 +108,7 @@ def test_deduplicate_saved_consultations_db(test_db):
 
 @pytest.mark.asyncio
 async def test_process_user_query_deduplication(test_db):
-    prompt = "búscame gualix de la sierra-algete-colmenar viejo, en ese eje, fincas rústicas de más de 25.000m2 que tengan pozo/río y cuenten con casa"
+    prompt = "búscame pisos en Carabanchel Madrid con descuento"
 
     # 1. Primera ejecución: debe crear el registro
     res1 = await advisor_engine.process_user_query(

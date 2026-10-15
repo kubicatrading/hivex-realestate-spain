@@ -51,51 +51,52 @@ class MarketScraper:
 
     TARGET_GALLERY_SIZE = 20
 
-    RESIDENTIAL_CDN_GALLERY = [
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/0a/08/72/1347770919.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/1a/89/e5/1446923522.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/a2/07/c2/1446923546.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/95/b2/48/1446923549.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/56/f5/0f/1446923552.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ee/de/11/1446923565.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ce/5a/64/1474033788.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/10/f8/73/1474033790.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/7e/6d/0f/1460944140.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/ac/40/60/1474033792.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/98/f6/e6/1474033797.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/2b/8a/68/1474033794.jpg",
-        "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/89/16/3c/1405310886.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/de/64/53/1474033815.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/3c/77/22/1474033798.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/e2/5b/1d/1474033799.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/3a/b3/94/1474033819.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/07/1e/18/1474033820.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/06/24/e9/1474033821.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/5f/b3/19/1459107087.jpg",
-    ]
+    # PROHIBIDO usar fotos de catálogo o simuladas: galerías de relleno vacías por política estricta
+    RESIDENTIAL_CDN_GALLERY: List[str] = []
+    SOLAR_CDN_GALLERY: List[str] = []
 
-    SOLAR_CDN_GALLERY = [
-        "https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/dc/37/e4/1332096505.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/dc/37/e4/1332096505.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/f1/2a/3b/1332096506.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/e3/4c/5d/1332096507.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/a4/5e/6f/1332096508.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/b5/6f/7a/1332096509.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/c6/7a/8b/1332096510.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/d7/8b/9c/1332096511.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/e8/9c/0d/1332096512.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/f9/0d/1e/1332096513.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/0a/1e/2f/1332096514.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/1b/2f/3a/1332096515.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/2c/3a/4b/1332096516.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/3d/4b/5c/1332096517.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/4e/5c/6d/1332096518.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/5f/6d/7e/1332096519.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/6a/7e/8f/1332096520.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/7b/8f/9a/1332096521.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/8c/9a/0b/1332096522.jpg",
-        "https://img4.idealista.com/blur/WEB_DETAIL-L-L/0/id.pro.es.image.master/9d/0b/1c/1332096523.jpg",
-    ]
+    SYNTHETIC_BLACKLIST_IDS = {
+        "MKT-IDEALISTA-103981145",
+        "MKT-IDEALISTA-107819230",
+        "MKT-IDEALISTA-106492104",
+        "MKT-IDEALISTA-105128392",
+        "MKT-IDEALISTA-104276706",
+        "MKT-IDEALISTA-108314327",
+        "MKT-IDEALISTA-110449240",
+    }
+
+    FORBIDDEN_MOCK_IMAGE_PATTERNS = (
+        "default_nophoto",
+        "/logos/",
+        "logo",
+        "icon",
+        "avatar",
+        "placeholder",
+        "watermark",
+        "prof-wp",
+        "loading",
+        "static/common",
+        "1347770919.jpg",
+        "1405310886.jpg",
+        "13320965",
+        "unsplash.com",
+        "pexels.com",
+        "pixabay.com",
+        "picsum.photos",
+    )
+
+    @classmethod
+    def is_valid_real_portal_photo(cls, url: Any) -> bool:
+        """Verifica que una URL corresponda a una fotografía real de inmueble y no a un mock/logo/placeholder."""
+        if not url or not isinstance(url, str):
+            return False
+        cleaned = url.strip()
+        if not cleaned.startswith("http"):
+            return False
+        low = cleaned.lower()
+        if any(pat in low for pat in cls.FORBIDDEN_MOCK_IMAGE_PATTERNS):
+            return False
+        return True
 
     @classmethod
     def ensure_twenty_images(cls, images: Optional[List[str]], is_solar: bool = False, item_id: str = "") -> List[str]:
@@ -103,13 +104,13 @@ class MarketScraper:
         Garantiza máxima fidelidad y precisión: conserva única y exclusivamente las fotografías
         reales aportadas por el portal inmobiliario / anunciante para este inmueble concreto.
         No se añaden fotos simuladas ni de relleno artificial si el anuncio tiene menos imágenes.
-        Elimina duplicados, descarta URLs vacías o inválidas y aplica un tope máximo de 20 fotos reales.
+        Elimina duplicados, descarta URLs vacías, logos o mocks y aplica un tope máximo de 20 fotos reales.
         """
         valid_imgs = []
         for img in (images or []):
-            if img and isinstance(img, str):
+            if cls.is_valid_real_portal_photo(img):
                 cleaned = img.strip()
-                if cleaned and cleaned not in valid_imgs:
+                if cleaned not in valid_imgs:
                     valid_imgs.append(cleaned)
         return valid_imgs[:cls.TARGET_GALLERY_SIZE]
 
@@ -739,11 +740,23 @@ class MarketScraper:
     def _process_market_listing(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Procesa una oportunidad de mercado:
+        - Regla estricta: si un inmueble de portal no tiene fotografías reales del anuncio,
+          esa oportunidad ya no está vigente/activa en el portal y se descarta inmediatamente.
         - Calcula precios distintos y asigna el mínimo.
         - Calcula el indicador xPublicación.
         - Calcula el descuento respecto al precio original de salida.
         """
         from app.connectors.boe_scraper import BOESubastasScraper
+
+        item_id_str = str(item.get("id") or "").strip()
+        refcat_str = str(item.get("refcat") or "").strip()
+        if item_id_str in self.SYNTHETIC_BLACKLIST_IDS or "VK2882N0001" in refcat_str:
+            return None
+
+        valid_images = self.ensure_twenty_images(item.get("images"), item_id=item_id_str)
+        if not valid_images:
+            # Regla de oro: 0 fotos reales de portal = oportunidad no vigente / inactiva
+            return None
 
         # Descartar naves para cualquier mercado
         if BOESubastasScraper.is_nave(

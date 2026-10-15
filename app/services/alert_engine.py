@@ -468,15 +468,16 @@ class RealEstateAlertEngine:
             ]
         }
 
-        # Extraer imagen principal (de la oportunidad, galería o CDN residencial)
+        # Extraer imagen principal real de la oportunidad (PROHIBIDO usar fotos de catálogo o genéricas)
         images = opp.get("images") or opp.get("gallery") or []
         first_photo = None
         if images and isinstance(images, list) and images[0]:
             first_photo = str(images[0])
         elif opp.get("image_url"):
             first_photo = str(opp.get("image_url"))
-        elif MarketScraper.RESIDENTIAL_CDN_GALLERY:
-            first_photo = MarketScraper.RESIDENTIAL_CDN_GALLERY[0]
+
+        if first_photo and not MarketScraper.is_valid_real_portal_photo(first_photo):
+            first_photo = None
 
         if first_photo and str(first_photo).startswith("http"):
             photo_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"

@@ -182,11 +182,14 @@ class PhotosBackfillWorker:
                 html = resp.read().decode("utf-8", errors="ignore")
 
             # Buscar todas las fotos en el CDN imghs.net
+            from app.connectors.market_scraper import MarketScraper
             raw_imgs = re.findall(r'https://fotos\.imghs\.net/[^\s\"\'\<\>]+', html)
             clean_imgs = []
             seen_uuids = set()
 
             for img in raw_imgs:
+                if not MarketScraper.is_valid_real_portal_photo(img):
+                    continue
                 # Extraer UUID o identificador de foto
                 m = re.search(r'([a-f0-9\-]{36})', img)
                 photo_id = m.group(1) if m else img
@@ -196,7 +199,8 @@ class PhotosBackfillWorker:
                     high_res = re.sub(r'https://fotos\.imghs\.net/[^/]+/', 'https://fotos.imghs.net/xl-wp/', img)
                     # Limpiar sufijos
                     high_res = high_res.split("?")[0]
-                    clean_imgs.append(high_res)
+                    if MarketScraper.is_valid_real_portal_photo(high_res):
+                        clean_imgs.append(high_res)
 
             return clean_imgs
         except Exception as e:
@@ -226,6 +230,7 @@ class PhotosBackfillWorker:
                     return []
                 html = resp.read().decode("utf-8", errors="ignore")
 
+            from app.connectors.market_scraper import MarketScraper
             raw_imgs = re.findall(r'https?://[^\s\"\'\<\>]+\.static\.fotocasa\.es/[^\s\"\'\<\>]+', html)
             raw_imgs += re.findall(r'https?://fotos\.habitaclia\.com/[^\s\"\'\<\>]+', html)
 
@@ -233,7 +238,7 @@ class PhotosBackfillWorker:
             seen = set()
             for img in raw_imgs:
                 base = img.split("?")[0]
-                if any(bad in base.lower() for bad in ["logo", "icon", "banner", "map", "pin"]):
+                if not MarketScraper.is_valid_real_portal_photo(base):
                     continue
                 if base not in seen:
                     seen.add(base)
@@ -253,6 +258,7 @@ class PhotosBackfillWorker:
 
         try:
             from app.connectors.supadata_client import SupadataClient
+            from app.connectors.market_scraper import MarketScraper
             client = SupadataClient()
             scrape_res = client.scrape_url(portal_url)
             if not scrape_res:
@@ -264,7 +270,7 @@ class PhotosBackfillWorker:
             seen = set()
 
             for img_url in raw_matches:
-                if img_url.endswith(".gif") or any(b in img_url.lower() for b in ["logo", "icon", "avatar"]):
+                if img_url.endswith(".gif"):
                     continue
                 clean = (
                     img_url.replace("/blur/189_120_mq/", "/blur/WEB_DETAIL-XL-L/")
@@ -272,6 +278,8 @@ class PhotosBackfillWorker:
                     .replace("/blur/240_180_mq/", "/blur/WEB_DETAIL-XL-L/")
                     .replace("/blur/120_90_mq/", "/blur/WEB_DETAIL-XL-L/")
                 )
+                if not MarketScraper.is_valid_real_portal_photo(clean):
+                    continue
                 if clean not in seen:
                     seen.add(clean)
                     clean_imgs.append(clean)

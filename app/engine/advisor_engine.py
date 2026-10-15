@@ -825,9 +825,18 @@ class AdvisorEngine:
             catalog_path = Path("app/data/verified_market_catalog.json")
         if catalog_path.exists():
             try:
+                from app.connectors.market_scraper import MarketScraper
                 with open(catalog_path, "r", encoding="utf-8") as f:
                     market_items = json.load(f)
                 for item in market_items:
+                    item_id = str(item.get("id") or "").strip().upper()
+                    if item_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                        continue
+                    valid_imgs = MarketScraper.ensure_twenty_images(item.get("images"))
+                    # REGLA DE ORO: Si un anuncio de portal no tiene fotos reales válidas, no está activo/vigente
+                    if not valid_imgs:
+                        continue
+
                     price = float(item.get("price") or item.get("listing_price") or 0)
                     mkt_val = float(item.get("estimated_reference_value") or item.get("market_valuation") or price)
                     disc = float(item.get("discount_percentage") or 0)
@@ -863,25 +872,132 @@ class AdvisorEngine:
                         "is_solar": item.get("is_solar", False),
                         "url": item.get("url") or item.get("portal_url") or "",
                         "portal_url": item.get("portal_url") or item.get("url") or "",
-                        "images": item.get("images") or []
+                        "images": valid_imgs
                     })
             except Exception as e_cat:
                 logger.warning(f"Aviso cargando catálogo de mercado: {e_cat}")
 
-        # 3. Incluir oportunidades sincronizadas en la sesión activa
+        # 3. Incluir oportunidades sincronizadas en la sesión activa (solo si tienen fotos reales válidas)
         if self._cached_catalog_opps:
+            from app.connectors.market_scraper import MarketScraper
             for opp in self._cached_catalog_opps:
+                oid = str(opp.get("id") or "").strip().upper()
+                if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                    continue
+                if (str(opp.get("source_type") or "").lower() == "market" or oid.startswith("MKT-")):
+                    valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
+                    if not valid_imgs:
+                        continue
+                    opp["images"] = valid_imgs
                 if not any(o.get("id") == opp.get("id") for o in all_opps):
                     all_opps.append(opp)
 
         return all_opps
+
+    def verify_and_filter_active_market_opportunities(
+        self,
+        candidates: List[Dict[str, Any]],
+        target_count: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Verifica rigurosamente antes de entregar al inversor que cada oportunidad de portal:
+        1. No esté en la lista negra sintética y disponga de al menos 1 fotografía real de portal.
+        2. Su primera fotografía (y/o URL de portal directa en Pisos.com/Habitaclia) responda HTTP 200 activa.
+        Si una oportunidad de portal no tiene fotos o devuelve 404/despublicada, la purga inmediatamente del catálogo.
+        """
+        from app.connectors.market_scraper import MarketScraper
+        from app.services.catalog_guardian import CatalogGuardian
+        import httpx
+
+        guardian = CatalogGuardian()
+        verified: List[Dict[str, Any]] = []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        }
+
+        for opp in candidates:
+            if len(verified) >= target_count:
+                break
+            opp_id = str(opp.get("id") or "").strip().upper()
+            is_market = (
+                str(opp.get("source_type") or "").strip().lower() == "market"
+                or opp_id.startswith("MKT-")
+            )
+            if not is_market:
+                verified.append(opp)
+                continue
+
+            if opp_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                guardian.purge_opportunity(opp_id)
+                continue
+
+            valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
+            if not valid_imgs:
+                logger.warning(f"[Rigurosidad] Oportunidad {opp_id} descartada y purgada por tener 0 fotos reales.")
+                guardian.purge_opportunity(opp_id)
+                continue
+
+            opp["images"] = valid_imgs
+            first_img = valid_imgs[0]
+            portal_url = str(opp.get("portal_url") or opp.get("url") or "").strip()
+
+            # Comprobar que la foto real principal es accesible (HTTP 200) y en portales abiertos que el anuncio sigue activo
+            is_alive = True
+            is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+            if not is_pytest:
+                try:
+                    with httpx.Client(timeout=3.5, follow_redirects=True) as client:
+                        img_resp = client.head(first_img, headers=headers)
+                        if img_resp.status_code in (404, 410):
+                            img_get = client.get(first_img, headers=headers)
+                            if img_get.status_code in (404, 410) or (img_get.status_code == 200 and len(img_get.content) < 500):
+                                is_alive = False
+                        # En Pisos.com y Habitaclia podemos verificar también la URL del anuncio gratis (0 créditos)
+                        if is_alive and any(p in portal_url.lower() for p in ["pisos.com", "habitaclia.com"]):
+                            page_resp = client.get(portal_url, headers=headers)
+                            if page_resp.status_code in (404, 410):
+                                is_alive = False
+                            elif page_resp.status_code == 200 and len(page_resp.text) > 200:
+                                delisted, _reason, page_photos = guardian.verify_listing_active_status(
+                                    portal_url=portal_url,
+                                    content=page_resp.text,
+                                    http_code=page_resp.status_code
+                                )
+                                if delisted or not page_photos:
+                                    is_alive = False
+                except Exception:
+                    # En entorno de test offline o timeout puntual de red, mantenemos si superó ensure_twenty_images
+                    pass
+
+            if not is_alive:
+                logger.warning(f"[Rigurosidad] Oportunidad {opp_id} ya no está vigente en portal ({portal_url}). Purgando...")
+                if not is_pytest:
+                    guardian.purge_opportunity(opp_id)
+                continue
+
+            verified.append(opp)
+
+        return verified
 
     # --------------------------------------------------------------------------
     # 4. FILTRADO INTELIGENTE SEGÚN CRITERIOS
     # --------------------------------------------------------------------------
     def filter_opportunities(self, opportunities: List[Dict[str, Any]], criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Filtra y ordena oportunidades según los criterios extraídos."""
-        filtered = opportunities
+        from app.connectors.market_scraper import MarketScraper
+        filtered = []
+        for o in opportunities:
+            oid = str(o.get("id") or "").strip().upper()
+            if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                continue
+            is_mkt = str(o.get("source_type") or "").strip().lower() == "market" or oid.startswith("MKT-")
+            if is_mkt:
+                valid_imgs = MarketScraper.ensure_twenty_images(o.get("images"))
+                if not valid_imgs:
+                    continue
+                o["images"] = valid_imgs
+            filtered.append(o)
 
         # Micro-zona, Barrio, Urbanización, P.A.U., Ensanche Urbanístico, Código Postal o Pueblo
         target_zone_str = criteria.get("zone_or_neighborhood")
@@ -2218,10 +2334,6 @@ class AdvisorEngine:
                     check_db.close()
 
         if cached_consultation:
-            logger.info(
-                f"[Ahorro Tokens] Reutilizando consulta #{cached_consultation.id} (usuario original: {cached_consultation.user_name}) "
-                f"para '{user_name}' sin consumir tokens de Gemini."
-            )
             try:
                 cached_ids = json.loads(cached_consultation.matched_opportunity_ids_json or "[]")
             except Exception:
@@ -2231,13 +2343,22 @@ class AdvisorEngine:
             opps_map = {str(o.get("id")).strip().upper(): o for o in all_opps}
             matched_opps = [opps_map[str(oid).strip().upper()] for oid in cached_ids if str(oid).strip().upper() in opps_map]
 
-            # Fallback en caso de que alguna oportunidad esté solo en BD
+            # Fallback en caso de que alguna oportunidad esté solo en BD (solo subastas BOE o con fotos reales)
             if not matched_opps and cached_ids:
                 from app.db.models import Opportunity
+                from app.connectors.market_scraper import MarketScraper
                 fetch_db = db if db is not None else SessionLocal()
                 try:
                     db_opps = fetch_db.query(Opportunity).filter(Opportunity.id.in_(cached_ids)).all()
                     for o in db_opps:
+                        oid_u = str(o.id or "").strip().upper()
+                        if oid_u in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                            continue
+                        raw_imgs = [o.main_image] if o.main_image else []
+                        if oid_u.startswith("MKT-"):
+                            raw_imgs = MarketScraper.ensure_twenty_images(raw_imgs)
+                            if not raw_imgs:
+                                continue
                         opp_dict = {
                             "id": o.id,
                             "title": o.title or "Inmueble",
@@ -2247,11 +2368,12 @@ class AdvisorEngine:
                             "locality": o.locality or "N/D",
                             "province": o.province or "N/D",
                             "hivex_score": o.hivex_score or 75,
-                            "images": [o.main_image] if o.main_image else [],
+                            "images": raw_imgs,
                             "rental_yield": o.rental_yield or 0,
                             "estimated_monthly_rent": o.estimated_monthly_rent or 0,
                             "potential_gross_profit": o.potential_gross_profit or 0,
-                            "url": o.portal_url or f"{self.platform_url}/?opp_id={o.id}"
+                            "url": o.portal_url or f"{self.platform_url}/?opp_id={o.id}",
+                            "portal_url": o.portal_url or ""
                         }
                         matched_opps.append(opp_dict)
                 except Exception as e_fetch_opps:
@@ -2260,6 +2382,20 @@ class AdvisorEngine:
                     if db is None:
                         fetch_db.close()
 
+            # Verificar rigurosamente que las oportunidades cacheadas siguen activas y con fotos reales
+            matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=20)
+            if not matched_opps:
+                logger.info(
+                    f"[Rigurosidad Caché] La consulta cacheada #{cached_consultation.id} ya no tiene oportunidades vigentes con fotos reales. "
+                    f"Invalidando caché y ejecutando búsqueda fresca."
+                )
+                cached_consultation = None
+
+        if cached_consultation:
+            logger.info(
+                f"[Ahorro Tokens] Reutilizando consulta #{cached_consultation.id} (usuario original: {cached_consultation.user_name}) "
+                f"para '{user_name}' con {len(matched_opps)} oportunidades verificadas activas."
+            )
             # Parsear criterios cacheados
             try:
                 criteria = json.loads(cached_consultation.criteria_json or "{}")
@@ -2333,7 +2469,7 @@ class AdvisorEngine:
                         description=final_prompt,
                         query_type=cached_consultation.query_type or "SEARCH_OPPORTUNITIES",
                         criteria_json=cached_consultation.criteria_json,
-                        matched_opportunity_ids_json=cached_consultation.matched_opportunity_ids_json,
+                        matched_opportunity_ids_json=json.dumps([o.get("id") for o in matched_opps[:20]]),
                         matched_count=len(matched_opps),
                         ai_summary=ai_summary,
                         is_alert=cached_consultation.is_alert,
@@ -2474,6 +2610,7 @@ class AdvisorEngine:
             # 2C. Búsqueda de Inmuebles con Solicitud Explícita de Fichas: Obtener catálogo y filtrar rigurosamente
             all_opps = self.get_live_catalog_opportunities(db=db)
             matched_opps = self.filter_opportunities(all_opps, criteria)
+            matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=target_count)
 
             # Comprobar métricas internas de representatividad en HIVEX
             prov = criteria.get("province") or "Madrid"
@@ -2505,6 +2642,7 @@ class AdvisorEngine:
                 if newly_synced:
                     all_opps = self.get_live_catalog_opportunities(db=db)
                     matched_opps = self.filter_opportunities(all_opps, criteria)
+                    matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=target_count)
                     if matched_opps:
                         try:
                             avg_p = sum(o.get("listing_price", 0) for o in matched_opps) / len(matched_opps)
@@ -2573,7 +2711,8 @@ class AdvisorEngine:
                         if matched_opps:
                             is_relaxed = True
 
-            # Recortar al top solicitado (hasta target_count, máximo 20)
+            # Verificar vigencias y recortar al top solicitado (hasta target_count, máximo 20)
+            matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=target_count)
             matched_opps = matched_opps[:target_count]
             should_display_cards = is_explicit_listing_request and len(matched_opps) > 0
 

@@ -33,6 +33,7 @@ def test_market_scraper_deduplication_and_min_price():
         "province": "Madrid",
         "original_listing_price": 300000.0,
         "surface_m2": 80.0,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/aa/bb/cc/1499887766.jpg"],
         "publications": [
             {"portal": "Idealista", "price": 280000.0, "url": "https://idealista.com/1"},
             {"portal": "Fotocasa", "price": 260000.0, "url": "https://fotocasa.es/1"}, # Precio mínimo
@@ -56,6 +57,7 @@ def test_market_scraper_same_price_different_portals_no_increment():
         "id": "MKT-TEST-002",
         "title": "Piso de prueba",
         "original_listing_price": 200000.0,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/aa/bb/cc/1499887767.jpg"],
         "publications": [
             {"portal": "Idealista", "portal_name": "idealista", "price": 180000.0},
             {"portal": "Fotocasa", "portal_name": "fotocasa", "price": 180000.0}, # mismo precio, no debe sumar
@@ -81,6 +83,7 @@ def test_market_cross_reference_with_pgou():
         "listing_price": 220000.0,
         "lat": 40.3540,
         "lon": -3.6180,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/aa/bb/cc/1499887768.jpg"],
         "publications": [{"portal": "Idealista", "price": 220000.0}]
     }
     processed = scraper._process_market_listing(raw_sample)
@@ -123,6 +126,7 @@ def test_market_scraper_discards_naves():
         "listing_price": 150000.0,
         "original_listing_price": 180000.0,
         "surface_m2": 450.0,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/aa/bb/cc/1499887769.jpg"],
         "publications": [{"portal": "Idealista", "price": 150000.0}]
     }
     processed = scraper._process_market_listing(nave_sample)
@@ -141,6 +145,7 @@ def test_market_scraper_independent_discounts():
         "listing_price": 400000.0,
         "price_drop_date": "2026-03-15",
         "surface_m2": 100.0,
+        "images": ["https://img4.idealista.com/blur/480_360_mq/0/id.pro.es.image.master/aa/bb/cc/1499887770.jpg"],
         "publications": [{"portal": "Idealista", "price": 400000.0}]
     }
     processed = scraper._process_market_listing(sample)
@@ -215,7 +220,7 @@ def test_market_scraper_twenty_images_gallery():
     assert proc_large is not None
     assert len(proc_large["images"]) == 20
 
-    # 4. Caso sin fotos aportadas -> Debe ser lista vacía, sin inventar imágenes
+    # 4. REGLA DE ORO: Caso sin fotos aportadas -> El anuncio no está vigente/activo en portal y debe ser descartado (None)
     zero_sample = {
         "id": "MKT-IMG-004",
         "title": "Terreno rústico",
@@ -229,8 +234,7 @@ def test_market_scraper_twenty_images_gallery():
         "publications": [{"portal": "Idealista", "price": 100000.0}]
     }
     proc_zero = scraper._process_market_listing(zero_sample)
-    assert proc_zero is not None
-    assert len(proc_zero["images"]) == 0
+    assert proc_zero is None
 
 
 

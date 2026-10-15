@@ -99,7 +99,8 @@ class CatalogGuardian:
                 if img not in extracted:
                     extracted.append(img)
 
-        return extracted
+        from app.connectors.market_scraper import MarketScraper
+        return [u for u in extracted if MarketScraper.is_valid_real_portal_photo(u)]
 
     def verify_listing_active_status(
         self,
@@ -196,6 +197,7 @@ class CatalogGuardian:
         Portales directos (Pisos.com, Habitaclia, Fotocasa) se auditan con 0 créditos.
         """
         from app.connectors.supadata_client import SupadataClient
+        from app.connectors.market_scraper import MarketScraper
 
         if not self.catalog_path.exists():
             return {"checked": 0, "purged": [], "remaining": 0}
@@ -211,7 +213,22 @@ class CatalogGuardian:
         purged_ids = []
         checked_count = 0
 
-        target_items = [it for it in items if it.get("portal_url")]
+        # Fase 0 (0 créditos): Purgar inmediatamente cualquier inmueble con 0 fotos reales o ID sintético
+        valid_items_for_http = []
+        for it in items:
+            opp_id = str(it.get("id") or "").strip().upper()
+            valid_imgs = MarketScraper.ensure_twenty_images(it.get("images"))
+            if opp_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS or not valid_imgs:
+                self.purge_opportunity(opp_id)
+                purged_ids.append({
+                    "id": opp_id,
+                    "url": it.get("portal_url"),
+                    "reason": "Sin fotografías reales válidas en catálogo o ID sintético"
+                })
+            else:
+                valid_items_for_http.append(it)
+
+        target_items = [it for it in valid_items_for_http if it.get("portal_url")]
         if max_items:
             target_items = target_items[:max_items]
 

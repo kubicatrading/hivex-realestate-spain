@@ -42,6 +42,7 @@ GILMAR Consulting Inmobiliario pone a su disposición este sofisticado piso.
 SAMPLE_HABITACLIA_MARKDOWN = """
 # Pisos en venta en Barcelona
 
+![Foto Poblenou](https://static.fotocasa.es/images/ads/5f6b97eb-9dc4-4e81-a671-b8b8cd978aa1)
 [Piso con terraza en Poblenou](https://www.habitaclia.com/comprar-viviendas-barcelona/sant_marti_poblenou-i24589012.htm)
 
 320.000 €
@@ -67,7 +68,7 @@ def test_idealista_markdown_parser():
     assert item1["surface_m2"] == 131.0
     assert item1["has_elevator"] is True
     assert item1["publications"][0]["agency"] == "Gilmar Barrio de Salamanca"
-    assert len(item1["images"]) > 0
+    assert len(item1["images"]) == 1  # No debe contaminarse con la foto del anuncio siguiente
     assert item1["lat"] is not None and item1["lon"] is not None
     assert item1["census_tract_data"]["avg_household_income"] > 50000
     assert item1.get("rental_yield") is not None
@@ -89,12 +90,14 @@ def test_habitaclia_markdown_parser():
     assert "24589012" in item["id"]
     assert item["listing_price"] == 320000.0
     assert item["locality"] == "Barcelona"
+    assert len(item["images"]) == 1
     assert item["lat"] is not None and item["lon"] is not None
 
 
 SAMPLE_FOTOCASA_MARKDOWN = """
 # Pisos en venta en Madrid
 
+![Foto Palomeras](https://static.fotocasa.es/images/ads/9a8b7c6d-1234-4321-8888-112233445566)
 [Piso en venta en Palomeras sureste, Madrid](https://www.fotocasa.es/es/comprar/vivienda/madrid-capital/palomeras-sureste/182746190/d)
 
 110.000 €
@@ -107,6 +110,7 @@ Bonito piso en Palomeras sureste ideal inversión.
 SAMPLE_PISOSCOM_MARKDOWN = """
 # Casas y pisos en Valencia
 
+![Foto Torrefiel](https://fotos.imghs.net/xl-wp/46019/piso_torrefiel_12345678_1.jpg)
 [Piso en venta en Torrefiel](https://www.pisos.com/comprar/piso-torrefiel-46019-12345678/)
 
 85.000 €
@@ -131,6 +135,7 @@ def test_fotocasa_markdown_parser():
     assert item["census_tract_data"]["area_m2_price"] == 2300.0
     assert item["discount_vs_market"] > 20.0
     assert item["rental_yield"] > 7.0
+    assert len(item["images"]) == 1
 
 
 def test_pisoscom_markdown_parser():
@@ -146,6 +151,7 @@ def test_pisoscom_markdown_parser():
     assert item["postal_code"] == "46019"
     assert item["census_tract_data"]["area_m2_price"] == 1700.0
     assert item["rental_yield"] > 7.0
+    assert len(item["images"]) == 1
 
 
 def test_meso_market_price_by_postal_code():

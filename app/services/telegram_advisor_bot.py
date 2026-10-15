@@ -514,7 +514,24 @@ class TelegramAdvisorBot:
         except Exception as e_card:
             logger.warning(f"Excepción renderizando tarjeta gráfica WhatsApp: {repr(e_card)}", exc_info=True)
 
-        # 2. Fallback a mensaje HTML si el upload o render de imagen fallase
+        # REGLA ESTRICTA: Si es una oportunidad de portal inmobiliario (MKT- / market) y no tiene fotos reales
+        # (card_bytes is None), significa que el anuncio ya NO está vigente en portal -> PROHIBIDO enviarlo
+        is_market_opp = (
+            str(opp.get("source_type") or "").strip().lower() == "market"
+            or opp_id.upper().startswith("MKT-")
+        )
+        if is_market_opp:
+            logger.warning(
+                f"[TelegramAdvisorBot] Bloqueado envío de oportunidad de portal {opp_id} por carecer de fotografías reales verificadas."
+            )
+            try:
+                from app.services.catalog_guardian import CatalogGuardian
+                CatalogGuardian().purge_opportunity(opp_id)
+            except Exception:
+                pass
+            return False
+
+        # 2. Fallback a mensaje HTML únicamente para subastas BOE sin Street View
         card_html = advisor_engine.generate_telegram_card_html(opp)
         return await self.send_message(
             chat_id=chat_id,

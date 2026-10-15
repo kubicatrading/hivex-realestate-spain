@@ -22,20 +22,29 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Patrones terminantemente prohibidos: fotos mockeadas, de stock o satelitales / ortofotos
+# Patrones terminantemente prohibidos: fotos mockeadas, de stock, recicladas o satelitales / ortofotos
 FORBIDDEN_IMAGE_PATTERNS = [
     "unsplash.com", "pexels.com", "pixabay.com", "freepik.com", "shutterstock.com",
     "placeholder", "dummy", "mock", "sample", "stock", "fake",
     "catastro", "cartografia", "wms", "ortofoto", "pnoa", "sedecatastro",
-    "ign.es", "mapa", "satelite", "satellite", "aerial"
+    "ign.es", "mapa", "satelite", "satellite", "aerial",
+    "default_nophoto", "nophoto", "no-photo", "no_photo", "sin_foto", "sin-foto",
+    "/logos/", "/logo/", "prof-wp",
+    "1347770919.jpg", "1405310886.jpg", "13320965"
 ]
 
 def is_forbidden_image(url: str) -> bool:
-    """Detecta y rechaza fotografías mockeadas, de stock o mapas/ortofotos satelitales."""
+    """Detecta y rechaza fotografías mockeadas, recicladas, de stock o mapas/ortofotos satelitales."""
     if not url or not str(url).startswith("http"):
         return True
     u_lower = str(url).lower()
-    return any(p in u_lower for p in FORBIDDEN_IMAGE_PATTERNS)
+    if any(p in u_lower for p in FORBIDDEN_IMAGE_PATTERNS):
+        return True
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        return not MarketScraper.is_valid_real_portal_photo(url)
+    except Exception:
+        return False
 
 def fetch_verified_streetview(opp: Dict[str, Any]) -> Optional[Image.Image]:
     """
@@ -515,15 +524,37 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
         except Exception:
             pass
 
-    # Si NO existen fotos reales del anuncio, intentar Google Street View verificado
-    if not loaded_imgs:
+    # Determinar si es un inmueble de portal inmobiliario (MKT- / source_type == 'market')
+    opp_id_str = str(opp.get("id") or "").strip().upper()
+    is_market_listing = (
+        str(opp.get("source_type") or "").strip().lower() == "market"
+        or opp_id_str.startswith("MKT-")
+    )
+
+    # REGLA DE ORO INMOBILIARIA:
+    # Si es una oportunidad de portal inmobiliario y NO tiene fotos reales descargables,
+    # con total seguridad esa oportunidad YA NO ESTÁ VIGENTE/ACTIVA en el portal -> PURGAR y NO ENVIAR.
+    if is_market_listing and not loaded_imgs:
+        logger.warning(
+            f"[Regla Rigurosidad] Oportunidad de portal {opp_id_str} sin fotos reales válidas/descargables. "
+            f"Oportunidad retirada o inactiva en portal. Purgando del catálogo y cancelando envío."
+        )
+        try:
+            from app.services.catalog_guardian import CatalogGuardian
+            CatalogGuardian().purge_opportunity(opp_id_str)
+        except Exception:
+            pass
+        return None
+
+    # Exclusivamente para subastas BOE (SUB-*) que por naturaleza no tienen fotos de portal:
+    if not is_market_listing and not loaded_imgs:
         sv_img = fetch_verified_streetview(opp)
         if sv_img:
             loaded_imgs.append(sv_img)
 
     # EN ÚLTIMA INSTANCIA: Si no existen fotos reales ni Street View verificado, NO ENVIAR FOTO
     if not loaded_imgs:
-        logger.info(f"Oportunidad {opp.get('id')} sin fotos reales ni Street View verificado. Omitiendo generación de imagen para enviar ficha limpia sin foto.")
+        logger.info(f"Oportunidad {opp_id_str} sin fotos reales ni Street View verificado. Omitiendo generación de imagen.")
         return None
 
 

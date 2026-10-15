@@ -473,10 +473,11 @@ class IdealistaMarkdownParser:
                 if agency_matches:
                     agency = agency_matches[-1].group("agency").replace("Comercializa", "").strip()
 
-                # 2. Imágenes del inmueble: capturar todas las fotos disponibles sin límite
+                # 2. Imágenes del inmueble: capturar EXCLUSIVAMENTE las fotos de este anuncio (en prev_text)
+                # NUNCA usar post_text[:2500] porque contamina con la foto de portada del siguiente anuncio del listado
+                from app.connectors.market_scraper import MarketScraper
                 images = []
-                full_img_block = prev_text + "\n" + post_text[:2500]
-                img_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+', full_img_block)
+                img_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+', prev_text)
                 for img_url in img_matches:
                     if img_url.endswith('.gif'):
                         continue
@@ -487,10 +488,16 @@ class IdealistaMarkdownParser:
                         .replace("/blur/WEB_DETAIL_TOP-L-L/", "/blur/WEB_DETAIL-XL-L/")
                         .replace("/blur/591_420_mq/", "/blur/WEB_DETAIL-XL-L/")
                     )
+                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
+                        continue
                     if clean_img not in images:
                         images.append(clean_img)
                     if len(images) >= 20:
                         break
+
+                # REGLA DE ORO: Si no existen fotos reales para la oportunidad, el anuncio no está activo/vigente
+                if not images:
+                    continue
 
                 # 3. Precios y Descuento
                 # En Idealista aparece:
@@ -1143,18 +1150,24 @@ class HabitacliaMarkdownParser:
                 rooms_match = re.search(r'(\d+)\s*hab', post_text) or re.search(r'(\d+)\s*hab', prev_text)
                 rooms = int(rooms_match.group(1)) if rooms_match else 3
 
-                # Extraer hasta 20 imágenes del carrusel
+                # Extraer hasta 20 imágenes reales del anuncio (sin contaminar con el siguiente anuncio)
+                from app.connectors.market_scraper import MarketScraper
                 images = []
                 raw_img_matches = (
-                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text + "\n" + post_text)
-                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text)
+                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text)
+                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text)
                 )
                 for img_url in raw_img_matches:
                     clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
+                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
+                        continue
                     if clean_img not in images:
                         images.append(clean_img)
                     if len(images) >= 20:
                         break
+
+                if not images:
+                    continue
 
                 opportunity = {
                     "id": f"MKT-HABITACLIA-{item_id}",
@@ -1516,18 +1529,24 @@ class FotocasaMarkdownParser:
 
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
-                # Imágenes: capturar hasta 20 fotos del inmueble
+                # Imágenes: capturar hasta 20 fotos reales del inmueble (sin contaminar con el siguiente anuncio)
+                from app.connectors.market_scraper import MarketScraper
                 images = []
                 raw_img_matches = (
-                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text + "\n" + post_text[:4000])
-                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text + "\n" + post_text[:4000])
+                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text)
+                    + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text)
                 )
                 for img_url in raw_img_matches:
                     clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
+                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
+                        continue
                     if clean_img not in images:
                         images.append(clean_img)
                     if len(images) >= 20:
                         break
+
+                if not images:
+                    continue
 
                 # Ubicación y KPIs meso
                 loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
@@ -1715,13 +1734,19 @@ class PisosComMarkdownParser:
 
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
+                from app.connectors.market_scraper import MarketScraper
                 images = []
-                all_candidate_imgs = re.findall(r'https?://(?:fotos|statics)\.imghs\.net/[^\s\"\)\']+\.(?:jpg|jpeg|png|webp)', prev_text + "\n" + post_text[:1200])
+                all_candidate_imgs = re.findall(r'https?://(?:fotos|statics)\.imghs\.net/[^\s\"\)\']+\.(?:jpg|jpeg|png|webp)', prev_text)
                 for img_url in all_candidate_imgs:
-                    if any(bad in img_url.lower() for bad in ["logo", "icon", "microphone", "map_", "loading"]):
+                    if not MarketScraper.is_valid_real_portal_photo(img_url):
                         continue
                     if img_url not in images:
                         images.append(img_url)
+                    if len(images) >= 20:
+                        break
+
+                if not images:
+                    continue
 
                 loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
 

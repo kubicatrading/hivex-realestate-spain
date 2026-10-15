@@ -88,9 +88,10 @@ class TelegramNotifier:
             except Exception:
                 pass
 
-        if not first_photo:
-            # Fallback a CDN residencial
-            first_photo = "https://img4.idealista.com/blur/WEB_DETAIL-XL-L/0/id.pro.es.image.master/0a/08/72/1347770919.jpg"
+        if first_photo:
+            from app.connectors.market_scraper import MarketScraper
+            if not MarketScraper.is_valid_real_portal_photo(first_photo):
+                first_photo = None
 
         if first_photo and str(first_photo).startswith("http"):
             photo_url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
