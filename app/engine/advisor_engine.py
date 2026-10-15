@@ -71,7 +71,7 @@ SPANISH_ZONE_DEFINITIONS = [
     # Municipios Madrid
     ("La Moraleja - Alcobendas - Colegio Suizo", "Madrid", ["la moraleja", "moraleja", "el soto", "el soto de la moraleja", "el encinar", "el encinar de los reyes", "alcobendas", "colegio suizo", "colegio suizo de madrid", "28109", "28100", "28108"]),
     ("Ciudalcampo - San Sebastián de los Reyes Norte", "Madrid", ["ciudalcampo", "fuente del fresno", "santo domingo", "la granjilla", "club de campo", "valdelagua", "28707", "28708", "28120"]),
-    ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas", "avenida de las vegas", "avda de las vegas", "urbanización las vegas", "urbanizacion las vegas", "urbanización avenida de las vegas", "urbanizacion avenida de las vegas", "santa maría", "santa maria", "28229"]),
+    ("Las Vegas - Villanueva del Pardillo", "Madrid", ["villanueva del pardillo", "las vegas", "avenida de las vegas", "avda de las vegas", "urbanización las vegas", "urbanizacion las vegas", "urbanización avenida de las vegas", "urbanizacion avenida de las vegas", "28229"]),
     ("Alcalá de Henares", "Madrid", ["alcalá de henares", "alcala de henares", "28801", "28802"]),
     ("Eje Guadalix de la Sierra - Algete - Colmenar Viejo", "Madrid", ["guadalix de la sierra", "guadalix", "gualix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "miraflores de la sierra", "28794", "28770", "28791", "28792"]),
     ("Algete - Fuente el Saz - SS Reyes Norte", "Madrid", ["algete", "fuente el saz", "fuente el saz de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ss reyes", "talamanca", "el molar", "paracuellos", "paracuellos de jarama", "paracuellos del jarama", "jarama", "rio jarama", "río jarama", "valpuercos", "28110", "28140", "28701", "28702", "28703", "28860"]),
@@ -355,11 +355,12 @@ class AdvisorEngine:
     # --------------------------------------------------------------------------
     async def parse_query_intent(self, text_input: str) -> Dict[str, Any]:
         """
-        Extrae intención, provincia, micro-zona/barrio, rangos de precio, tipos de activo,
+        Extrae intención, jerarquía completa de ubicación (calle/urbanización + barrio/distrito +
+        municipio/localidad + código postal + provincia), rangos de precio, tipos de activo,
         descuentos mínimos, rendimiento BTL, target de fichas y solicitud de alertas.
-        Prioriza Gemini Flash en cascada descendente y fusiona con heurística experta.
+        Prioriza Gemini Flash en cascada descendente y fusiona de forma conjuntiva (AND) con heurística experta.
         """
-        # 1. Base heurística inicial robusta
+        # 1. Base heurística inicial robusta (jerarquía geográfica completa)
         criteria = self._parse_query_intent_heuristics(text_input)
 
         # 2. Enriquecimiento mediante Gemini Flash Cascade si hay clave
@@ -373,29 +374,42 @@ class AdvisorEngine:
         if api_key:
             sys_inst = (
                 "Eres el analizador de consultas inmobiliarias de HIVEX en España. "
-                "Extrae los parámetros de la consulta del usuario en formato JSON con las siguientes claves: "
+                "Es VITAL que extraigas el CONJUNTO JERÁRQUICO COMPLETO de la zona indicada por el usuario "
+                "(calle/urbanización + barrio/distrito + municipio/ciudad + código postal + provincia) para aplicar un filtro AND estricto. "
+                "Extrae los parámetros en formato JSON con las siguientes claves: "
                 "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT), "
-                "province (nombre de la provincia o null), "
-                "zone_or_neighborhood (extrae cualquier micro-zona geográfica concreta solicitada por el usuario, sin importar su escala: puede ser un barrio, una urbanización, un P.A.U., un ensanche urbanístico, un código postal, un pueblo o municipio, o una calle/subdistrito. Si no se solicita ninguna zona concreta, devuelve null), "
+                "street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Avenida de las Vegas', o null), "
+                "district_or_neighborhood (barrio, distrito, PAU o ensanche si se menciona, ej: 'Chamberí', 'PAU de Vallecas', o null), "
+                "municipality (municipio, localidad o ciudad específica dentro de la provincia si se menciona, ej: 'Villanueva del Pardillo', 'Alcobendas', o null), "
+                "zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, ej: 'Urbanización Avenida de las Vegas - Villanueva del Pardillo', o null), "
                 "postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null), "
+                "province (nombre de la provincia, ej: 'Madrid', o null), "
                 "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 10 para '10 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 20), "
                 "sort_by ('rental_yield', 'overall_score', 'discount' o 'price'), "
                 "strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD' o null), "
                 "min_price (float o null), max_price (float o null), "
                 "min_discount (float o null), min_yield (float o null), is_alert (bool)."
             )
-            prompt = f"Analiza esta consulta inmobiliaria: '{text_input}'"
+            prompt = f"Analiza esta consulta inmobiliaria respetando toda la jerarquía geográfica (AND): '{text_input}'"
             gemini_res, model_used = await self.call_gemini_flash_cascade(prompt, system_instruction=sys_inst, response_json=True)
             if gemini_res:
                 try:
                     parsed = json.loads(gemini_res)
                     if isinstance(parsed, dict):
-                        if parsed.get("province"):
+                        if parsed.get("province") and not criteria.get("province"):
                             criteria["province"] = parsed["province"]
-                        if parsed.get("zone_or_neighborhood"):
-                            criteria["zone_or_neighborhood"] = parsed["zone_or_neighborhood"]
-                        if parsed.get("postal_code"):
+                        if parsed.get("street_or_urbanization") and not criteria.get("street_or_urbanization"):
+                            criteria["street_or_urbanization"] = str(parsed["street_or_urbanization"]).strip()
+                        if parsed.get("district_or_neighborhood") and not criteria.get("district_or_neighborhood"):
+                            criteria["district_or_neighborhood"] = str(parsed["district_or_neighborhood"]).strip()
+                        if parsed.get("municipality") and not criteria.get("municipality"):
+                            criteria["municipality"] = str(parsed["municipality"]).strip()
+                        if parsed.get("postal_code") and not criteria.get("postal_code"):
                             criteria["postal_code"] = str(parsed["postal_code"]).strip()
+                        if parsed.get("zone_or_neighborhood") and not criteria.get("zone_or_neighborhood"):
+                            criteria["zone_or_neighborhood"] = parsed["zone_or_neighborhood"]
+                        # Reconstruir etiqueta compuesta y jerarquía si Gemini aportó algún nivel adicional
+                        self._sync_location_hierarchy(criteria)
                         if parsed.get("target_count") and isinstance(parsed["target_count"], int):
                             criteria["target_count"] = parsed["target_count"]
                         if parsed.get("sort_by"):
@@ -421,10 +435,46 @@ class AdvisorEngine:
 
         return criteria
 
+    @staticmethod
+    def _sync_location_hierarchy(criteria: Dict[str, Any]) -> None:
+        """
+        Sincroniza el diccionario `location_hierarchy` y `full_location_query` uniendo
+        todos los niveles geográficos presentes (calle/urbanización, distrito/barrio,
+        municipio, código postal y provincia) bajo semántica conjuntiva (AND).
+        """
+        street_urb = (criteria.get("street_or_urbanization") or "").strip() or None
+        dist_neigh = (criteria.get("district_or_neighborhood") or "").strip() or None
+        muni = (criteria.get("municipality") or "").strip() or None
+        cp = (criteria.get("postal_code") or "").strip() or None
+        prov = (criteria.get("province") or "").strip() or None
+        zone = (criteria.get("zone_or_neighborhood") or "").strip() or None
+
+        parts = []
+        for p in [street_urb, dist_neigh, muni, f"CP {cp}" if cp else None, prov]:
+            if p and not any(p.lower() in existing.lower() or existing.lower() in p.lower() for existing in parts):
+                parts.append(p)
+        if not parts and zone:
+            parts.append(zone)
+            if prov and prov.lower() not in zone.lower():
+                parts.append(prov)
+
+        full_location_query = ", ".join(parts) if parts else ""
+        criteria["location_hierarchy"] = {
+            "street_or_urbanization": street_urb,
+            "district_or_neighborhood": dist_neigh,
+            "municipality": muni,
+            "postal_code": cp,
+            "province": prov,
+            "zone_or_neighborhood": zone,
+            "full_location_query": full_location_query,
+        }
+        criteria["full_location_query"] = full_location_query
+
     def _parse_query_intent_heuristics(self, text_input: str) -> Dict[str, Any]:
         """
-        Motor heurístico de extracción de entidades (provincias, micro-zonas, números,
-        estrategias y filtros inmobiliarios) a partir de reglas y expresiones regulares.
+        Motor heurístico de extracción de entidades (jerarquía completa de ubicación:
+        calle/urbanización, barrio/distrito, municipio/localidad, código postal, provincia;
+        números, estrategias y filtros inmobiliarios) a partir de reglas y expresiones regulares.
         """
         q_lower = text_input.lower()
 
@@ -448,48 +498,117 @@ class AdvisorEngine:
         if cp_match:
             detected_postal_code = cp_match.group(1)
 
-        # Detección de Micro-zona, Barrio, Urbanización, PAU, Ensanche, Municipio o Pueblo
+        # Detección Jerárquica: Calle/Urbanización + Barrio/Distrito/PAU/Ensanche + Municipio/Pueblo
+        street_or_urbanization = None
+        district_or_neighborhood = None
+        detected_municipality = None
         zone_or_neighborhood = None
-        term_pat = r'(?:(?:\s+(?:con|por|menos|m[áa]s|top|precio|barato|caro|desde|hasta|\d+\s*€|\d+\s*k))|[\.\,]|$)'
+        term_pat = r'(?:(?:\s+(?:con|por|menos|m[áa]s|top|precio|barato|caro|desde|hasta|c[oó]digo\s+postal|cp\s*\d|\d+\s*€|\d+\s*k))|[\.\,]|$)'
 
-        # 1. Regla Común: Extraer delimitación explícita si el prompt define tipología de zona:
-        # A) Urbanización
+        # 1A) Urbanización o Calle/Avenida explícita
         urb_m = re.search(r'\b(?:urbanizaci[oó]n|urb\.?)\s+([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
         if urb_m and len(urb_m.group(1).strip()) >= 3:
-            zone_or_neighborhood = "Urbanización " + urb_m.group(1).strip().title()
+            raw_urb = urb_m.group(1).strip()
+            # Si contiene "de <municipio> <cp>" (ej. "las vegas de villanueva del pardillo 28229"), separar urbanización y municipio
+            raw_urb_no_cp = re.sub(r'\b\d{5}\b', '', raw_urb).strip()
+            de_muni_split = re.match(r'^(.+?)\s+(?:de|en)\s+(villanueva\s+del\s+pardillo|villanueva\s+de\s+la\s+ca[ñn]ada|alcobendas|pozuelo\s+de\s+alarc[oó]n|boadilla\s+del\s+monte|majadahonda|las\s+rozas(?:\s+de\s+madrid)?|colmenar\s+viejo|san\s+sebasti[aá]n\s+de\s+los\s+reyes|algete|guadalix\s+de\s+la\s+sierra|torrelodones|galapagar|alpedrete|valdemorillo|brunete|m[oó]stoles|alcal[aá]\s+de\s+henares|getafe|legan[eé]s|alcorc[oó]n|fuenlabrada)\b', raw_urb_no_cp)
+            if de_muni_split:
+                street_or_urbanization = "Urbanización " + de_muni_split.group(1).strip().title()
+                detected_municipality = de_muni_split.group(2).strip().title()
+            else:
+                street_or_urbanization = "Urbanización " + raw_urb_no_cp.title()
+            zone_or_neighborhood = "Urbanización " + raw_urb.title()
+        else:
+            calle_m = re.search(r'\b(?:calle|c/|avenida|avda\.?|paseo|plaza)\s+([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+            if calle_m and len(calle_m.group(1).strip()) >= 3:
+                street_or_urbanization = calle_m.group(0).strip().rstrip(".,").title()
 
-        # B) P.A.U. / PAU
-        if not zone_or_neighborhood:
-            pau_m = re.search(r'\b(?:p\.?a\.?u\.?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
-            if pau_m and len(pau_m.group(1).strip()) >= 3:
-                zone_or_neighborhood = "PAU de " + pau_m.group(1).strip().title()
+        # 1B) P.A.U. / PAU
+        pau_m = re.search(r'\b(?:p\.?a\.?u\.?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+        if pau_m and len(pau_m.group(1).strip()) >= 3:
+            district_or_neighborhood = "PAU de " + pau_m.group(1).strip().title()
+            if not zone_or_neighborhood:
+                zone_or_neighborhood = district_or_neighborhood
 
-        # C) Ensanche
-        if not zone_or_neighborhood:
-            ens_m = re.search(r'\b(?:ensanche(?:\s+urban[ií]stico)?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
-            if ens_m and len(ens_m.group(1).strip()) >= 3:
-                zone_or_neighborhood = "Ensanche de " + ens_m.group(1).strip().title()
+        # 1C) Ensanche
+        ens_m = re.search(r'\b(?:ensanche(?:\s+urban[ií]stico)?)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+        if ens_m and len(ens_m.group(1).strip()) >= 3:
+            district_or_neighborhood = "Ensanche de " + ens_m.group(1).strip().title()
+            if not zone_or_neighborhood:
+                zone_or_neighborhood = district_or_neighborhood
 
-        # D) Barrio
-        if not zone_or_neighborhood:
-            barrio_m = re.search(r'\b(?:barrio)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
-            if barrio_m and len(barrio_m.group(1).strip()) >= 3:
-                zone_or_neighborhood = "Barrio de " + barrio_m.group(1).strip().title()
+        # 1D) Barrio / Distrito
+        barrio_m = re.search(r'\b(?:barrio|distrito)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+        if barrio_m and len(barrio_m.group(1).strip()) >= 3:
+            district_or_neighborhood = "Barrio de " + barrio_m.group(1).strip().title()
+            if not zone_or_neighborhood:
+                zone_or_neighborhood = district_or_neighborhood
 
-        # E) Pueblo o Municipio
-        if not zone_or_neighborhood:
-            pueblo_m = re.search(r'\b(?:pueblo|municipio|localidad)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
-            if pueblo_m and len(pueblo_m.group(1).strip()) >= 3:
-                zone_or_neighborhood = pueblo_m.group(1).strip().title()
+        # 1E) Pueblo, Municipio o Localidad explícita (o tras código postal / coma: "código postal 28229 de Villanueva del Pardillo en Madrid")
+        pueblo_m = re.search(r'\b(?:pueblo|municipio|localidad)\s+(?:de\s+)?([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
+        if pueblo_m and len(pueblo_m.group(1).strip()) >= 3:
+            muni_raw = re.sub(r'\s+en\s+[a-záéíóúñ\s]+$', '', pueblo_m.group(1).strip())
+            detected_municipality = muni_raw.strip().title()
+            if not zone_or_neighborhood:
+                zone_or_neighborhood = detected_municipality
 
-        # 2. Si no se especificó un prefijo explícito, buscar en definiciones de zonas conocidas:
-        if not zone_or_neighborhood:
-            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
-                if any(re.search(r'\b' + re.escape(k) + r'\b', q_lower) for k in z_tokens):
-                    zone_or_neighborhood = z_name
-                    if not matched_province:
-                        matched_province = z_prov
+        if not detected_municipality and detected_postal_code:
+            after_cp_m = re.search(
+                r'\b' + re.escape(detected_postal_code) + r'\b\s*(?:,\s*|\s+de\s+|\s+en\s+)([a-záéíóúñ][a-záéíóúñ\s\-]{2,40}?)(?=\s+en\s+(?:madrid|barcelona|valencia|alicante|sevilla|m[aá]laga|espa[ñn]a|la\s+provincia)|[\.\,]|$)',
+                q_lower
+            )
+            if after_cp_m:
+                cand_muni = after_cp_m.group(1).strip()
+                if cand_muni and cand_muni not in ("madrid", "barcelona", "valencia", "alicante", "sevilla", "málaga", "malaga"):
+                    detected_municipality = cand_muni.title()
+
+        # También comprobar municipios conocidos en el texto si aún no se detectó municipio
+        if not detected_municipality:
+            known_municipalities = [
+                "villanueva del pardillo", "villanueva de la cañada", "villaviciosa de odón", "villaviciosa de odon",
+                "pozuelo de alarcón", "pozuelo de alarcon", "boadilla del monte", "majadahonda", "las rozas de madrid",
+                "las rozas", "torrelodones", "galapagar", "alpedrete", "colmenar viejo", "tres cantos",
+                "alcobendas", "san sebastián de los reyes", "san sebastian de los reyes", "guadalix de la sierra",
+                "soto del real", "miraflores de la sierra", "algete", "fuente el saz de jarama", "fuente el saz",
+                "paracuellos de jarama", "talamanca de jarama", "el molar", "valdemorillo", "brunete",
+                "alcalá de henares", "alcala de henares", "torrejón de ardoz", "torrejon de ardoz",
+                "rivas-vaciamadrid", "rivas vaciamadrid", "getafe", "leganés", "leganes", "alcorcón", "alcorcon",
+                "móstoles", "mostoles", "fuenlabrada", "pinto", "valdemoro", "aranjuez", "arganda del rey",
+                "collado villalba", "san lorenzo de el escorial", "el escorial", "guadarrama", "cercedilla",
+                "navacerrada", "moralzarzal", "manzanares el real", "cobeña", "daganzo de arriba",
+                "san agustín del guadalix", "san agustin del guadalix", "pedrezuela",
+                "benidorm", "torrevieja", "elche", "orihuela", "denia", "jávea", "javea", "calpe", "altea",
+                "marbella", "estepona", "mijas", "fuengirola", "benalmádena", "benalmadena", "torremolinos",
+                "sant cugat del vallès", "sant cugat del valles", "sitges", "castelldefels", "badalona", "sabadell", "terrassa"
+            ]
+            for km in known_municipalities:
+                if re.search(r'\b' + re.escape(km) + r'\b', q_lower):
+                    detected_municipality = km.title()
                     break
+
+        # 2. Comprobar definiciones de zonas conocidas (SPANISH_ZONE_DEFINITIONS)
+        matched_known_zone = None
+        for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+            if any(re.search(r'\b' + re.escape(k) + r'\b', q_lower) for k in z_tokens):
+                matched_known_zone = z_name
+                if not matched_province:
+                    matched_province = z_prov
+                if not district_or_neighborhood and not street_or_urbanization and not detected_municipality:
+                    district_or_neighborhood = z_name
+                break
+
+        if not zone_or_neighborhood and matched_known_zone:
+            zone_or_neighborhood = matched_known_zone
+
+        # Si tenemos urbanización/calle y municipio (y el municipio no está ya incluido en zone_or_neighborhood), combinarlos
+        if zone_or_neighborhood and detected_municipality and detected_municipality.lower() not in zone_or_neighborhood.lower():
+            zone_or_neighborhood = f"{zone_or_neighborhood} - {detected_municipality}"
+        elif not zone_or_neighborhood and street_or_urbanization:
+            zone_or_neighborhood = (
+                f"{street_or_urbanization} - {detected_municipality}"
+                if detected_municipality and detected_municipality.lower() not in street_or_urbanization.lower()
+                else street_or_urbanization
+            )
 
         # 3. Fallback a Código Postal
         if not zone_or_neighborhood and detected_postal_code:
@@ -501,6 +620,17 @@ class AdvisorEngine:
                 if z_name.lower() in zone_or_neighborhood.lower() or any(t.lower() in zone_or_neighborhood.lower() for t in z_tokens):
                     matched_province = z_prov
                     break
+        if not matched_province and detected_postal_code and len(detected_postal_code) == 5:
+            cp_prov_map = {
+                "28": "Madrid", "08": "Barcelona", "46": "Valencia", "03": "Alicante",
+                "41": "Sevilla", "29": "Málaga", "07": "Illes Balears", "48": "Vizcaya",
+                "20": "Guipúzcoa", "50": "Zaragoza", "30": "Murcia", "15": "A Coruña",
+                "36": "Pontevedra", "35": "Las Palmas", "38": "Santa Cruz de Tenerife",
+                "18": "Granada", "11": "Cádiz", "14": "Córdoba", "04": "Almería",
+                "45": "Toledo", "19": "Guadalajara", "40": "Segovia", "05": "Ávila",
+                "47": "Valladolid", "34": "Palencia", "09": "Burgos", "24": "León", "37": "Salamanca"
+            }
+            matched_province = cp_prov_map.get(detected_postal_code[:2])
 
         # Detección de Número de Fichas (ej: "top five", "top 5", "las 3 mejores", "10 pisos")
         # Si el prompt no da un límite numérico, por defecto son hasta 20 oportunidades
@@ -698,9 +828,12 @@ class AdvisorEngine:
         if "subasta" in q_lower or "boe" in q_lower:
             portal_filter = "subastas"
 
-        return {
+        res = {
             "query_type": query_type,
             "province": matched_province,
+            "municipality": detected_municipality,
+            "district_or_neighborhood": district_or_neighborhood,
+            "street_or_urbanization": street_or_urbanization,
             "zone_or_neighborhood": zone_or_neighborhood,
             "postal_code": detected_postal_code,
             "target_count": target_count,
@@ -719,6 +852,8 @@ class AdvisorEngine:
             "keywords_exclude": keywords_exclude,
             "raw_text": text_input
         }
+        self._sync_location_hierarchy(res)
+        return res
 
     # --------------------------------------------------------------------------
     # 3. CARGA Y FILTRADO DE OPORTUNIDADES REALES
@@ -726,7 +861,10 @@ class AdvisorEngine:
     def get_live_catalog_opportunities(self, db: Optional[Session] = None) -> List[Dict[str, Any]]:
         """
         Carga el conjunto completo de oportunidades verificadas (BD Subastas + Catálogo Market multicanal).
+        REGLA UNIVERSAL (CatalogGuardian): Ninguna oportunidad sin al menos 1 fotografía real válida
+        puede formar parte del catálogo activo en plataforma ni enviarse por alertas.
         """
+        from app.connectors.market_scraper import MarketScraper
         all_opps = []
 
         # 1. Carga de base de datos PostgreSQL (Subastas)
@@ -771,7 +909,7 @@ class AdvisorEngine:
                         and "pnoa" not in img.lower()
                     ]
 
-                    # Prioridad a fotografía de fachada Google Street View si no hay fotos de reportaje comercial
+                    # Prioridad a fotografía de fachada Google Street View si tiene clave activa
                     gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
                     lat_auc = getattr(auc, "latitude", None)
                     lon_auc = getattr(auc, "longitude", None)
@@ -782,6 +920,10 @@ class AdvisorEngine:
                             addr_full = f"{auc.address}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
                             raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={quote_plus(addr_full)}&fov=90&heading=235&pitch=10&key={gmaps_key}"]
 
+                    valid_sub_imgs = MarketScraper.ensure_twenty_images(raw_imgs)
+                    if not valid_sub_imgs:
+                        # REGLA DE ORO: Si no dispone de ninguna fotografía válida, no debe estar en plataforma ni enviarse
+                        continue
 
                     all_opps.append({
                         "id": sub_id,
@@ -806,7 +948,7 @@ class AdvisorEngine:
                         "poi_score": opp.poi_score or 70.0,
                         "surface_m2": getattr(auc, "surface_m2", None) or 90.0,
                         "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
-                        "images": raw_imgs,
+                        "images": valid_sub_imgs,
                         "latitude": getattr(auc, "latitude", None),
                         "longitude": getattr(auc, "longitude", None),
                         "refcat": getattr(auc, "refcat", None) or ""
@@ -818,14 +960,12 @@ class AdvisorEngine:
                 except Exception:
                     pass
 
-
         # 2. Carga de Catálogo Market Verificado
         catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
         if not catalog_path.exists():
             catalog_path = Path("app/data/verified_market_catalog.json")
         if catalog_path.exists():
             try:
-                from app.connectors.market_scraper import MarketScraper
                 with open(catalog_path, "r", encoding="utf-8") as f:
                     market_items = json.load(f)
                 for item in market_items:
@@ -879,16 +1019,14 @@ class AdvisorEngine:
 
         # 3. Incluir oportunidades sincronizadas en la sesión activa (solo si tienen fotos reales válidas)
         if self._cached_catalog_opps:
-            from app.connectors.market_scraper import MarketScraper
             for opp in self._cached_catalog_opps:
                 oid = str(opp.get("id") or "").strip().upper()
                 if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                     continue
-                if (str(opp.get("source_type") or "").lower() == "market" or oid.startswith("MKT-")):
-                    valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
-                    if not valid_imgs:
-                        continue
-                    opp["images"] = valid_imgs
+                valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
+                if not valid_imgs:
+                    continue
+                opp["images"] = valid_imgs
                 if not any(o.get("id") == opp.get("id") for o in all_opps):
                     all_opps.append(opp)
 
@@ -900,10 +1038,10 @@ class AdvisorEngine:
         target_count: int = 20
     ) -> List[Dict[str, Any]]:
         """
-        Verifica rigurosamente antes de entregar al inversor que cada oportunidad de portal:
-        1. No esté en la lista negra sintética y disponga de al menos 1 fotografía real de portal.
-        2. Su primera fotografía (y/o URL de portal directa en Pisos.com/Habitaclia) responda HTTP 200 activa.
-        Si una oportunidad de portal no tiene fotos o devuelve 404/despublicada, la purga inmediatamente del catálogo.
+        Verifica rigurosamente antes de entregar al inversor que cada oportunidad (en plataforma u Out-of-HIVEX):
+        1. No esté en la lista negra sintética y disponga de al menos 1 fotografía real válida.
+        2. Su primera fotografía (y/o URL de portal directa en Pisos.com/Habitaclia/Milanuncios/YaEncontré) responda HTTP 200 activa.
+        Si una oportunidad no tiene fotos o devuelve 404/despublicada, la purga inmediatamente del catálogo.
         """
         from app.connectors.market_scraper import MarketScraper
         from app.services.catalog_guardian import CatalogGuardian
@@ -920,26 +1058,32 @@ class AdvisorEngine:
             if len(verified) >= target_count:
                 break
             opp_id = str(opp.get("id") or "").strip().upper()
-            is_market = (
-                str(opp.get("source_type") or "").strip().lower() == "market"
-                or opp_id.startswith("MKT-")
-            )
-            if not is_market:
-                verified.append(opp)
-                continue
+            src_type = str(opp.get("source_type") or "").strip().lower()
+            is_market = src_type == "market" or opp_id.startswith("MKT-")
+            is_subasta = src_type in ("subastas", "auction") or opp_id.startswith("SUB-")
 
             if opp_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                 guardian.purge_opportunity(opp_id)
                 continue
 
-            valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
-            if not valid_imgs:
-                logger.warning(f"[Rigurosidad] Oportunidad {opp_id} descartada y purgada por tener 0 fotos reales.")
-                guardian.purge_opportunity(opp_id)
+            # Exigir al menos 1 fotografía real válida a cualquier oportunidad de catálogo, subasta o dict con clave 'images'
+            if is_market or is_subasta or "images" in opp:
+                valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
+                if not valid_imgs:
+                    logger.warning(f"[Rigurosidad Guardian] Oportunidad {opp_id} descartada por tener 0 fotos reales.")
+                    if is_market:
+                        guardian.purge_opportunity(opp_id)
+                    continue
+                opp["images"] = valid_imgs
+            else:
+                verified.append(opp)
                 continue
 
-            opp["images"] = valid_imgs
-            first_img = valid_imgs[0]
+            if not is_market:
+                verified.append(opp)
+                continue
+
+            first_img = opp["images"][0]
             portal_url = str(opp.get("portal_url") or opp.get("url") or "").strip()
 
             # Comprobar que la foto real principal es accesible (HTTP 200) y en portales abiertos que el anuncio sigue activo
@@ -981,145 +1125,261 @@ class AdvisorEngine:
         return verified
 
     # --------------------------------------------------------------------------
-    # 4. FILTRADO INTELIGENTE SEGÚN CRITERIOS
+    # 4. FILTRADO INTELIGENTE SEGÚN CRITERIOS (SEMÁNTICA CONJUNTIVA 'AND')
     # --------------------------------------------------------------------------
     def filter_opportunities(self, opportunities: List[Dict[str, Any]], criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Filtra y ordena oportunidades según los criterios extraídos."""
+        """
+        Filtra y ordena oportunidades según los criterios extraídos aplicando
+        estrictamente un conector lógico 'AND' en toda la jerarquía geográfica aportada por el usuario:
+        Provincia AND Código Postal AND Municipio/Localidad AND Urbanización/Calle/Barrio.
+        Además exige que toda oportunidad real disponga de al menos 1 fotografía válida.
+        """
         from app.connectors.market_scraper import MarketScraper
+        from app.core.geo_utils import normalize_text
+
         filtered = []
         for o in opportunities:
             oid = str(o.get("id") or "").strip().upper()
             if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                 continue
-            is_mkt = str(o.get("source_type") or "").strip().lower() == "market" or oid.startswith("MKT-")
-            if is_mkt:
+            src_type = str(o.get("source_type") or "").strip().lower()
+            is_mkt = src_type == "market" or oid.startswith("MKT-")
+            is_subasta = src_type in ("subastas", "auction") or oid.startswith("SUB-")
+            if is_mkt or is_subasta or "images" in o:
                 valid_imgs = MarketScraper.ensure_twenty_images(o.get("images"))
                 if not valid_imgs:
                     continue
                 o["images"] = valid_imgs
             filtered.append(o)
 
-        # Micro-zona, Barrio, Urbanización, P.A.U., Ensanche Urbanístico, Código Postal o Pueblo
-        target_zone_str = criteria.get("zone_or_neighborhood")
-        postal_code_str = criteria.get("postal_code")
+        # Extraer todos los niveles jerárquicos de ubicación solicitados por el usuario
+        target_prov_raw = (criteria.get("province") or "").strip()
+        target_muni_raw = (criteria.get("municipality") or "").strip()
+        target_urb_raw = (criteria.get("street_or_urbanization") or "").strip()
+        target_dist_raw = (criteria.get("district_or_neighborhood") or "").strip()
+        target_zone_str = (criteria.get("zone_or_neighborhood") or "").strip()
+        postal_code_str = str(criteria.get("postal_code") or "").strip()
 
-        if target_zone_str or postal_code_str:
-            raw_target_zone = (target_zone_str or "").strip().lower()
+        # Inferir códigos postales explícitos de 5 dígitos
+        explicit_cps = set()
+        if postal_code_str and re.match(r'^\d{5}$', postal_code_str):
+            explicit_cps.add(postal_code_str)
+        for cp in re.findall(r'\b(0[1-9]\d{3}|[1-4]\d{4}|5[0-2]\d{3})\b', target_zone_str):
+            explicit_cps.add(cp)
 
-            # Extraer códigos postales (5 dígitos)
-            found_cps = set()
-            if postal_code_str:
-                found_cps.add(str(postal_code_str).strip())
-            for cp in re.findall(r'\b(0[1-9]\d{3}|[1-4]\d{4}|5[0-2]\d{3})\b', raw_target_zone):
-                found_cps.add(cp)
+        # Si el usuario no pasó `municipality` separado pero `target_zone_str` incluye un municipio conocido (ej. "Las Vegas - Villanueva del Pardillo")
+        if not target_muni_raw and target_zone_str:
+            tz_norm = normalize_text(target_zone_str)
+            # Evitar asignar municipio único si es un eje multi-municipio ("Eje Guadalix de la Sierra - Algete - Colmenar Viejo")
+            if "eje " not in tz_norm and " - ss reyes" not in tz_norm and "alcobendas - colegio suizo" not in tz_norm:
+                for km in [
+                    "villanueva del pardillo", "villanueva de la canada", "pozuelo de alarcon",
+                    "boadilla del monte", "majadahonda", "las rozas", "torrelodones", "galapagar",
+                    "alpedrete", "alcala de henares", "pinto", "valdemoro", "getafe", "leganes",
+                    "alcorcon", "mostoles", "fuenlabrada", "torrejon de ardoz", "rivas vaciamadrid"
+                ]:
+                    if km in tz_norm:
+                        target_muni_raw = km
+                        break
 
-            # Generar frases clave y componentes distintivos
-            key_phrases = []
-            if raw_target_zone and len(raw_target_zone) >= 3:
-                key_phrases.append(raw_target_zone)
+        # Mapa de prefijos postales por provincia para descartar colisiones interprovinciales
+        prov_cp_prefix = {
+            "madrid": "28", "barcelona": "08", "valencia": "46", "alicante": "03",
+            "sevilla": "41", "malaga": "29", "illes balears": "07", "baleares": "07",
+            "vizcaya": "48", "bizkaia": "48", "guipuzcoa": "20", "gipuzkoa": "20",
+            "zaragoza": "50", "murcia": "30", "palencia": "34", "valladolid": "47",
+            "toledo": "45", "guadalajara": "19", "segovia": "40", "avila": "05",
+            "salamanca": "37", "burgos": "09", "leon": "24", "granada": "18",
+            "cadiz": "11", "cordoba": "14", "almeria": "04", "castellon": "12"
+        }
 
-            # Eliminar prefijos tipológicos comunes ("urbanización", "barrio de", "pau de", "ensanche de", etc.)
-            clean_without_prefix = re.sub(
-                r'^(?:urbanizaci[oó]n|urb\.?|barrio\s+de|barrio|p\.?a\.?u\.?\s+de|pau|ensanche\s+(?:urban[ií]stico\s+)?de|ensanche|pueblo\s+de|municipio\s+de|localidad\s+de|cp)\s+',
-                '',
-                raw_target_zone
-            ).strip()
-            if clean_without_prefix and clean_without_prefix != raw_target_zone and len(clean_without_prefix) >= 3:
-                key_phrases.append(clean_without_prefix)
-
-            # Segmentar por separadores comunes (guiones, comas, barras)
-            sub_parts = [p.strip() for p in re.split(r'[-–—,;/]', raw_target_zone) if p.strip()]
-            for p in sub_parts:
-                p_clean = re.sub(
-                    r'\b(?:urbanizaci[oó]n|urb\.?|barrio\s+de|barrio|p\.?a\.?u\.?\s+de|pau|ensanche\s+de|ensanche|pueblo\s+de|municipio\s+de|cp|\d{5})\b',
-                    '',
-                    p
-                ).strip()
-                if p_clean and len(p_clean) >= 3:
-                    key_phrases.append(p_clean)
-
-            # Tokens individuales significativos (omitiendo palabras vacías comunes)
-            stop_words = {
-                "en", "de", "del", "la", "las", "el", "los", "y", "o", "a", "al", "para", "por", "con",
-                "urbanizacion", "urbanización", "urb", "barrio", "pau", "p.a.u.", "ensanche",
-                "pueblo", "municipio", "localidad", "zona", "distrito", "sector", "madrid", "espana", "españa"
-            }
-            raw_tokens = re.findall(r'[a-záéíóúñ0-9]+', raw_target_zone)
-            core_tokens = [t for t in raw_tokens if t not in stop_words and len(t) >= 3 and not t.isdigit()]
-
-            # Integrar alias de SPANISH_ZONE_DEFINITIONS si coinciden
-            matched_zone_def = None
-            zone_keys = list(set([k.lower() for k in key_phrases] + core_tokens + list(found_cps)))
-            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
-                if z_name.lower() in raw_target_zone or any(t.lower() in raw_target_zone for t in z_tokens):
-                    zone_keys = list(set(zone_keys + [t.lower() for t in z_tokens]))
-                    matched_zone_def = (z_name, z_prov)
+        if not target_prov_raw and len(explicit_cps) == 1:
+            only_cp = next(iter(explicit_cps))
+            for p_k, pref in prov_cp_prefix.items():
+                if only_cp.startswith(pref):
+                    target_prov_raw = p_k.title()
                     break
 
-            # Si se buscan rústicos cerca de La Moraleja / Jarama / Colmenar, ampliar al cinturón rústico contiguo
-            if any(w in str(criteria.get("property_type", "")).lower() for w in ["rústic", "rustic", "terreno", "finca", "solar"]) and any(k in zone_keys for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama", "guadalix", "gualix", "colmenar"]):
-                zone_keys.extend(["guadalix", "guadalix de la sierra", "gualix", "colmenar viejo", "colmenar", "soto del real", "miraflores", "algete", "fuente el saz", "el molar", "talamanca", "paracuellos", "paracuellos de jarama", "san sebastián de los reyes", "san sebastian de los reyes", "ciudalcampo", "fuente del fresno", "jarama", "zarzalejo", "quijorna", "brunete", "valdemorillo", "villa del prado", "el álamo", "alamo"])
-                zone_keys = list(set(zone_keys))
+        target_prov_norm = normalize_text(target_prov_raw)
+        target_muni_norm = normalize_text(target_muni_raw)
 
-            def _matches_target_zone(o: Dict[str, Any]) -> bool:
-                # 1. Coincidencia por Código Postal
-                o_cp = str(o.get("postal_code") or "").strip()
-                if found_cps and o_cp and o_cp in found_cps:
-                    return True
+        # Detectar si es búsqueda rústica sobre eje rústico (donde se permite cinturón rústico contiguo de la misma provincia)
+        is_rustic_query = any(
+            w in str(criteria.get("property_type", "")).lower()
+            for w in ["rústic", "rustic", "terreno", "finca", "solar"]
+        )
+        raw_target_zone_norm = normalize_text(target_zone_str)
+        is_rustic_axis = is_rustic_query and any(
+            k in raw_target_zone_norm
+            for k in ["colegio suizo", "la moraleja", "moraleja", "alcobendas", "algete", "fuente el saz", "jarama", "guadalix", "gualix", "colmenar"]
+        )
 
-                # 2. Coincidencia en campos estructurados de ubicación
-                census_dist = ""
-                if isinstance(o.get("census_tract_data"), dict):
-                    census_dist = str(o.get("census_tract_data", {}).get("district", ""))
-                structured_loc = " ".join([
-                    str(o.get("zone_or_neighborhood") or ""),
-                    str(o.get("district") or ""),
-                    str(o.get("locality") or ""),
-                    str(o.get("municipality") or ""),
-                    str(o.get("address") or ""),
-                    census_dist,
-                    str(o.get("meso_label") or ""),
-                    str(o.get("area_m2_price_label") or "")
-                ]).lower()
+        # Construir conjunto de claves de micro-zona (urbanización / calle / barrio / eje)
+        microzone_phrases: List[str] = []
+        if target_urb_raw:
+            u_norm = normalize_text(target_urb_raw)
+            microzone_phrases.append(u_norm)
+            u_clean = re.sub(r'^(?:urbanizacion|urb|calle|avenida\s+de|avenida|avda\s+de|avda|paseo\s+de|paseo|plaza\s+de|plaza)\s+', '', u_norm).strip()
+            if u_clean and len(u_clean) >= 3:
+                microzone_phrases.append(u_clean)
+            # Si es "urbanizacion avenida de las vegas", añadir también "las vegas" y "avenida de las vegas"
+            u_clean2 = re.sub(r'^(?:urbanizacion|urb)\s+(?:avenida\s+de\s+|avda\s+de\s+|calle\s+)?', '', u_norm).strip()
+            if u_clean2 and len(u_clean2) >= 3:
+                microzone_phrases.append(u_clean2)
 
-                if any(k in structured_loc for k in zone_keys if len(k) >= 3):
-                    return True
+        if target_dist_raw:
+            d_norm = normalize_text(target_dist_raw)
+            microzone_phrases.append(d_norm)
+            d_clean = re.sub(r'^(?:barrio\s+de|barrio|distrito\s+de|distrito|p\.?a\.?u\.?\s+de|pau\s+de|pau|ensanche\s+urbanistico\s+de|ensanche\s+de|ensanche)\s+', '', d_norm).strip()
+            if d_clean and len(d_clean) >= 3:
+                microzone_phrases.append(d_clean)
 
-                # 3. REGLA UNIVERSAL DE PORTALES (COINCIDENCIAS DE TEXTO DENTRO DE PORTALES):
-                # Si las keywords no fueran suficientes en campos estructurados, busca por
-                # coincidencias de texto dentro del título, descripción, URL o datos crudos de los portales
-                portal_text = " ".join([
-                    str(o.get("title") or ""),
-                    str(o.get("description") or ""),
-                    str(o.get("address") or ""),
-                    str(o.get("url") or ""),
-                    str(o.get("portal_url") or ""),
-                    str(o.get("raw_data") or ""),
-                    str(o.get("portal_data") or "")
-                ]).lower()
+        # Si hay target_zone_str pero no se desglosó en target_urb_raw ni target_dist_raw
+        zone_def_tokens: List[str] = []
+        if target_zone_str:
+            for z_name, z_prov, z_tokens in SPANISH_ZONE_DEFINITIONS:
+                z_name_norm = normalize_text(z_name)
+                if z_name_norm in raw_target_zone_norm or any(normalize_text(t) in raw_target_zone_norm for t in z_tokens):
+                    # Si el usuario pidió una urbanización específica Y un municipio específico, no diluir la urbanización con el nombre del municipio como OR
+                    for t in z_tokens:
+                        t_norm = normalize_text(t)
+                        if t_norm.isdigit():
+                            continue
+                        if target_urb_raw and target_muni_norm and t_norm == target_muni_norm:
+                            continue
+                        zone_def_tokens.append(t_norm)
+                    if not target_prov_norm:
+                        target_prov_norm = normalize_text(z_prov)
+                    break
 
-                # Coincidencia de frases compuestas o códigos postales en texto del portal
-                if any(phrase in portal_text for phrase in key_phrases if len(phrase) >= 3):
-                    return True
-                if found_cps and any(cp in portal_text for cp in found_cps):
-                    return True
+            if not microzone_phrases and not re.match(r'^cp\s*\d{5}$', raw_target_zone_norm):
+                # Extraer frases limpias de target_zone_str excluyendo el nombre del municipio si ya se filtra en su propio nivel AND
+                sub_parts = [p.strip() for p in re.split(r'[-–—,;/]', raw_target_zone_norm) if p.strip()]
+                for p in sub_parts:
+                    p_clean = re.sub(
+                        r'\b(?:urbanizacion|urb|barrio\s+de|barrio|pau\s+de|pau|ensanche\s+urbanistico\s+de|ensanche\s+de|ensanche|pueblo\s+de|municipio\s+de|localidad\s+de|cp|\d{5})\b',
+                        '',
+                        p
+                    ).strip()
+                    p_clean = re.sub(r'\s+(?:de|en)\s+' + re.escape(target_muni_norm) + r'$', '', p_clean).strip() if target_muni_norm else p_clean
+                    if p_clean and len(p_clean) >= 3 and p_clean != target_muni_norm:
+                        microzone_phrases.append(p_clean)
+                        p_no_av = re.sub(r'^(?:avenida\s+de\s+|avda\s+de\s+|calle\s+)', '', p_clean).strip()
+                        if p_no_av and len(p_no_av) >= 3:
+                            microzone_phrases.append(p_no_av)
 
-                # Coincidencia de tokens distintivos
-                if core_tokens:
-                    matches = sum(1 for tok in core_tokens if tok in portal_text or tok in structured_loc)
-                    required = len(core_tokens) if len(core_tokens) <= 2 else int(len(core_tokens) * 0.6)
-                    if matches >= required and matches > 0:
-                        return True
-
-                return False
-
-            filtered = [o for o in filtered if _matches_target_zone(o)]
-        elif criteria.get("province"):
-            target_prov = criteria["province"].lower()
-            filtered = [
-                o for o in filtered
-                if target_prov in o.get("province", "").lower() or target_prov in o.get("locality", "").lower()
+        if is_rustic_axis:
+            rustic_belt = [
+                "guadalix", "guadalix de la sierra", "gualix", "colmenar viejo", "colmenar",
+                "soto del real", "miraflores", "algete", "fuente el saz", "el molar", "talamanca",
+                "paracuellos", "paracuellos de jarama", "san sebastian de los reyes", "ciudalcampo",
+                "fuente del fresno", "jarama", "zarzalejo", "quijorna", "brunete", "valdemorillo",
+                "villa del prado", "el alamo", "alamo", "la moraleja", "alcobendas", "colegio suizo"
             ]
+            zone_def_tokens.extend(rustic_belt)
+
+        microzone_candidates = list(dict.fromkeys([p for p in (microzone_phrases + zone_def_tokens) if p and len(p) >= 3]))
+
+        def _matches_hierarchical_and(o: Dict[str, Any]) -> bool:
+            o_prov_norm = normalize_text(str(o.get("province") or ""))
+            o_loc_norm = normalize_text(str(o.get("locality") or o.get("municipality") or ""))
+            o_cp = str(o.get("postal_code") or "").strip()
+
+            census_dist = ""
+            if isinstance(o.get("census_tract_data"), dict):
+                census_dist = str(o.get("census_tract_data", {}).get("district", ""))
+
+            structured_loc_norm = normalize_text(" ".join([
+                str(o.get("zone_or_neighborhood") or ""),
+                str(o.get("district") or ""),
+                str(o.get("locality") or ""),
+                str(o.get("municipality") or ""),
+                str(o.get("address") or ""),
+                census_dist,
+                str(o.get("meso_label") or ""),
+                str(o.get("area_m2_price_label") or "")
+            ]))
+            portal_text_norm = normalize_text(" ".join([
+                str(o.get("title") or ""),
+                str(o.get("description") or ""),
+                str(o.get("address") or ""),
+                str(o.get("url") or ""),
+                str(o.get("portal_url") or ""),
+                str(o.get("raw_data") or ""),
+                str(o.get("portal_data") or "")
+            ]))
+            all_loc_norm = f"{structured_loc_norm} {portal_text_norm}".strip()
+
+            # Extraer CP del texto del anuncio si el campo estructurado postal_code está vacío
+            if not o_cp:
+                cp_in_text = re.findall(r'\b(0[1-9]\d{3}|[1-4]\d{4}|5[0-2]\d{3})\b', str(o.get("address") or "") + " " + str(o.get("title") or ""))
+                if cp_in_text:
+                    o_cp = cp_in_text[0]
+
+            # ------------------------------------------------------------------
+            # NIVEL 1 (AND): PROVINCIA
+            # ------------------------------------------------------------------
+            if target_prov_norm:
+                prov_aliases = {target_prov_norm}
+                if target_prov_norm in ("illes balears", "baleares"):
+                    prov_aliases.update(["illes balears", "baleares", "mallorca", "palma", "ibiza", "menorca"])
+                elif target_prov_norm in ("vizcaya", "bizkaia"):
+                    prov_aliases.update(["vizcaya", "bizkaia", "bilbao"])
+                elif target_prov_norm in ("guipuzcoa", "gipuzkoa"):
+                    prov_aliases.update(["guipuzcoa", "gipuzkoa", "san sebastian", "donostia"])
+                elif target_prov_norm in ("alicante", "alacant"):
+                    prov_aliases.update(["alicante", "alacant"])
+
+                if o_prov_norm and o_prov_norm != "espana":
+                    if not any(pa in o_prov_norm or pa in o_loc_norm for pa in prov_aliases):
+                        return False
+                elif o_loc_norm and o_loc_norm != "espana":
+                    # Si no tiene provincia pero su localidad es otra provincia española distinta, descartar
+                    for other_p, _pref in prov_cp_prefix.items():
+                        if other_p not in prov_aliases and other_p == o_loc_norm:
+                            return False
+
+                # Si la oportunidad tiene código postal, su prefijo provincial de 2 dígitos debe coincidir con la provincia objetivo
+                expected_prefix = prov_cp_prefix.get(target_prov_norm)
+                if expected_prefix and o_cp and len(o_cp) == 5 and o_cp.isdigit():
+                    if not o_cp.startswith(expected_prefix):
+                        return False
+
+            # ------------------------------------------------------------------
+            # NIVEL 2 (AND): CÓDIGO POSTAL EXPLÍCITO
+            # ------------------------------------------------------------------
+            if explicit_cps and not is_rustic_axis:
+                # Si la oportunidad tiene un CP explícito y NO coincide con el CP buscado -> Rechazar (AND estricto)
+                if o_cp and o_cp not in explicit_cps:
+                    return False
+                # Si el usuario buscó únicamente por CP (sin municipio ni urbanización), exigir que el CP aparezca en el inmueble
+                if not target_muni_norm and not microzone_candidates:
+                    if o_cp not in explicit_cps and not any(cp in all_loc_norm for cp in explicit_cps):
+                        return False
+
+            # ------------------------------------------------------------------
+            # NIVEL 3 (AND): MUNICIPIO / LOCALIDAD ESPECÍFICA
+            # ------------------------------------------------------------------
+            if target_muni_norm and not is_rustic_axis:
+                muni_matched = (
+                    target_muni_norm in structured_loc_norm
+                    or target_muni_norm in portal_text_norm
+                )
+                if not muni_matched:
+                    return False
+
+            # ------------------------------------------------------------------
+            # NIVEL 4 (AND): URBANIZACIÓN / CALLE / BARRIO / MICRO-ZONA
+            # ------------------------------------------------------------------
+            if microzone_candidates:
+                micro_matched = any(mc in all_loc_norm for mc in microzone_candidates)
+                if not micro_matched:
+                    return False
+
+            return True
+
+        if target_prov_norm or explicit_cps or target_muni_norm or microzone_candidates:
+            filtered = [o for o in filtered if _matches_hierarchical_and(o)]
 
         # Tipo de Propiedad
         if criteria.get("property_type"):
@@ -1356,10 +1616,17 @@ class AdvisorEngine:
         """
         logger.info(f"[Advisor Sync] Sincronización dinámica bajo demanda (target_count={target_count}) para criterios: {criteria}")
         prov = criteria.get("province") or "Madrid"
-        zone = criteria.get("zone_or_neighborhood") or ""
+        municipality = criteria.get("municipality") or ""
+        postal_code = criteria.get("postal_code") or ""
+        street_or_urb = criteria.get("street_or_urbanization") or ""
+        district = criteria.get("district_or_neighborhood") or ""
+        zone = criteria.get("zone_or_neighborhood") or street_or_urb or district or municipality or ""
+        full_loc_query = criteria.get("full_location_query") or ", ".join(
+            [p for p in [street_or_urb, district, postal_code, municipality, prov] if p]
+        )
         max_p = criteria.get("max_price")
         prop_type = criteria.get("property_type") or "Vivienda"
-        user_query = prompt_text or criteria.get("original_query") or f"inmuebles en venta en {zone} {prov}"
+        user_query = prompt_text or criteria.get("original_query") or f"{prop_type} en venta en {full_loc_query}"
 
         discovered_opps: List[Dict[str, Any]] = []
 
@@ -1373,30 +1640,32 @@ class AdvisorEngine:
         )
         logger.info(f"[Advisor Sync] Cuotas calculadas por matriz para N={target_count}: {portal_quotas}")
 
-        # Filtrar portales con cuota asignada > 0
-        active_target_portals = [p for p, q in portal_quotas.items() if q > 0]
-
         # 2. GENERAR ESTRATEGIA DE SCRAPING CON GEMINI FLASH CASCADE
         try:
             builder_prompt = (
                 f"Eres el arquitecto de web scraping y prospección inmobiliaria en vivo de HIVEX España.\n"
-                f"El usuario necesita oportunidades de inversión reales en portales con estos criterios:\n"
-                f"- Consulta del usuario: '{user_query}'\n"
-                f"- Provincia: '{prov}'\n"
-                f"- Micro-zona / Barrio / Calle: '{zone}'\n"
+                f"El usuario necesita oportunidades de inversión reales en portales con estos criterios jerárquicos (CONECTOR LÓGICO AND ESTRICTO):\n"
+                f"- Consulta original del usuario: '{user_query}'\n"
+                f"- Jerarquía geográfica completa obligatoria (AND): '{full_loc_query}'\n"
+                f"  * Calle / Urbanización: '{street_or_urb or 'No especificada'}'\n"
+                f"  * Distrito / Barrio: '{district or 'No especificado'}'\n"
+                f"  * Municipio / Localidad: '{municipality or 'No especificado'}'\n"
+                f"  * Código Postal: '{postal_code or 'No especificado'}'\n"
+                f"  * Provincia: '{prov}'\n"
                 f"- Precio Máximo: '{max_p or 'Sin límite'}'\n"
                 f"- Tipo de Inmueble: '{prop_type}'\n"
                 f"- Portales activos a consultar y cuota requerida: {portal_quotas}\n\n"
-                f"Construye las URLs de búsqueda exactas en portales inmobiliarios españoles (Idealista, Fotocasa, Habitaclia, Pisos.com, Milanuncios, YaEncontré) con los filtros de zona, precio y rebajas aplicados.\n"
+                f"REGLA CRÍTICA DE PRECISIÓN GEOGRÁFICA: Construye las URLs de búsqueda apuntando SIEMPRE al nivel geográfico más específico disponible (urbanización/barrio + municipio, ej. 'villanueva-del-pardillo/las-vegas' o 'villanueva-del-pardillo-madrid').\n"
+                f"PROHIBIDO generar URLs genéricas de toda la provincia (ej. '/venta-viviendas/madrid-provincia/' o '/madrid-madrid/') cuando el usuario ha especificado un municipio, código postal o urbanización concreta.\n"
                 f"Responde estrictamente en formato JSON con la siguiente estructura:\n"
                 f"{{\n"
                 f'  "target_portals": [\n'
-                f'    {{"portal": "Idealista", "url": "https://www.idealista.com/venta-viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Idealista", 4)}}},\n'
-                f'    {{"portal": "Fotocasa", "url": "https://www.fotocasa.es/es/comprar/viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Fotocasa", 3)}}},\n'
-                f'    {{"portal": "Habitaclia", "url": "https://www.habitaclia.com/comprar/viviendas/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Habitaclia", 3)}}},\n'
-                f'    {{"portal": "Pisos.com", "url": "https://www.pisos.com/venta/pisos-...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Pisos.com", 2)}}},\n'
-                f'    {{"portal": "Milanuncios", "url": "https://www.milanuncios.com/fincas-rusticas-en-...", "zone": "{zone or prov}", "quota": {portal_quotas.get("Milanuncios", 6)}}},\n'
-                f'    {{"portal": "YaEncontré", "url": "https://www.yaencontre.com/venta/...", "zone": "{zone or prov}", "quota": {portal_quotas.get("YaEncontré", 1)}}}\n'
+                f'    {{"portal": "Idealista", "url": "https://www.idealista.com/venta-viviendas/...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("Idealista", 4)}}},\n'
+                f'    {{"portal": "Fotocasa", "url": "https://www.fotocasa.es/es/comprar/viviendas/...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("Fotocasa", 3)}}},\n'
+                f'    {{"portal": "Habitaclia", "url": "https://www.habitaclia.com/comprar/viviendas/...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("Habitaclia", 3)}}},\n'
+                f'    {{"portal": "Pisos.com", "url": "https://www.pisos.com/venta/pisos-...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("Pisos.com", 2)}}},\n'
+                f'    {{"portal": "Milanuncios", "url": "https://www.milanuncios.com/venta-de-viviendas-en-...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("Milanuncios", 6)}}},\n'
+                f'    {{"portal": "YaEncontré", "url": "https://www.yaencontre.com/venta/...", "zone": "{full_loc_query}", "quota": {portal_quotas.get("YaEncontré", 1)}}}\n'
                 f'  ]\n'
                 f"}}"
             )
@@ -1495,11 +1764,12 @@ class AdvisorEngine:
                     item.setdefault("primary_portal", target.get("portal") or "Pisos.com")
                     item.setdefault("portal_url", item.get("url") or target_url)
                     item.setdefault("province", prov)
-                    if zone and not item.get("locality"):
-                        item["locality"] = zone
+                    # IMPORTANTE: NO sobre-escribir item["locality"] con `zone` a ciegas,
+                    # ya que falsificaría la ubicación de anuncios de otras calles/municipios
+                    # haciendo que pasen el filtro AND por falso positivo.
 
                     processed_opp = _m_scraper._process_market_listing(dict(item))
-                    if processed_opp:
+                    if processed_opp and MarketScraper.ensure_twenty_images(processed_opp):
                         results.append(processed_opp)
 
                 return results
@@ -1519,11 +1789,22 @@ class AdvisorEngine:
             try:
                 from app.connectors.market_scraper import MarketScraper
                 scraper = MarketScraper()
-                discovered_opps = scraper.fetch_market_opportunities(province=prov, live_scrape=True)
+                raw_fallback = scraper.fetch_market_opportunities(province=prov, live_scrape=True)
+                discovered_opps = [o for o in raw_fallback if MarketScraper.ensure_twenty_images(o)]
             except Exception as e_mkt:
                 logger.warning(f"[Advisor Sync] Fallback MarketScraper: {e_mkt}")
 
-        # 3. PERSISTENCIA EN PLATAFORMA (verified_market_catalog.json)
+        # 3. FILTRADO ESTRICTO (GUARDIAN DE FOTOS + JERARQUÍA GEOGRÁFICA AND) ANTES DE PERSISTIR O DEVOLVER
+        if discovered_opps:
+            from app.connectors.market_scraper import MarketScraper
+            discovered_opps = [o for o in discovered_opps if MarketScraper.ensure_twenty_images(o)]
+            discovered_opps = self.filter_opportunities(discovered_opps, criteria)
+            if discovered_opps:
+                discovered_opps = self.verify_and_filter_active_market_opportunities(
+                    discovered_opps, target_count=max(target_count, 50)
+                )
+
+        # 4. PERSISTENCIA EN PLATAFORMA (verified_market_catalog.json) SOLO DE OPORTUNIDADES VERIFICADAS
         if discovered_opps:
             try:
                 from pathlib import Path

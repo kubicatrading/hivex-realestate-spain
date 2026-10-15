@@ -99,15 +99,27 @@ class MarketScraper:
         return True
 
     @classmethod
-    def ensure_twenty_images(cls, images: Optional[List[str]], is_solar: bool = False, item_id: str = "") -> List[str]:
+    def ensure_twenty_images(cls, images: Any, is_solar: bool = False, item_id: str = "") -> List[str]:
         """
         Garantiza máxima fidelidad y precisión: conserva única y exclusivamente las fotografías
         reales aportadas por el portal inmobiliario / anunciante para este inmueble concreto.
         No se añaden fotos simuladas ni de relleno artificial si el anuncio tiene menos imágenes.
         Elimina duplicados, descarta URLs vacías, logos o mocks y aplica un tope máximo de 20 fotos reales.
+        Acepta tanto una lista de URLs (`List[str]`) como un diccionario de oportunidad (`Dict[str, Any]`).
         """
+        if isinstance(images, dict):
+            raw_list = list(images.get("images") or [])
+            if not raw_list and images.get("image_url"):
+                raw_list = [images.get("image_url")]
+        elif isinstance(images, (list, tuple, set)):
+            raw_list = list(images)
+        elif isinstance(images, str):
+            raw_list = [images]
+        else:
+            raw_list = []
+
         valid_imgs = []
-        for img in (images or []):
+        for img in raw_list:
             if cls.is_valid_real_portal_photo(img):
                 cleaned = img.strip()
                 if cleaned not in valid_imgs:

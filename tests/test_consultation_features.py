@@ -249,8 +249,24 @@ async def test_consultation_alerts_worker_daily_scan(in_memory_db, monkeypatch):
     in_memory_db.add(cons)
     in_memory_db.commit()
 
-    opp1 = {"id": "OPP_1", "title": "Finca 1", "property_type": "RUSTIC", "province": "Madrid", "locality": "Madrid", "listing_price": 100000}
-    opp2 = {"id": "OPP_2", "title": "Finca 2 Nueva", "property_type": "RUSTIC", "province": "Madrid", "locality": "Madrid", "listing_price": 120000}
+    opp1 = {
+        "id": "OPP_1",
+        "title": "Finca 1",
+        "property_type": "RUSTIC",
+        "province": "Madrid",
+        "locality": "Madrid",
+        "listing_price": 100000,
+        "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/aa/bb/cc/111111.jpg"]
+    }
+    opp2 = {
+        "id": "OPP_2",
+        "title": "Finca 2 Nueva",
+        "property_type": "RUSTIC",
+        "province": "Madrid",
+        "locality": "Madrid",
+        "listing_price": 120000,
+        "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/aa/bb/cc/222222.jpg"]
+    }
 
     # Mock live catalog to return opp1 and opp2
     monkeypatch.setattr(advisor_engine, "get_live_catalog_opportunities", lambda db=None: [opp1, opp2])
@@ -375,3 +391,122 @@ async def test_dev_agent_command_dispatch(monkeypatch):
     assert "¡DevAgent activado en GitHub Actions!" in sent_messages[-1]["text"]
 
 
+@pytest.mark.asyncio
+async def test_alerts_worker_respects_active_consultations_and_photo_guardian(in_memory_db, monkeypatch):
+    """
+    Verifica que:
+    1. Las consultas pausadas (is_active=False), eliminadas o sin fichas verificadas (matched_count=0)
+       NUNCA disparan alertas en el cron.
+    2. El Guardian descarta cualquier oportunidad (incluso de subastas BOE o extraída Out-of-HIVEX)
+       que carezca de fotografías reales válidas antes de enviar ni siquiera la cabecera de Telegram.
+    3. send_photo_card jamás envía texto plano si no hay foto válida.
+    """
+    worker = ConsultationAlertsWorker()
+    delivered_msgs = []
+    delivered_cards = []
+
+    from app.services.telegram_advisor_bot import telegram_advisor_bot
+    async def mock_send_msg(chat_id, text, **kwargs):
+        delivered_msgs.append({"chat_id": chat_id, "text": text})
+        return True
+    async def mock_send_card(chat_id, opp, **kwargs):
+        delivered_cards.append({"chat_id": chat_id, "opp": opp})
+        return True
+
+    monkeypatch.setattr(telegram_advisor_bot, "send_message", mock_send_msg)
+    monkeypatch.setattr(telegram_advisor_bot, "send_photo_card", mock_send_card)
+
+    # Consulta 1: Pausada (is_active=False) -> No debe escanearse
+    c_paused = SavedConsultation(
+        id=201,
+        user_name="UserPaused",
+        telegram_chat_id="88888",
+        title="Búsqueda Pausada",
+        description="Oportunidades en Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid",
+        query_type="SEARCH_OPPORTUNITIES",
+        criteria_json=json.dumps({"province": "Madrid"}),
+        matched_opportunity_ids_json=json.dumps(["MKT-1"]),
+        matched_count=1,
+        is_active=False
+    )
+    # Consulta 2: Huérfana con matched_count=0 -> No debe escanearse
+    c_empty = SavedConsultation(
+        id=202,
+        user_name="UserEmpty",
+        telegram_chat_id="88888",
+        title="Búsqueda Vacía #25",
+        description="Oportunidades en Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid",
+        query_type="SEARCH_OPPORTUNITIES",
+        criteria_json=json.dumps({"province": "Madrid"}),
+        matched_opportunity_ids_json="[]",
+        matched_count=0,
+        is_active=True
+    )
+    # Consulta 3: Vigente y activa, pero el catálogo devuelve solo una subasta sin foto y fuera de zona
+    c_active = SavedConsultation(
+        id=203,
+        user_name="UserActive",
+        telegram_chat_id="88888",
+        title="🔍 Búsqueda #203: Chalet / Las Vegas - Villanueva del Pardillo",
+        description="Oportunidades en Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid",
+        query_type="SEARCH_OPPORTUNITIES",
+        criteria_json=json.dumps({"province": "Madrid", "zone_or_neighborhood": "Las Vegas - Villanueva del Pardillo"}),
+        matched_opportunity_ids_json=json.dumps(["MKT-EXISTING"]),
+        matched_count=1,
+        is_active=True
+    )
+    in_memory_db.add_all([c_paused, c_empty, c_active])
+    in_memory_db.commit()
+
+    bad_subasta_no_photo = {
+        "id": "SUB-JC-2026-PALENCIA",
+        "source_type": "subastas",
+        "primary_portal": "BOE_SUBASTAS",
+        "title": "Subasta de Vivienda en Palencia (Palencia)",
+        "address": "Santa María de la Cabeza. nº 22. Palencia (Palencia)",
+        "locality": "Palencia",
+        "province": "Palencia",
+        "listing_price": 11540,
+        "images": []
+    }
+    bad_madrid_wrong_zone = {
+        "id": "MKT-IDEALISTA-SANTA-MARIA",
+        "source_type": "market",
+        "primary_portal": "Idealista",
+        "title": "Piso en Santa María de la Cabeza, Madrid",
+        "address": "Paseo de Santa María de la Cabeza, 28045 Madrid",
+        "locality": "Madrid",
+        "province": "Madrid",
+        "postal_code": "28045",
+        "listing_price": 240000,
+        "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/aa/bb/cc/999999.jpg"]
+    }
+
+    monkeypatch.setattr(
+        advisor_engine,
+        "get_live_catalog_opportunities",
+        lambda db=None: [bad_subasta_no_photo, bad_madrid_wrong_zone]
+    )
+    async def mock_sync_empty(*args, **kwargs):
+        return []
+    monkeypatch.setattr(advisor_engine, "sync_portal_opportunities_on_demand", mock_sync_empty)
+
+    report = await worker.run_daily_scan(db=in_memory_db, force=True)
+    # Solo c_active (1 consulta) es escaneada; c_paused y c_empty son ignoradas.
+    # Y como las 2 candidatas incumplen zona AND y/o foto, se envían 0 alertas y 0 mensajes.
+    assert report["scanned_consultations"] == 1
+    assert report["alerts_triggered"] == 0
+    assert report["new_opportunities_delivered"] == 0
+    assert len(delivered_msgs) == 0
+    assert len(delivered_cards) == 0
+
+    # Verificar que send_photo_card devuelve False y jamás envía texto plano si una subasta no tiene fotos
+    real_bot = TelegramAdvisorBot()
+    real_bot_msgs = []
+    async def mock_real_send_msg(chat_id, text, **kwargs):
+        real_bot_msgs.append(text)
+        return True
+    monkeypatch.setattr(real_bot, "send_message", mock_real_send_msg)
+    sent_ok = await real_bot.send_photo_card("88888", bad_subasta_no_photo)
+    assert sent_ok is False
+    assert len(real_bot_msgs) == 0

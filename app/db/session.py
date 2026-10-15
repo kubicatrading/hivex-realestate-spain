@@ -45,7 +45,7 @@ connect_args = {}
 if "postgresql" in db_url:
     if "sslmode" not in db_url:
         connect_args["sslmode"] = "require"
-    connect_args["connect_timeout"] = 10
+    connect_args["connect_timeout"] = 15
 
 try:
     if "postgresql" in db_url:
@@ -57,7 +57,7 @@ try:
         )
         # Test connection immediately with retry for serverless cold starts
         last_err = None
-        for _attempt in range(2):
+        for _attempt in range(3):
             try:
                 with engine.connect() as conn:
                     last_err = None
@@ -95,6 +95,12 @@ except Exception as e_conn:
         connect_args={"check_same_thread": False},
         echo=False
     )
+    if os.environ.get("VERCEL"):
+        try:
+            with engine.begin() as _conn_clean:
+                _conn_clean.execute(text("DELETE FROM saved_consultations"))
+        except Exception:
+            pass
     ACTIVE_DB_ENGINE = "SQLite (Fallback Desarrollo Local)"
     DB_STATUS_INFO = {
         "engine": "SQLite (Fallback Desarrollo Local)",

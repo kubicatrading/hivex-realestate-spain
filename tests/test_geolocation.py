@@ -159,7 +159,8 @@ def test_universal_zone_matching_and_portal_fallback():
             "locality": "Villanueva del Pardillo",
             "postal_code": "28229",
             "province": "Madrid",
-            "portal": "idealista"
+            "portal": "idealista",
+            "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/aa/bb/cc/123456.jpg"]
         },
         {
             "id": "OPP-2",
@@ -168,7 +169,8 @@ def test_universal_zone_matching_and_portal_fallback():
             "locality": "Madrid",
             "postal_code": "28010",
             "province": "Madrid",
-            "portal": "idealista"
+            "portal": "idealista",
+            "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/aa/bb/cc/654321.jpg"]
         },
         {
             "id": "OPP-3",
@@ -177,7 +179,8 @@ def test_universal_zone_matching_and_portal_fallback():
             "locality": "Barcelona",
             "postal_code": "08007",
             "province": "Barcelona",
-            "portal": "fotocasa"
+            "portal": "fotocasa",
+            "images": ["https://static.fotocasa.es/images/ads/11223344-real.jpg"]
         }
     ]
 
@@ -187,4 +190,95 @@ def test_universal_zone_matching_and_portal_fallback():
     assert res[0]["postal_code"] == "28229"
 
 
+def test_hierarchical_and_location_filter_strict():
+    """
+    Verifica que el parseador extrae toda la jerarquía geográfica del usuario
+    (calle/urbanización + municipio + código postal + provincia) y aplica un
+    conector lógico 'AND' estricto, rechazando falsos positivos como
+    'Santa María de la Cabeza' en Palencia o en Madrid centro, así como
+    oportunidades sin foto.
+    """
+    from app.engine.advisor_engine import AdvisorEngine
 
+    engine = AdvisorEngine()
+    query = "Oportunidades en Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid"
+    criteria = engine._parse_query_intent_heuristics(query)
+
+    assert criteria["province"] == "Madrid"
+    assert criteria["postal_code"] == "28229"
+    assert criteria["municipality"].lower() == "villanueva del pardillo"
+    assert "las vegas" in (criteria.get("street_or_urbanization") or "").lower()
+    assert "28229" in (criteria.get("full_location_query") or "")
+    assert "villanueva del pardillo" in (criteria.get("full_location_query") or "").lower()
+
+    candidates = [
+        # 1. Subasta en Santa María de la Cabeza, Palencia (sin foto y otra provincia/calle) -> RECHAZADA
+        {
+            "id": "SUB-JC-2026-PALENCIA",
+            "source_type": "subastas",
+            "primary_portal": "BOE_SUBASTAS",
+            "title": "Subasta de Vivienda en Palencia (Palencia)",
+            "address": "Santa María de la Cabeza. nº 22. Palencia (Palencia)",
+            "locality": "Palencia",
+            "province": "Palencia",
+            "postal_code": "34004",
+            "listing_price": 11540,
+            "images": []
+        },
+        # 2. Piso en Santa María de la Cabeza, Madrid centro (misma provincia "Madrid", distinto municipio/CP/urba) -> RECHAZADA (prohibido OR por provincia)
+        {
+            "id": "MKT-IDEALISTA-999001",
+            "source_type": "market",
+            "primary_portal": "Idealista",
+            "title": "Piso en venta en Paseo de Santa María de la Cabeza, Arganzuela, Madrid",
+            "address": "Paseo de Santa María de la Cabeza 40, Madrid",
+            "locality": "Madrid",
+            "province": "Madrid",
+            "postal_code": "28045",
+            "listing_price": 295000,
+            "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/11/22/33/999001.jpg"]
+        },
+        # 3. Chalet en Villanueva del Pardillo (mismo municipio y CP 28229, pero en otra calle/zona fuera de Urb. Las Vegas) -> RECHAZADA (AND estricto con urbanización)
+        {
+            "id": "MKT-FOTOCASA-999002",
+            "source_type": "market",
+            "primary_portal": "Fotocasa",
+            "title": "Chalet adosado en Casco Antiguo, Villanueva del Pardillo",
+            "address": "Calle Real 15, Villanueva del Pardillo",
+            "locality": "Villanueva del Pardillo",
+            "province": "Madrid",
+            "postal_code": "28229",
+            "listing_price": 410000,
+            "images": ["https://static.fotocasa.es/images/ads/999002-real.jpg"]
+        },
+        # 4. Chalet en Urbanización Las Vegas, 28229 Villanueva del Pardillo, pero SIN FOTO -> RECHAZADA por Guardian
+        {
+            "id": "MKT-PISOS-999003",
+            "source_type": "market",
+            "primary_portal": "Pisos.com",
+            "title": "Chalet en Urbanización Avenida de las Vegas, Villanueva del Pardillo",
+            "address": "Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid",
+            "locality": "Villanueva del Pardillo",
+            "province": "Madrid",
+            "postal_code": "28229",
+            "listing_price": 520000,
+            "images": []
+        },
+        # 5. Chalet en Urbanización Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid CON FOTO REAL -> ACEPTADA
+        {
+            "id": "MKT-IDEALISTA-999004",
+            "source_type": "market",
+            "primary_portal": "Idealista",
+            "title": "Chalet independiente en Urbanización Avenida de las Vegas, Villanueva del Pardillo",
+            "address": "Avenida de las Vegas, 28229 Villanueva del Pardillo, Madrid",
+            "locality": "Villanueva del Pardillo",
+            "province": "Madrid",
+            "postal_code": "28229",
+            "listing_price": 550000,
+            "images": ["https://img4.idealista.com/blur/WEB_DETAIL/0/id.pro.es.image.master/44/55/66/999004.jpg"]
+        }
+    ]
+
+    filtered = engine.filter_opportunities(candidates, criteria)
+    assert len(filtered) == 1
+    assert filtered[0]["id"] == "MKT-IDEALISTA-999004"
