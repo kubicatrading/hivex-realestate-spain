@@ -1036,23 +1036,53 @@ def get_saved_consultations(
             # Fallback en caso de que alguna ID no esté en el catálogo vivo pero sí en BD
             missing_ids = [str(mid).strip() for mid in matched_ids if str(mid).strip().upper() not in opps_by_id]
             if missing_ids:
-                from app.db.models import Opportunity
+                from app.db.models import Opportunity, Auction
+                from app.services.photos_backfill import PhotosBackfillWorker
                 try:
-                    db_opps = db.query(Opportunity).filter(Opportunity.id.in_(missing_ids)).all()
+                    raw_sub_ids = [m.replace("SUB-", "") for m in missing_ids] + missing_ids
+                    db_opps = db.query(Opportunity).outerjoin(Auction).filter(
+                        (Opportunity.id.in_(missing_ids)) | (Auction.id_subasta.in_(raw_sub_ids))
+                    ).all()
                     for o in db_opps:
-                        matched_cards.append({
-                            "id": o.id,
-                            "title": o.title or "Inmueble",
-                            "listing_price": o.price or 0,
-                            "estimated_reference_value": o.market_reference_price or o.price or 0,
-                            "discount_percentage": o.discount_pct or 0,
-                            "locality": o.locality or "N/D",
-                            "province": o.province or "N/D",
-                            "overall_score": o.hivex_score or 75,
-                            "images": [o.main_image] if o.main_image else [],
-                            "rental_yield": o.rental_yield or 0,
-                            "portal_url": o.portal_url
-                        })
+                        auc = getattr(o, "auction", None)
+                        oid_str = str(o.id or (f"SUB-{auc.id_subasta}" if auc else "")).strip()
+                        raw_imgs = []
+                        if auc and getattr(auc, "images_json", None):
+                            try:
+                                parsed = json.loads(auc.images_json)
+                                raw_imgs = parsed if isinstance(parsed, list) else [str(parsed)]
+                            except Exception:
+                                raw_imgs = []
+                        elif getattr(o, "main_image", None):
+                            raw_imgs = [o.main_image]
+
+                        list_price = getattr(o, "listing_price", None) or getattr(o, "price", None) or (auc.starting_bid if auc else 0) or 0
+                        ref_val = getattr(o, "estimated_reference_value", None) or getattr(o, "market_reference_price", None) or (auc.appraisal_value if auc else list_price) or list_price
+                        disc_pct = getattr(o, "discount_percentage", None) or getattr(o, "discount_pct", None) or 0
+                        if 0 < disc_pct <= 1.0:
+                            disc_pct = round(disc_pct * 100, 1)
+
+                        card_dict = {
+                            "id": oid_str if oid_str.startswith(("SUB-", "MKT-", "PGOU-")) else (f"SUB-{auc.id_subasta}" if auc else oid_str),
+                            "source_type": "market" if str(oid_str).upper().startswith("MKT-") else "subastas",
+                            "title": (auc.title if auc else getattr(o, "title", None)) or "Inmueble en Subasta Pública",
+                            "listing_price": list_price,
+                            "estimated_reference_value": ref_val,
+                            "discount_percentage": disc_pct,
+                            "locality": (auc.locality if auc else getattr(o, "locality", None)) or "España",
+                            "province": (auc.province if auc else getattr(o, "province", None)) or "España",
+                            "address": (auc.address if auc else getattr(o, "address", None)) or "",
+                            "lat": getattr(auc, "lat", None) if auc else None,
+                            "lon": getattr(auc, "lon", None) if auc else None,
+                            "overall_score": getattr(o, "overall_score", None) or getattr(o, "hivex_score", None) or 75,
+                            "images": raw_imgs,
+                            "rental_yield": getattr(o, "rental_yield", 0) or 0,
+                            "portal_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else getattr(o, "portal_url", None)
+                        }
+                        if card_dict["source_type"] != "market":
+                            PhotosBackfillWorker.ensure_non_market_streetview_photo(card_dict)
+                        if card_dict.get("images"):
+                            matched_cards.append(card_dict)
                 except Exception as e_miss:
                     logger.warning(f"Aviso recuperando oportunidades complementarias de BD: {e_miss}")
 
@@ -1382,13 +1412,19 @@ def get_opportunities(
                 full_address_parts = [p for p in [address_str, locality_str, province_str] if p]
                 full_address = ", ".join(full_address_parts) if full_address_parts else "Dirección no especificada"
 
-                # Prioridad a fotografía de fachada Google Street View si no hay fotos de reportaje comercial (sin ortofotos)
-                if not images_list:
-                    gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
-                    if lat and lon and gmaps_key:
-                        images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={gmaps_key}"]
-                    elif full_address and gmaps_key and full_address != "Dirección no especificada":
-                        images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(full_address)}&key={gmaps_key}"]
+                # Regla de fotografía de fachada Google Street View para fichas no-market si no hay fotos de reportaje comercial
+                if not images_list and str(getattr(opp, "channel", "") or "subastas").lower().strip() in ("subastas", "auction", "pgou", "edictos"):
+                    from app.services.photos_backfill import PhotosBackfillWorker
+                    sv_url = PhotosBackfillWorker.build_streetview_facade_url(
+                        lat=lat,
+                        lon=lon,
+                        address=address_str,
+                        locality=locality_str,
+                        province=province_str,
+                        postal_code=getattr(auc, "postal_code", None) if auc else None,
+                    )
+                    if sv_url:
+                        images_list = [sv_url]
 
 
                 # Financial metrics calculation: Strictly take "Valor subasta" literal from BOE
@@ -2091,13 +2127,19 @@ def get_opportunity_by_id(
                 except Exception:
                     images_list = []
             
+            from app.services.photos_backfill import PhotosBackfillWorker
             full_address = f"{auc.address or ''}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
-            gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
-            if not images_list and gmaps_key:
-                if lat and lon:
-                    images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={lat},{lon}&key={gmaps_key}"]
-                elif full_address:
-                    images_list = [f"https://maps.googleapis.com/maps/api/streetview?size=600x350&location={quote_plus(full_address)}&key={gmaps_key}"]
+            if not images_list:
+                sv_url = PhotosBackfillWorker.build_streetview_facade_url(
+                    lat=lat,
+                    lon=lon,
+                    address=auc.address or auc.title,
+                    locality=auc.locality,
+                    province=auc.province,
+                    postal_code=getattr(auc, "postal_code", None)
+                )
+                if sv_url:
+                    images_list = [sv_url]
 
             ref_val = (opp.estimated_reference_value if opp else 0.0) or (auc.appraisal_value or 0.0)
             list_price = (opp.listing_price if opp else 0.0) or (auc.starting_bid or auc.appraisal_value or 0.0)
@@ -2155,14 +2197,58 @@ def enrich_opportunity_gallery(
 ):
     """
     Enriquece dinámicamente bajo demanda la galería fotográfica de un inmueble (Opción A).
-    Si el anuncio del portal solo aportó la foto de portada en el listado, visita la URL
-    de detalle para extraer el carrusel completo de 15 a 30 imágenes reales en alta resolución.
+    Si el anuncio es de market y solo aportó la foto de portada en el listado, visita la URL
+    de detalle para extraer el carrusel completo. Si es NO-market (Subasta BOE / PGOU),
+    garantiza y retorna su fotografía de fachada de Google Street View mediante PhotosBackfillWorker.
     """
     clean_id = opp_id.strip()
     from app.connectors.supadata_client import SupadataClient
+    from app.services.photos_backfill import PhotosBackfillWorker
     from pathlib import Path
 
-    # 1. Buscar la oportunidad en el catálogo
+    # 0. Si es una oportunidad NO-Market (Subasta BOE / PGOU en BD), asociar/retornar Street View
+    if not clean_id.upper().startswith("MKT-"):
+        try:
+            raw_sub_id = clean_id[4:] if clean_id.upper().startswith("SUB-") else clean_id
+            auc = db.query(Auction).filter(
+                (Auction.id_subasta == raw_sub_id) | (Auction.id_subasta == clean_id)
+            ).first()
+            if not auc:
+                opp_row = db.query(Opportunity).filter(Opportunity.id == clean_id).first()
+                if opp_row and opp_row.auction:
+                    auc = opp_row.auction
+            if auc:
+                opp_nm = {
+                    "id": f"SUB-{auc.id_subasta}" if not str(auc.id_subasta).startswith("SUB-") else auc.id_subasta,
+                    "source_type": "subastas",
+                    "title": auc.title,
+                    "address": auc.address,
+                    "locality": auc.locality,
+                    "province": auc.province,
+                    "postal_code": getattr(auc, "postal_code", None),
+                    "lat": getattr(auc, "lat", None),
+                    "lon": getattr(auc, "lon", None),
+                    "images": json.loads(auc.images_json) if getattr(auc, "images_json", None) else []
+                }
+                sv_imgs = PhotosBackfillWorker.ensure_non_market_streetview_photo(opp_nm)
+                if sv_imgs:
+                    if not getattr(auc, "images_json", None) or auc.images_json == "[]":
+                        try:
+                            auc.images_json = json.dumps(sv_imgs, ensure_ascii=False)
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                    return {
+                        "success": True,
+                        "images": sv_imgs,
+                        "count": len(sv_imgs),
+                        "cached": True,
+                        "source_type": "subastas"
+                    }
+        except Exception as e_nm_gal:
+            logger.warning(f"Aviso enriqueciendo galería Street View para {clean_id}: {e_nm_gal}")
+
+    # 1. Buscar la oportunidad en el catálogo de mercado
     target_item = None
     catalog_path = Path("app/data/verified_market_catalog.json")
     catalog_items = []

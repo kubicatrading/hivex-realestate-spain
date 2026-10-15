@@ -881,20 +881,28 @@ class BOESubastasScraper:
                     # Detección de estructura por lotes
                     lotes_info = self.extract_lotes_info(html_ver1 + " " + html_ver3, desc)
 
-                    # Geolocalización y Street View (preferir fotografía a nivel de calle antes que ortofoto aérea)
+                    # Geolocalización y Street View (regla oficial HIVEX: asociar siempre fachada Street View por lat/lon o dirección/municipio)
+                    from app.services.photos_backfill import PhotosBackfillWorker
                     lat, lon = self.geocode_address(address, locality, province, refcat=refcat)
                     images = []
-                    gmaps_key = settings.GOOGLE_MAPS_API_KEY
-                    if lat and lon and gmaps_key:
-                        sv_url = f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={lat},{lon}&fov=90&heading=235&pitch=10&key={gmaps_key}"
+                    sv_url = PhotosBackfillWorker.build_streetview_facade_url(
+                        lat=lat,
+                        lon=lon,
+                        address=address if address else f"{locality}, {province}",
+                        locality=locality,
+                        province=province
+                    )
+                    if sv_url:
                         images.append(sv_url)
 
                     desc_lower = desc.lower()
                     ptype = "Solar" if any(w in desc_lower for w in ["solar", "terreno", "parcela", "finca rústica", "rustica", "suelo"]) else "Vivienda"
 
                     item = {
+                        "id": f"SUB-{aid}" if not str(aid).startswith("SUB-") else str(aid),
                         "id_subasta": aid,
                         "source": "BOE_SUBASTAS",
+                        "source_type": "subastas",
                         "title": f"Subasta de {ptype} en {locality} ({province})",
                         "description": desc,
                         "property_type": ptype,
@@ -917,6 +925,7 @@ class BOESubastasScraper:
                         "lote_badge": lotes_info["lote_badge"],
                         "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}"
                     }
+                    PhotosBackfillWorker.ensure_non_market_streetview_photo(item)
                     real_auctions.append(item)
 
                 return real_auctions

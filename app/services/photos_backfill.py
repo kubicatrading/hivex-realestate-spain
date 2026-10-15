@@ -293,6 +293,202 @@ class PhotosBackfillWorker:
     # AUDITORÍA Y BACKFILL POR LOTES
     # =========================================================================
 
+    @staticmethod
+    def build_streetview_facade_url(
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        address: Optional[str] = None,
+        locality: Optional[str] = None,
+        province: Optional[str] = None,
+        postal_code: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Regla oficial de HIVEX para oportunidades NO-Market (Subastas BOE, PGOU, Edictos):
+        Construye la URL de fotografía a pie de calle (Google Street View Facade API)
+        priorizando coordenadas exactas (lat, lon) y en su defecto la dirección completa
+        o municipio/provincia del activo. Nunca utiliza ortofotos aéreas ni mapas WMS de Catastro.
+        """
+        gmaps_key = (
+            getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+            or os.getenv("GOOGLE_MAPS_API_KEY", "")
+        ).strip()
+
+        location_param = None
+        try:
+            if lat is not None and lon is not None and float(lat) != 0.0 and float(lon) != 0.0:
+                location_param = f"{float(lat)},{float(lon)}"
+        except (ValueError, TypeError):
+            location_param = None
+
+        if not location_param:
+            parts = [
+                str(p).strip()
+                for p in (address, postal_code, locality, province, "España")
+                if p and str(p).strip() and str(p).strip().lower() not in ("n/d", "none", "null")
+            ]
+            # Evitar duplicar España o provincia si ya está incluido
+            dedup_parts = []
+            for p in parts:
+                if not any(p.lower() == existing.lower() for existing in dedup_parts):
+                    dedup_parts.append(p)
+            if dedup_parts:
+                location_param = urllib.parse.quote_plus(", ".join(dedup_parts))
+
+        if not location_param:
+            return None
+
+        base_url = (
+            f"https://maps.googleapis.com/maps/api/streetview"
+            f"?size=600x400&location={location_param}&fov=90&heading=235&pitch=10"
+        )
+        if gmaps_key:
+            return f"{base_url}&key={gmaps_key}"
+        return base_url
+
+    @classmethod
+    def ensure_non_market_streetview_photo(cls, opp: Dict[str, Any]) -> List[str]:
+        """
+        Garantiza que cualquier ficha de oportunidad NO-Market (ya exista en HIVEX o venga
+        de fuera / Out-of-HIVEX: Subastas BOE, PGOU, Edictos, etc.) tenga asociada al menos
+        su fotografía de fachada de Google Street View.
+        Modifica `opp['images']` in-place y retorna la lista de imágenes verificadas.
+        """
+        from app.connectors.market_scraper import MarketScraper
+
+        if not isinstance(opp, dict):
+            return []
+
+        oid = str(opp.get("id") or opp.get("id_subasta") or "").strip().upper()
+        src_type = str(opp.get("source_type") or opp.get("source") or "").strip().lower()
+        is_market = (
+            src_type == "market"
+            or oid.startswith("MKT-")
+        )
+        if is_market:
+            return MarketScraper.ensure_twenty_images(opp.get("images"))
+
+        raw_imgs = opp.get("images")
+        if isinstance(raw_imgs, str):
+            try:
+                parsed = json.loads(raw_imgs)
+                raw_imgs = parsed if isinstance(parsed, list) else [raw_imgs]
+            except Exception:
+                raw_imgs = [raw_imgs]
+        elif not isinstance(raw_imgs, list):
+            raw_imgs = []
+
+        # Filtrar ortofotos/mapas de Catastro
+        cleaned_imgs = [
+            str(img).strip() for img in raw_imgs
+            if img and isinstance(img, str) and str(img).strip()
+            and "catastro" not in str(img).lower()
+            and "cartografia" not in str(img).lower()
+            and "wms" not in str(img).lower()
+            and "ortofoto" not in str(img).lower()
+            and "pnoa" not in str(img).lower()
+        ]
+        valid_imgs = MarketScraper.ensure_twenty_images(cleaned_imgs)
+        if valid_imgs:
+            opp["images"] = valid_imgs
+            return valid_imgs
+
+        lat = opp.get("lat") if opp.get("lat") is not None else opp.get("latitude")
+        lon = opp.get("lon") if opp.get("lon") is not None else opp.get("longitude")
+        sv_url = cls.build_streetview_facade_url(
+            lat=lat,
+            lon=lon,
+            address=opp.get("address") or opp.get("full_address") or opp.get("title"),
+            locality=opp.get("locality") or opp.get("municipality"),
+            province=opp.get("province"),
+            postal_code=opp.get("postal_code")
+        )
+        if sv_url:
+            valid_imgs = MarketScraper.ensure_twenty_images([sv_url])
+            opp["images"] = valid_imgs
+            return valid_imgs
+
+        return []
+
+    def backfill_non_market_streetview_db(self, db=None) -> Dict[str, Any]:
+        """
+        Recorre las oportunidades no-market (tabla `auctions` en base de datos) y asocia
+        de forma persistente la foto de fachada de Google Street View en `images_json` a todas
+        aquellas fichas que no dispongan de fotografía válida o que tuvieran ortofotos de Catastro.
+        """
+        from app.db.session import SessionLocal
+        from app.db.models import Auction
+        from app.connectors.market_scraper import MarketScraper
+
+        own_session = False
+        if db is None:
+            db = SessionLocal()
+            own_session = True
+
+        updated_count = 0
+        total_checked = 0
+        try:
+            auctions = db.query(Auction).all()
+            for auc in auctions:
+                src_upper = str(getattr(auc, "source", "") or "").upper().strip()
+                id_sub_upper = str(getattr(auc, "id_subasta", "") or "").upper().strip()
+                if src_upper in ("MARKET", "IDEALISTA", "PISOS", "HABITACLIA", "FOTOCASA", "INDOMIO", "YAENCONTRE") or id_sub_upper.startswith("MKT-"):
+                    continue
+                total_checked += 1
+                raw_imgs = []
+                if getattr(auc, "images_json", None):
+                    try:
+                        parsed = json.loads(auc.images_json)
+                        if isinstance(parsed, str):
+                            raw_imgs = [parsed]
+                        elif isinstance(parsed, list):
+                            raw_imgs = [str(x) for x in parsed if x]
+                    except Exception:
+                        raw_imgs = []
+
+                cleaned = [
+                    img for img in raw_imgs
+                    if "catastro" not in img.lower()
+                    and "cartografia" not in img.lower()
+                    and "wms" not in img.lower()
+                    and "ortofoto" not in img.lower()
+                    and "pnoa" not in img.lower()
+                ]
+                valid_imgs = MarketScraper.ensure_twenty_images(cleaned)
+                if not valid_imgs:
+                    lat_val = getattr(auc, "lat", None) or getattr(auc, "latitude", None)
+                    lon_val = getattr(auc, "lon", None) or getattr(auc, "longitude", None)
+                    sv_url = self.build_streetview_facade_url(
+                        lat=lat_val,
+                        lon=lon_val,
+                        address=auc.address or auc.title,
+                        locality=auc.locality,
+                        province=auc.province,
+                        postal_code=getattr(auc, "postal_code", None)
+                    )
+                    if sv_url:
+                        auc.images_json = json.dumps([sv_url], ensure_ascii=False)
+                        updated_count += 1
+                elif raw_imgs != valid_imgs:
+                    auc.images_json = json.dumps(valid_imgs, ensure_ascii=False)
+                    updated_count += 1
+
+            if updated_count > 0:
+                db.commit()
+                logger.info(
+                    f"[PhotosBackfill Non-Market] Asociada foto Street View a {updated_count}/{total_checked} subastas/activos no-market en BD."
+                )
+        except Exception as e_nm:
+            logger.warning(f"[PhotosBackfill Non-Market] Aviso en backfill de Street View en BD: {e_nm}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        finally:
+            if own_session:
+                db.close()
+
+        return {"checked": total_checked, "updated": updated_count}
+
     def run_backfill_batch(
         self,
         max_items: int = 25,
@@ -301,18 +497,21 @@ class PhotosBackfillWorker:
     ) -> Dict[str, Any]:
         """
         Ejecuta un pase de backfill silencioso sobre el catálogo:
+        0. Garantiza que todas las oportunidades NO-Market (Subastas/PGOU en BD) tengan su foto de Google Street View.
         1. Portales de coste cero (Pisos.com, Habitaclia, Fotocasa) se enriquecen sin límite de créditos.
         2. Idealista consume de la bolsa exclusiva de 300 créditos/mes (estrictamente <= 10 créditos/día).
            Prioriza oportunidades con 0-1 foto y mayor descuento/score.
         """
+        non_market_stats = self.backfill_non_market_streetview_db()
+
         if not os.path.exists(self.catalog_path):
-            return {"error": "Catalog not found", "enriched": 0}
+            return {"error": "Catalog not found", "enriched": 0, "non_market_streetview": non_market_stats}
 
         try:
             with open(self.catalog_path, "r", encoding="utf-8") as f:
                 items = json.load(f)
         except Exception as e:
-            return {"error": f"Failed reading catalog: {e}", "enriched": 0}
+            return {"error": f"Failed reading catalog: {e}", "enriched": 0, "non_market_streetview": non_market_stats}
 
         free_candidates = []
         idealista_candidates = []
@@ -422,6 +621,7 @@ class PhotosBackfillWorker:
         return {
             "processed": len(batch_to_process),
             "enriched": enriched_count,
+            "non_market_streetview": non_market_stats,
             "idealista_credits_used_batch": idealista_credits_consumed,
             "supadata_quota": updated_quota,
             "remaining_free_candidates": max(0, len(free_candidates) - enriched_count),

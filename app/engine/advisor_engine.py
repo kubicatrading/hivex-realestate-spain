@@ -887,6 +887,8 @@ class AdvisorEngine:
                     disc_pct = round(opp.discount_percentage * 100, 1)
                     profit = max(0.0, round(opp.estimated_reference_value - opp.listing_price, 2))
 
+                    from app.services.photos_backfill import PhotosBackfillWorker
+
                     sub_id = auc.id_subasta if auc.id_subasta.startswith("SUB-") else f"SUB-{auc.id_subasta}"
                     raw_imgs = []
                     if getattr(auc, "images_json", None):
@@ -909,16 +911,20 @@ class AdvisorEngine:
                         and "pnoa" not in img.lower()
                     ]
 
-                    # Prioridad a fotografía de fachada Google Street View si tiene clave activa
-                    gmaps_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or os.getenv("GOOGLE_MAPS_API_KEY", "")
-                    lat_auc = getattr(auc, "latitude", None)
-                    lon_auc = getattr(auc, "longitude", None)
-                    if not raw_imgs and gmaps_key:
-                        if lat_auc and lon_auc:
-                            raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={lat_auc},{lon_auc}&fov=90&heading=235&pitch=10&key={gmaps_key}"]
-                        elif auc.address:
-                            addr_full = f"{auc.address}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
-                            raw_imgs = [f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={quote_plus(addr_full)}&fov=90&heading=235&pitch=10&key={gmaps_key}"]
+                    # Regla oficial de Street View para oportunidades NO-Market (usa auc.lat / auc.lon reales del modelo Auction)
+                    lat_auc = getattr(auc, "lat", None) if getattr(auc, "lat", None) is not None else getattr(auc, "latitude", None)
+                    lon_auc = getattr(auc, "lon", None) if getattr(auc, "lon", None) is not None else getattr(auc, "longitude", None)
+                    if not raw_imgs:
+                        sv_url = PhotosBackfillWorker.build_streetview_facade_url(
+                            lat=lat_auc,
+                            lon=lon_auc,
+                            address=auc.address or auc.title,
+                            locality=auc.locality,
+                            province=auc.province,
+                            postal_code=getattr(auc, "postal_code", None)
+                        )
+                        if sv_url:
+                            raw_imgs = [sv_url]
 
                     valid_sub_imgs = MarketScraper.ensure_twenty_images(raw_imgs)
                     if not valid_sub_imgs:
@@ -949,8 +955,10 @@ class AdvisorEngine:
                         "surface_m2": getattr(auc, "surface_m2", None) or 90.0,
                         "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
                         "images": valid_sub_imgs,
-                        "latitude": getattr(auc, "latitude", None),
-                        "longitude": getattr(auc, "longitude", None),
+                        "lat": lat_auc,
+                        "lon": lon_auc,
+                        "latitude": lat_auc,
+                        "longitude": lon_auc,
                         "refcat": getattr(auc, "refcat", None) or ""
                     })
             except Exception as e_db:
@@ -1019,10 +1027,15 @@ class AdvisorEngine:
 
         # 3. Incluir oportunidades sincronizadas en la sesión activa (solo si tienen fotos reales válidas)
         if self._cached_catalog_opps:
+            from app.services.photos_backfill import PhotosBackfillWorker
             for opp in self._cached_catalog_opps:
                 oid = str(opp.get("id") or "").strip().upper()
                 if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                     continue
+                src_type = str(opp.get("source_type") or "").strip().lower()
+                is_mkt = src_type == "market" or oid.startswith("MKT-")
+                if not is_mkt:
+                    PhotosBackfillWorker.ensure_non_market_streetview_photo(opp)
                 valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
                 if not valid_imgs:
                     continue
@@ -1040,11 +1053,14 @@ class AdvisorEngine:
         """
         Verifica rigurosamente antes de entregar al inversor que cada oportunidad (en plataforma u Out-of-HIVEX):
         1. No esté en la lista negra sintética y disponga de al menos 1 fotografía real válida.
-        2. Su primera fotografía (y/o URL de portal directa en Pisos.com/Habitaclia/Milanuncios/YaEncontré) responda HTTP 200 activa.
+        2. Si no es de market (subasta BOE, PGOU, edicto), garantiza primero su foto de fachada Google Street View
+           a través de PhotosBackfillWorker.ensure_non_market_streetview_photo.
+        3. Su primera fotografía (y/o URL de portal directa en Pisos.com/Habitaclia/Milanuncios/YaEncontré) responda HTTP 200 activa.
         Si una oportunidad no tiene fotos o devuelve 404/despublicada, la purga inmediatamente del catálogo.
         """
         from app.connectors.market_scraper import MarketScraper
         from app.services.catalog_guardian import CatalogGuardian
+        from app.services.photos_backfill import PhotosBackfillWorker
         import httpx
 
         guardian = CatalogGuardian()
@@ -1057,17 +1073,27 @@ class AdvisorEngine:
         for opp in candidates:
             if len(verified) >= target_count:
                 break
-            opp_id = str(opp.get("id") or "").strip().upper()
-            src_type = str(opp.get("source_type") or "").strip().lower()
+            opp_id = str(opp.get("id") or opp.get("id_subasta") or "").strip().upper()
+            src_type = str(opp.get("source_type") or opp.get("source") or "").strip().lower()
             is_market = src_type == "market" or opp_id.startswith("MKT-")
-            is_subasta = src_type in ("subastas", "auction") or opp_id.startswith("SUB-")
+            is_non_market = (
+                not is_market
+                and (
+                    src_type in ("subastas", "auction", "pgou", "edictos", "boe_subastas")
+                    or opp_id.startswith(("SUB-", "PGOU-", "BOE-"))
+                    or bool(opp.get("id_subasta"))
+                )
+            )
 
             if opp_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                 guardian.purge_opportunity(opp_id)
                 continue
 
+            if is_non_market:
+                PhotosBackfillWorker.ensure_non_market_streetview_photo(opp)
+
             # Exigir al menos 1 fotografía real válida a cualquier oportunidad de catálogo, subasta o dict con clave 'images'
-            if is_market or is_subasta or "images" in opp:
+            if is_market or is_non_market or "images" in opp:
                 valid_imgs = MarketScraper.ensure_twenty_images(opp.get("images"))
                 if not valid_imgs:
                     logger.warning(f"[Rigurosidad Guardian] Oportunidad {opp_id} descartada por tener 0 fotos reales.")
@@ -1132,20 +1158,31 @@ class AdvisorEngine:
         Filtra y ordena oportunidades según los criterios extraídos aplicando
         estrictamente un conector lógico 'AND' en toda la jerarquía geográfica aportada por el usuario:
         Provincia AND Código Postal AND Municipio/Localidad AND Urbanización/Calle/Barrio.
-        Además exige que toda oportunidad real disponga de al menos 1 fotografía válida.
+        Además exige que toda oportunidad real disponga de al menos 1 fotografía válida
+        (asociando Street View automáticamente a oportunidades no-market mediante PhotosBackfillWorker).
         """
         from app.connectors.market_scraper import MarketScraper
+        from app.services.photos_backfill import PhotosBackfillWorker
         from app.core.geo_utils import normalize_text
 
         filtered = []
         for o in opportunities:
-            oid = str(o.get("id") or "").strip().upper()
+            oid = str(o.get("id") or o.get("id_subasta") or "").strip().upper()
             if oid in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                 continue
-            src_type = str(o.get("source_type") or "").strip().lower()
+            src_type = str(o.get("source_type") or o.get("source") or "").strip().lower()
             is_mkt = src_type == "market" or oid.startswith("MKT-")
-            is_subasta = src_type in ("subastas", "auction") or oid.startswith("SUB-")
-            if is_mkt or is_subasta or "images" in o:
+            is_non_market = (
+                not is_mkt
+                and (
+                    src_type in ("subastas", "auction", "pgou", "edictos", "boe_subastas")
+                    or oid.startswith(("SUB-", "PGOU-", "BOE-"))
+                    or bool(o.get("id_subasta"))
+                )
+            )
+            if is_non_market:
+                PhotosBackfillWorker.ensure_non_market_streetview_photo(o)
+            if is_mkt or is_non_market or "images" in o:
                 valid_imgs = MarketScraper.ensure_twenty_images(o.get("images"))
                 if not valid_imgs:
                     continue
@@ -1629,6 +1666,56 @@ class AdvisorEngine:
         user_query = prompt_text or criteria.get("original_query") or f"{prop_type} en venta en {full_loc_query}"
 
         discovered_opps: List[Dict[str, Any]] = []
+
+        # 0. SI LA PETICIÓN ES DE NO-MARKET (SUBASTAS BOE / EDICTOS / PGOU), RASTREAR CON SU FOTO DE STREET VIEW
+        req_source_type = str(criteria.get("source_type") or "").strip().lower()
+        if req_source_type in ("subastas", "auction", "pgou", "edictos"):
+            from app.connectors.boe_scraper import BOESubastasScraper
+            from app.services.photos_backfill import PhotosBackfillWorker
+            try:
+                boe_scraper = BOESubastasScraper()
+                raw_auctions = await boe_scraper.async_scrape_live_auctions(limit=max(target_count, 20))
+                for r_auc in raw_auctions:
+                    aid_str = str(r_auc.get("id_subasta") or r_auc.get("id") or "")
+                    sub_id = aid_str if aid_str.startswith("SUB-") else f"SUB-{aid_str}"
+                    appraisal_val = float(r_auc.get("appraisal_value") or 0.0)
+                    start_bid = float(r_auc.get("starting_bid") or (appraisal_val * 0.6))
+                    disc_pct = round(((appraisal_val - start_bid) / appraisal_val) * 100, 1) if appraisal_val > start_bid and appraisal_val > 0 else 25.0
+                    opp_sub = {
+                        "id": sub_id,
+                        "id_subasta": sub_id,
+                        "source_type": "subastas",
+                        "primary_portal": "BOE",
+                        "strategy": criteria.get("strategy") or "SUBASTA",
+                        "property_type": r_auc.get("property_type") or prop_type,
+                        "title": r_auc.get("title") or f"Subasta BOE en {r_auc.get('locality') or prov}",
+                        "description": r_auc.get("description") or "",
+                        "locality": r_auc.get("locality") or municipality or prov,
+                        "province": r_auc.get("province") or prov,
+                        "address": r_auc.get("address") or "",
+                        "listing_price": start_bid,
+                        "estimated_reference_value": appraisal_val or start_bid,
+                        "discount_percentage": disc_pct,
+                        "potential_gross_profit": max(0.0, round((appraisal_val or start_bid) - start_bid, 2)),
+                        "overall_score": 82.0,
+                        "poi_score": 75.0,
+                        "surface_m2": 90.0,
+                        "lat": r_auc.get("lat"),
+                        "lon": r_auc.get("lon"),
+                        "latitude": r_auc.get("lat"),
+                        "longitude": r_auc.get("lon"),
+                        "url": r_auc.get("boe_url") or f"https://subastas.boe.es/detalleSubasta.php?idSub={aid_str.replace('SUB-', '')}",
+                        "images": r_auc.get("images") or []
+                    }
+                    PhotosBackfillWorker.ensure_non_market_streetview_photo(opp_sub)
+                    if opp_sub.get("images"):
+                        discovered_opps.append(opp_sub)
+                        if not any(c.get("id") == opp_sub["id"] for c in self._cached_catalog_opps):
+                            self._cached_catalog_opps.append(opp_sub)
+                if discovered_opps:
+                    return discovered_opps
+            except Exception as e_boe_sync:
+                logger.warning(f"[Advisor Sync] Aviso sincronizando subastas BOE Out-of-HIVEX: {e_boe_sync}")
 
         # 1. CALCULAR CUOTAS ASIGNADAS POR PORTAL SEGÚN LA MATRIZ DINÁMICA
         portal_quotas = self.allocate_portal_counts(
@@ -2626,36 +2713,68 @@ class AdvisorEngine:
 
             # Fallback en caso de que alguna oportunidad esté solo en BD (solo subastas BOE o con fotos reales)
             if not matched_opps and cached_ids:
-                from app.db.models import Opportunity
+                from app.db.models import Opportunity, Auction
                 from app.connectors.market_scraper import MarketScraper
+                from app.services.photos_backfill import PhotosBackfillWorker
                 fetch_db = db if db is not None else SessionLocal()
                 try:
-                    db_opps = fetch_db.query(Opportunity).filter(Opportunity.id.in_(cached_ids)).all()
+                    raw_sub_ids = [
+                        str(cid).replace("SUB-", "") for cid in cached_ids
+                    ] + [str(cid) for cid in cached_ids]
+                    db_opps = fetch_db.query(Opportunity).outerjoin(Auction).filter(
+                        (Opportunity.id.in_(cached_ids)) | (Auction.id_subasta.in_(raw_sub_ids))
+                    ).all()
                     for o in db_opps:
-                        oid_u = str(o.id or "").strip().upper()
+                        auc = getattr(o, "auction", None)
+                        oid_u = str(o.id or (f"SUB-{auc.id_subasta}" if auc else "")).strip().upper()
                         if oid_u in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
                             continue
-                        raw_imgs = [o.main_image] if o.main_image else []
-                        if oid_u.startswith("MKT-"):
-                            raw_imgs = MarketScraper.ensure_twenty_images(raw_imgs)
-                            if not raw_imgs:
-                                continue
+                        raw_imgs = []
+                        if auc and getattr(auc, "images_json", None):
+                            try:
+                                parsed = json.loads(auc.images_json)
+                                raw_imgs = parsed if isinstance(parsed, list) else [str(parsed)]
+                            except Exception:
+                                raw_imgs = []
+                        elif getattr(o, "main_image", None):
+                            raw_imgs = [o.main_image]
+
+                        list_price = getattr(o, "listing_price", None) or getattr(o, "price", None) or (auc.starting_bid if auc else 0) or 0
+                        ref_price = getattr(o, "estimated_reference_value", None) or getattr(o, "market_reference_price", None) or (auc.appraisal_value if auc else list_price) or list_price
+                        disc_val = getattr(o, "discount_percentage", None) or getattr(o, "discount_pct", None) or 0
+                        if 0 < disc_val <= 1.0:
+                            disc_val = round(disc_val * 100, 1)
+
                         opp_dict = {
-                            "id": o.id,
-                            "title": o.title or "Inmueble",
-                            "price": o.price or 0,
-                            "market_reference_price": o.market_reference_price or o.price,
-                            "discount_pct": o.discount_pct or 0,
-                            "locality": o.locality or "N/D",
-                            "province": o.province or "N/D",
-                            "hivex_score": o.hivex_score or 75,
+                            "id": oid_u,
+                            "source_type": "market" if oid_u.startswith("MKT-") else "subastas",
+                            "title": (auc.title if auc else getattr(o, "title", None)) or "Inmueble en Subasta Pública",
+                            "listing_price": list_price,
+                            "price": list_price,
+                            "estimated_reference_value": ref_price,
+                            "market_reference_price": ref_price,
+                            "discount_percentage": disc_val,
+                            "discount_pct": disc_val,
+                            "locality": (auc.locality if auc else getattr(o, "locality", None)) or "España",
+                            "province": (auc.province if auc else getattr(o, "province", None)) or "España",
+                            "address": (auc.address if auc else getattr(o, "address", None)) or "",
+                            "lat": getattr(auc, "lat", None) if auc else None,
+                            "lon": getattr(auc, "lon", None) if auc else None,
+                            "overall_score": getattr(o, "overall_score", None) or getattr(o, "hivex_score", None) or 75,
+                            "hivex_score": getattr(o, "overall_score", None) or getattr(o, "hivex_score", None) or 75,
                             "images": raw_imgs,
-                            "rental_yield": o.rental_yield or 0,
-                            "estimated_monthly_rent": o.estimated_monthly_rent or 0,
-                            "potential_gross_profit": o.potential_gross_profit or 0,
-                            "url": o.portal_url or f"{self.platform_url}/?opp_id={o.id}",
-                            "portal_url": o.portal_url or ""
+                            "rental_yield": getattr(o, "rental_yield", 0) or 0,
+                            "estimated_monthly_rent": getattr(o, "estimated_monthly_rent", 0) or 0,
+                            "potential_gross_profit": max(0.0, round(ref_price - list_price, 2)),
+                            "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else f"{self.platform_url}/?opp_id={oid_u}",
+                            "portal_url": getattr(o, "portal_url", "") if hasattr(o, "portal_url") else ""
                         }
+                        if not oid_u.startswith("MKT-"):
+                            PhotosBackfillWorker.ensure_non_market_streetview_photo(opp_dict)
+                        else:
+                            opp_dict["images"] = MarketScraper.ensure_twenty_images(raw_imgs)
+                        if not opp_dict.get("images"):
+                            continue
                         matched_opps.append(opp_dict)
                 except Exception as e_fetch_opps:
                     logger.warning(f"Error recuperando oportunidades en BD para caché: {e_fetch_opps}")
