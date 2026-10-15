@@ -99,6 +99,30 @@ class CatalogGuardian:
                 if img not in extracted:
                     extracted.append(img)
 
+        elif "milanuncios.com" in url_lower or "milanuncios" in content[:2000].lower():
+            raw_imgs = re.findall(
+                r'https?://(?:img\.milanuncios\.com|images\.milanuncios\.com|statics\.milanuncios\.com/imagenes)[^\s\"\'\)\]>]+?\.(?:jpg|jpeg|webp|png)(?:\?[^\s\"\'\)\]>]*)?',
+                content,
+                re.I,
+            )
+            for img in raw_imgs:
+                if any(x in img.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite"]):
+                    continue
+                if img not in extracted:
+                    extracted.append(img)
+
+        elif "yaencontre.com" in url_lower or "yaencontre" in content[:2000].lower():
+            raw_imgs = re.findall(
+                r'https?://[^\s\"\'\)\]>]*yaencontre\.com[^\s\"\'\)\]>]+?\.(?:jpg|jpeg|webp|png)(?:\?[^\s\"\'\)\]>]*)?',
+                content,
+                re.I,
+            )
+            for img in raw_imgs:
+                if any(x in img.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite"]):
+                    continue
+                if img not in extracted:
+                    extracted.append(img)
+
         from app.connectors.market_scraper import MarketScraper
         return [u for u in extracted if MarketScraper.is_valid_real_portal_photo(u)]
 

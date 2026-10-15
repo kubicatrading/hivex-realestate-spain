@@ -217,3 +217,48 @@ def test_toponym_normalization_and_zaragoza_isolation():
     assert "155.000" not in clean_desc
     assert "Piso de 103 m² con 3 dormitorios" in clean_desc
 
+
+def test_milanuncios_and_yaencontre_markdown_parsers():
+    from app.connectors.portal_parsers import MilanunciosMarkdownParser, YaEncontreMarkdownParser
+
+    sample_milanuncios = """
+# Terrenos y fincas rústicas en Toledo
+
+![Finca rústica en Toledo](https://img.milanuncios.com/fg/4512/89/451289012_1.jpg)
+[Finca rústica con olivos en Talavera de la Reina](https://www.milanuncios.com/venta-de-fincas-rusticas-en-toledo/finca-olivos-451289012.htm)
+
+68.000 €
+2.500 m²
+
+Finca rústica vallada con pozo legalizado y buen acceso desde carretera.
+
+[Finca sin fotos despublicada](https://www.milanuncios.com/venta-de-fincas-rusticas-en-toledo/finca-sin-foto-999999999.htm)
+45.000 €
+1.200 m²
+"""
+    mila_items = MilanunciosMarkdownParser.parse_listings(sample_milanuncios, default_province="Toledo")
+    assert len(mila_items) == 1
+    assert mila_items[0]["id"] == "MKT-MILANUNCIOS-451289012"
+    assert len(mila_items[0]["images"]) == 1
+    assert "img.milanuncios.com" in mila_items[0]["images"][0]
+
+    sample_yaencontre = """
+# Pisos en venta en Barcelona
+
+![Piso en Eixample](https://images.yaencontre.com/inmuebles/foto_piso_eixample_88776655_1.jpg)
+[Piso en venta en Eixample, Barcelona](https://www.yaencontre.com/venta/piso-barcelona-eixample-88776655)
+
+295.000 €
+3 habs. 92 m²
+
+Excelente oportunidad en finca regia con ascensor.
+
+[Piso sin fotos](https://www.yaencontre.com/venta/piso-barcelona-sin-fotos-11111111)
+210.000 €
+2 habs. 70 m²
+"""
+    ya_items = YaEncontreMarkdownParser.parse_listings(sample_yaencontre, default_province="Barcelona")
+    assert len(ya_items) == 1
+    assert len(ya_items[0]["images"]) == 1
+    assert "yaencontre.com" in ya_items[0]["images"][0]
+

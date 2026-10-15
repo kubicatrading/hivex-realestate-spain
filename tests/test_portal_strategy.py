@@ -73,6 +73,7 @@ def test_advisor_engine_allocate_portal_counts():
 def test_milanuncios_parser_markdown():
     sample_md = """
     # Resultados de búsqueda en Milanuncios
+    ![Foto finca Guadalix](https://img.milanuncios.com/fg/5123/45/51234567_1.jpg)
     [Finca rústica con vistas en Guadalix](https://www.milanuncios.com/fincas-rusticas-en-madrid/finca-en-guadalix-51234567.htm)
     Venta de particular a particular. 85.000 € finca rústica de 6.000 m2 con pozo y caseta de aperos.
     """
@@ -85,11 +86,13 @@ def test_milanuncios_parser_markdown():
     assert item["source_type"] == "market"
     assert item["is_solar"] is True
     assert item["is_particular"] is True
+    assert len(item["images"]) == 1
 
 
 def test_yaencontre_parser_markdown():
     sample_md = """
     # Pisos en Madrid YaEncontré
+    ![Foto piso Tetuán](https://images.yaencontre.com/inmuebles/foto_tetuan_88776655_1.jpg)
     [Piso reformado en Tetuán](https://www.yaencontre.com/venta/pisos/madrid/inmueble-88776655)
     145.000 € - 75 m² - 2 hab. Segunda planta exterior con ascensor.
     """
@@ -101,3 +104,5 @@ def test_yaencontre_parser_markdown():
     assert item["primary_portal"] == "YaEncontré"
     assert item["source_type"] == "market"
     assert item["surface_m2"] == 75.0
+    assert len(item["images"]) == 1
+

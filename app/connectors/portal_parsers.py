@@ -1,7 +1,7 @@
 """
-Módulos de parseo estructurado de contenido Markdown extraído por Supadata
-procedente de los portales inmobiliarios: Idealista, Habitaclia, Fotocasa y Pisos.com.
-Transforma texto y enlaces Markdown en objetos de oportunidad estructurados para HIVEX.
+Módulos de parseo estructurado de contenido Markdown/HTML extraído por Supadata o fetch directo
+procedente de los 6 portales de la matriz estratégica: Idealista, Habitaclia, Fotocasa, Pisos.com, Milanuncios y YaEncontré.
+Transforma texto y enlaces en objetos de oportunidad estructurados para HIVEX (exigiendo >= 1 foto real activa).
 """
 
 import re
@@ -1935,17 +1935,21 @@ class MilanunciosMarkdownParser:
                             else:
                                 surf = 5000.0 if "finca" in title.lower() else 85.0
 
-                    # Imágenes
+                    # Imágenes reales (regla estricta: 0 fotos = anuncio no vigente -> descartar)
+                    from app.connectors.market_scraper import MarketScraper
                     images = []
                     for img in ad.get("images", []) or ad.get("multimedia", []):
                         if isinstance(img, dict) and (img.get("url") or img.get("src")):
                             clean_u = (img.get("url") or img.get("src")).split("?")[0]
-                            if clean_u not in images:
+                            if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
                                 images.append(clean_u)
                         elif isinstance(img, str) and img.startswith("http"):
                             clean_u = img.split("?")[0]
-                            if clean_u not in images:
+                            if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
                                 images.append(clean_u)
+
+                    if not images:
+                        continue
 
                     # Geocodificación fallback
                     loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} en {municipality}", province)
@@ -2018,6 +2022,7 @@ class MilanunciosMarkdownParser:
                 return html_res
 
         # 2. Extracción de Markdown
+        from app.connectors.market_scraper import MarketScraper
         listings: List[Dict[str, Any]] = []
         link_pattern = re.compile(
             r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?milanuncios\.com/[^\)]*-(?:r|ad)?(?P<id>\d{5,})[^\)]*)\)',
@@ -2030,8 +2035,9 @@ class MilanunciosMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1500)
                 end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
+                prev_text = markdown_or_html[start_prev:match.start()]
                 context_text = markdown_or_html[start_prev:end_post]
 
                 price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
@@ -2039,6 +2045,25 @@ class MilanunciosMarkdownParser:
                     continue
                 listing_price = float(price_m.group(1).replace(".", ""))
                 if listing_price <= 10000:
+                    continue
+
+                # Extraer imágenes exclusivamente de prev_text para evitar contaminación entre anuncios
+                raw_imgs = re.findall(
+                    r'(?:https?:)?//(?:[a-z0-9\-]+\.)?(?:milanuncios\.com|fotocasa\.es|scmspain\.com)/[^\s\"\'\)\>]+?\.(?:jpg|jpeg|webp)',
+                    prev_text,
+                    re.IGNORECASE
+                )
+                if not raw_imgs:
+                    raw_imgs = re.findall(r'!\[[^\]]*\]\((https?://[^\s\)\"\']+?\.(?:jpg|jpeg|webp)[^\s\)\"\']*)\)', prev_text, re.IGNORECASE)
+
+                images: List[str] = []
+                for u in raw_imgs:
+                    clean_u = ("https:" + u if u.startswith("//") else u).split("?")[0]
+                    if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
+                        images.append(clean_u)
+
+                # Regla estricta: si no existen fotos de una oportunidad, no está vigente/activa
+                if not images:
                     continue
 
                 is_solar = any(w in title.lower() for w in ["finca", "terreno", "parcela", "suelo", "rustico"])
@@ -2066,7 +2091,7 @@ class MilanunciosMarkdownParser:
                     "discount_percentage": 15.0,
                     "discount_vs_market": 15.0,
                     "publications": [{"portal": "Milanuncios", "price": listing_price, "url": url}],
-                    "images": [],
+                    "images": images[:20],
                     "portal_id": item_id,
                     "portal_url": url,
                     "primary_portal": "Milanuncios",
@@ -2092,6 +2117,7 @@ class YaEncontreMarkdownParser:
 
     @classmethod
     def parse_listings(cls, markdown_or_html: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        from app.connectors.market_scraper import MarketScraper
         listings: List[Dict[str, Any]] = []
         if not markdown_or_html:
             return listings
@@ -2114,8 +2140,9 @@ class YaEncontreMarkdownParser:
                 title = match.group("title").strip()
                 url = match.group("url")
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1000)
+                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1500)
                 end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
+                prev_text = markdown_or_html[start_prev:match.start()]
                 context_text = markdown_or_html[start_prev:end_post]
 
                 price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
@@ -2123,6 +2150,25 @@ class YaEncontreMarkdownParser:
                     continue
                 listing_price = float(price_m.group(1).replace(".", ""))
                 if listing_price <= 15000:
+                    continue
+
+                # Extraer imágenes exclusivamente de prev_text para evitar contaminación entre anuncios
+                raw_imgs = re.findall(
+                    r'(?:https?:)?//(?:[a-z0-9\-]+\.)?yaencontre\.com/[^\s\"\'\)\>]+?\.(?:jpg|jpeg|webp)',
+                    prev_text,
+                    re.IGNORECASE
+                )
+                if not raw_imgs:
+                    raw_imgs = re.findall(r'!\[[^\]]*\]\((https?://[^\s\)\"\']+?\.(?:jpg|jpeg|webp)[^\s\)\"\']*)\)', prev_text, re.IGNORECASE)
+
+                images: List[str] = []
+                for u in raw_imgs:
+                    clean_u = ("https:" + u if u.startswith("//") else u).split("?")[0]
+                    if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
+                        images.append(clean_u)
+
+                # Regla estricta: si no existen fotos de una oportunidad, no está vigente/activa
+                if not images:
                     continue
 
                 # Superficie
@@ -2160,7 +2206,7 @@ class YaEncontreMarkdownParser:
                     "discount_percentage": discount,
                     "discount_vs_market": discount,
                     "publications": [{"portal": "YaEncontré", "price": listing_price, "url": url}],
-                    "images": [],
+                    "images": images[:20],
                     "portal_id": item_id,
                     "portal_url": url,
                     "primary_portal": "YaEncontré",

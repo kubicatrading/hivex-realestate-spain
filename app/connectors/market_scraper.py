@@ -496,9 +496,9 @@ class MarketScraper:
         # CONTROL ESTRICTO DE PRESUPUESTO SUPADATA (1.200 créditos/mes = máx 40/día):
         # Idealista requiere proxy residencial Supadata (1 crédito por página).
         # Capping estricto de <= 30 targets para Idealista (margen de seguridad garantizado).
-        # Fotocasa, Habitaclia y Pisos.com se consultan directamente vía HTTP sin gastar créditos Supadata.
+        # Fotocasa, Habitaclia, Pisos.com, Milanuncios y YaEncontré se consultan directamente vía HTTP sin gastar créditos Supadata.
         idealista_targets = [t for t in targets if t[2] == "idealista"][:30]
-        free_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom"]]
+        free_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom", "milanuncios", "yaencontre"]]
         active_targets = idealista_targets + free_targets
 
         logger.info(

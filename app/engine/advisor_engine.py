@@ -953,8 +953,8 @@ class AdvisorEngine:
                             img_get = client.get(first_img, headers=headers)
                             if img_get.status_code in (404, 410) or (img_get.status_code == 200 and len(img_get.content) < 500):
                                 is_alive = False
-                        # En Pisos.com y Habitaclia podemos verificar también la URL del anuncio gratis (0 créditos)
-                        if is_alive and any(p in portal_url.lower() for p in ["pisos.com", "habitaclia.com"]):
+                        # En Pisos.com, Habitaclia, Milanuncios y YaEncontré podemos verificar también la URL del anuncio gratis (0 créditos)
+                        if is_alive and any(p in portal_url.lower() for p in ["pisos.com", "habitaclia.com", "milanuncios.com", "yaencontre.com"]):
                             page_resp = client.get(portal_url, headers=headers)
                             if page_resp.status_code in (404, 410):
                                 is_alive = False
