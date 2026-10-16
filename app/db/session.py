@@ -69,22 +69,26 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
     antes que devolver datos de una base de datos local SQLite.
     """
     is_prod = is_production_environment() if force_prod is None else force_prod
-    default_supabase_url = getattr(settings, "DATABASE_URL", "") or CANONICAL_SUPABASE_POOLER_URL
-    if "sqlite" in default_supabase_url.lower() or not default_supabase_url.startswith("postgres"):
-        default_supabase_url = CANONICAL_SUPABASE_POOLER_URL
+    canon_url = get_ipv4_db_url(CANONICAL_SUPABASE_POOLER_URL)
 
     if raw_url is not None:
         candidate_urls = [get_ipv4_db_url(raw_url)]
     else:
         env_url = get_ipv4_db_url(os.getenv("DATABASE_URL", ""))
-        canon_url = get_ipv4_db_url(default_supabase_url)
         candidate_urls = []
-        if env_url and env_url.startswith("postgresql") and "sqlite" not in env_url.lower():
-            candidate_urls.append(env_url)
-        if canon_url and canon_url not in candidate_urls:
+        if is_prod:
+            # En producción (Vercel), priorizar el Pooler IPv4 canónico verificado de Supabase
+            # para evitar bloqueos si existe una variable DATABASE_URL antigua en el panel de Vercel
             candidate_urls.append(canon_url)
-        if not candidate_urls and env_url:
-            candidate_urls.append(env_url)
+            if env_url and env_url.startswith("postgresql") and "sqlite" not in env_url.lower() and env_url not in candidate_urls:
+                candidate_urls.append(env_url)
+        else:
+            if env_url and env_url.startswith("postgresql") and "sqlite" not in env_url.lower():
+                candidate_urls.append(env_url)
+            if canon_url and canon_url not in candidate_urls:
+                candidate_urls.append(canon_url)
+            if not candidate_urls and env_url:
+                candidate_urls.append(env_url)
 
     resolved_url = candidate_urls[0] if candidate_urls else ""
 
@@ -103,7 +107,7 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
         conn_args = {}
         if "sslmode" not in candidate_url:
             conn_args["sslmode"] = "require"
-        conn_args["connect_timeout"] = 5 if is_prod and "127.0.0.1" in candidate_url else 15
+        conn_args["connect_timeout"] = 5
 
         try:
             pg_engine = create_engine(
@@ -113,7 +117,7 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
                 echo=False
             )
             last_err = None
-            attempts = 1 if "127.0.0.1" in candidate_url else 3
+            attempts = 1 if "127.0.0.1" in candidate_url else 2
             for _attempt in range(attempts):
                 try:
                     with pg_engine.connect() as conn:
