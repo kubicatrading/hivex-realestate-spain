@@ -377,11 +377,13 @@ class AdvisorEngine:
                 "Es VITAL que extraigas el CONJUNTO JERÁRQUICO COMPLETO de la zona indicada por el usuario "
                 "(calle/urbanización + barrio/distrito + municipio/ciudad + código postal + provincia) para aplicar un filtro AND estricto. "
                 "Extrae los parámetros en formato JSON con las siguientes claves: "
-                "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT), "
-                "street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Avenida de las Vegas', o null), "
+                "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT; "
+                "IMPORTANTE: si el usuario pide 'envíame oportunidades', 'búscame oportunidades', 'muéstrame oportunidades', 'qué oportunidades detectas' o similar, "
+                "query_type DEBE ser 'SEARCH_OPPORTUNITIES' para que el motor busque ahora mismo en HIVEX y Out-of-HIVEX, nunca solo 'SCHEDULED_ALERT'), "
+                "street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Las Vegas', o null), "
                 "district_or_neighborhood (barrio, distrito, PAU o ensanche si se menciona, ej: 'Chamberí', 'PAU de Vallecas', o null), "
                 "municipality (municipio, localidad o ciudad específica dentro de la provincia si se menciona, ej: 'Villanueva del Pardillo', 'Alcobendas', o null), "
-                "zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, ej: 'Urbanización Avenida de las Vegas - Villanueva del Pardillo', o null), "
+                "zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, ej: 'Urbanización Las Vegas - Villanueva del Pardillo', o null), "
                 "postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null), "
                 "province (nombre de la provincia, ej: 'Madrid', o null), "
                 "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 10 para '10 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 20), "
@@ -399,15 +401,15 @@ class AdvisorEngine:
                         if parsed.get("province") and not criteria.get("province"):
                             criteria["province"] = parsed["province"]
                         if parsed.get("street_or_urbanization") and not criteria.get("street_or_urbanization"):
-                            criteria["street_or_urbanization"] = str(parsed["street_or_urbanization"]).strip()
+                            criteria["street_or_urbanization"] = str(parsed["street_or_urbanization"]).strip(" ()")
                         if parsed.get("district_or_neighborhood") and not criteria.get("district_or_neighborhood"):
-                            criteria["district_or_neighborhood"] = str(parsed["district_or_neighborhood"]).strip()
+                            criteria["district_or_neighborhood"] = str(parsed["district_or_neighborhood"]).strip(" ()")
                         if parsed.get("municipality") and not criteria.get("municipality"):
-                            criteria["municipality"] = str(parsed["municipality"]).strip()
+                            criteria["municipality"] = str(parsed["municipality"]).strip(" ()")
                         if parsed.get("postal_code") and not criteria.get("postal_code"):
                             criteria["postal_code"] = str(parsed["postal_code"]).strip()
                         if parsed.get("zone_or_neighborhood") and not criteria.get("zone_or_neighborhood"):
-                            criteria["zone_or_neighborhood"] = parsed["zone_or_neighborhood"]
+                            criteria["zone_or_neighborhood"] = str(parsed["zone_or_neighborhood"]).strip(" ()")
                         # Reconstruir etiqueta compuesta y jerarquía si Gemini aportó algún nivel adicional
                         self._sync_location_hierarchy(criteria)
                         if parsed.get("target_count") and isinstance(parsed["target_count"], int):
@@ -415,7 +417,11 @@ class AdvisorEngine:
                         if parsed.get("sort_by"):
                             criteria["sort_by"] = parsed["sort_by"]
                         if parsed.get("query_type"):
-                            criteria["query_type"] = parsed["query_type"]
+                            # Si el usuario pide activamente enviar/buscar oportunidades ahora, prevalece SEARCH_OPPORTUNITIES sobre SCHEDULED_ALERT
+                            if parsed["query_type"] == "SCHEDULED_ALERT" and criteria.get("query_type") == "SEARCH_OPPORTUNITIES":
+                                criteria["query_type"] = "SEARCH_OPPORTUNITIES"
+                            else:
+                                criteria["query_type"] = parsed["query_type"]
                         if parsed.get("strategy"):
                             criteria["strategy"] = parsed["strategy"]
                         if parsed.get("max_price"):
@@ -442,12 +448,12 @@ class AdvisorEngine:
         todos los niveles geográficos presentes (calle/urbanización, distrito/barrio,
         municipio, código postal y provincia) bajo semántica conjuntiva (AND).
         """
-        street_urb = (criteria.get("street_or_urbanization") or "").strip() or None
-        dist_neigh = (criteria.get("district_or_neighborhood") or "").strip() or None
-        muni = (criteria.get("municipality") or "").strip() or None
+        street_urb = (criteria.get("street_or_urbanization") or "").strip(" ()") or None
+        dist_neigh = (criteria.get("district_or_neighborhood") or "").strip(" ()") or None
+        muni = (criteria.get("municipality") or "").strip(" ()") or None
         cp = (criteria.get("postal_code") or "").strip() or None
-        prov = (criteria.get("province") or "").strip() or None
-        zone = (criteria.get("zone_or_neighborhood") or "").strip() or None
+        prov = (criteria.get("province") or "").strip(" ()") or None
+        zone = (criteria.get("zone_or_neighborhood") or "").strip(" ()") or None
 
         parts = []
         for p in [street_urb, dist_neigh, muni, f"CP {cp}" if cp else None, prov]:
@@ -503,18 +509,18 @@ class AdvisorEngine:
         district_or_neighborhood = None
         detected_municipality = None
         zone_or_neighborhood = None
-        term_pat = r'(?:(?:\s+(?:con|por|menos|m[áa]s|top|precio|barato|caro|desde|hasta|c[oó]digo\s+postal|cp\s*\d|\d+\s*€|\d+\s*k))|[\.\,]|$)'
+        term_pat = r'(?:(?:\s+(?:con|por|menos|m[áa]s|top|precio|barato|caro|desde|hasta|c[oó]digo\s+postal|cp\s*\d|\d+\s*€|\d+\s*k))|[\.\,\(\)]|$)'
 
         # 1A) Urbanización o Calle/Avenida explícita
         urb_m = re.search(r'\b(?:urbanizaci[oó]n|urb\.?)\s+([a-záéíóúñ0-9\s\-]+?)' + term_pat, q_lower)
-        if urb_m and len(urb_m.group(1).strip()) >= 3:
-            raw_urb = urb_m.group(1).strip()
+        if urb_m and len(urb_m.group(1).strip(" ()")) >= 3:
+            raw_urb = urb_m.group(1).strip(" ()")
             # Si contiene "de <municipio> <cp>" (ej. "las vegas de villanueva del pardillo 28229"), separar urbanización y municipio
-            raw_urb_no_cp = re.sub(r'\b\d{5}\b', '', raw_urb).strip()
+            raw_urb_no_cp = re.sub(r'\b\d{5}\b', '', raw_urb).strip(" ()")
             de_muni_split = re.match(r'^(.+?)\s+(?:de|en)\s+(villanueva\s+del\s+pardillo|villanueva\s+de\s+la\s+ca[ñn]ada|alcobendas|pozuelo\s+de\s+alarc[oó]n|boadilla\s+del\s+monte|majadahonda|las\s+rozas(?:\s+de\s+madrid)?|colmenar\s+viejo|san\s+sebasti[aá]n\s+de\s+los\s+reyes|algete|guadalix\s+de\s+la\s+sierra|torrelodones|galapagar|alpedrete|valdemorillo|brunete|m[oó]stoles|alcal[aá]\s+de\s+henares|getafe|legan[eé]s|alcorc[oó]n|fuenlabrada)\b', raw_urb_no_cp)
             if de_muni_split:
-                street_or_urbanization = "Urbanización " + de_muni_split.group(1).strip().title()
-                detected_municipality = de_muni_split.group(2).strip().title()
+                street_or_urbanization = "Urbanización " + de_muni_split.group(1).strip(" ()").title()
+                detected_municipality = de_muni_split.group(2).strip(" ()").title()
             else:
                 street_or_urbanization = "Urbanización " + raw_urb_no_cp.title()
             zone_or_neighborhood = "Urbanización " + raw_urb.title()
@@ -791,15 +797,16 @@ class AdvisorEngine:
         is_explicit_search = any(w in q_lower for w in [
             "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
             "haz búsqueda", "haz busqueda", "busca", "buscar", "búsqueda de", "busqueda de", "encuentra",
-            "enséñame", "enseñame", "muéstrame", "muestrame", "qué hay", "dime qué", "dime que",
+            "enséñame", "enseñame", "muéstrame", "muestrame", "envíame", "enviame", "mándame", "mandame",
+            "qué hay", "dime qué", "dime que", "detectes", "detectas",
             "oportunidades", "inmuebles", "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica",
             "fincas", "terrenos", "subastas"
         ])
 
-        if is_alert:
-            query_type = "SCHEDULED_ALERT"
-        elif is_explicit_search:
+        if is_explicit_search:
             query_type = "SEARCH_OPPORTUNITIES"
+        elif is_alert:
+            query_type = "SCHEDULED_ALERT"
         elif any(w in q_lower for w in [
             "barrio", "distrito", "renta media", "demografía", "demografia",
             "precios de ruzafa", "precios de chamberí", "precio m2 en", "precio medio",
@@ -1851,9 +1858,17 @@ class AdvisorEngine:
                     item.setdefault("primary_portal", target.get("portal") or "Pisos.com")
                     item.setdefault("portal_url", item.get("url") or target_url)
                     item.setdefault("province", prov)
-                    # IMPORTANTE: NO sobre-escribir item["locality"] con `zone` a ciegas,
-                    # ya que falsificaría la ubicación de anuncios de otras calles/municipios
-                    # haciendo que pasen el filtro AND por falso positivo.
+                    # Si la URL del portal o el título apunta específicamente al municipio solicitado,
+                    # enriquecer locality y postal_code para que no quede como 'Madrid' genérico
+                    url_and_title_low = f"{target_url} {item.get('url', '')} {item.get('title', '')}".lower()
+                    if municipality:
+                        muni_slug = re.sub(r'\s+', '-', municipality.lower().strip())
+                        if municipality.lower() in url_and_title_low or muni_slug in url_and_title_low:
+                            if not item.get("locality") or item.get("locality", "").lower() == prov.lower():
+                                item["locality"] = municipality
+                    if postal_code and (postal_code in url_and_title_low or (municipality and item.get("locality", "").lower() == municipality.lower())):
+                        if not item.get("postal_code") or item.get("postal_code") in ("28001", "08001", "46001", "29001", "03001", "41001", "50001"):
+                            item["postal_code"] = postal_code
 
                     processed_opp = _m_scraper._process_market_listing(dict(item))
                     if processed_opp and MarketScraper.ensure_twenty_images(processed_opp):
@@ -1885,14 +1900,31 @@ class AdvisorEngine:
         if discovered_opps:
             from app.connectors.market_scraper import MarketScraper
             discovered_opps = [o for o in discovered_opps if MarketScraper.ensure_twenty_images(o)]
-            discovered_opps = self.filter_opportunities(discovered_opps, criteria)
+            strict_filtered = self.filter_opportunities(discovered_opps, criteria)
+            if not strict_filtered and street_or_urb and (municipality or postal_code):
+                # Si los portales publican el activo a nivel de municipio/CP sin detallar el nombre de la urbanización en el título corto,
+                # filtrar exigiendo el municipio + CP + provincia y tipología
+                relaxed_muni_criteria = dict(criteria)
+                relaxed_muni_criteria["street_or_urbanization"] = None
+                relaxed_muni_criteria["zone_or_neighborhood"] = municipality or f"CP {postal_code}"
+                self._sync_location_hierarchy(relaxed_muni_criteria)
+                strict_filtered = self.filter_opportunities(discovered_opps, relaxed_muni_criteria)
+            discovered_opps = strict_filtered
             if discovered_opps:
                 discovered_opps = self.verify_and_filter_active_market_opportunities(
                     discovered_opps, target_count=max(target_count, 50)
                 )
 
-        # 4. PERSISTENCIA EN PLATAFORMA (verified_market_catalog.json) SOLO DE OPORTUNIDADES VERIFICADAS
+        # 4. PERSISTENCIA EN MEMORIA Y EN PLATAFORMA (verified_market_catalog.json) SOLO DE OPORTUNIDADES VERIFICADAS
         if discovered_opps:
+            if self._cached_catalog_opps is None:
+                self._cached_catalog_opps = []
+            cached_ids = {str(c.get("id")) for c in self._cached_catalog_opps}
+            for opp in discovered_opps:
+                if str(opp.get("id")) not in cached_ids:
+                    self._cached_catalog_opps.append(opp)
+                    cached_ids.add(str(opp.get("id")))
+
             try:
                 from pathlib import Path
                 catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
@@ -1923,7 +1955,7 @@ class AdvisorEngine:
                     logger.info(f"[Advisor Sync] Persistidas {new_items_added} nuevas oportunidades en verified_market_catalog.json")
 
             except Exception as e_save:
-                logger.error(f"[Advisor Sync] Error persistiendo en catálogo JSON: {e_save}")
+                logger.warning(f"[Advisor Sync] Catálogo en disco solo-lectura (Serverless), oportunidades mantenidas en memoria: {e_save}")
 
         return discovered_opps
 
@@ -2576,7 +2608,7 @@ class AdvisorEngine:
             r_m2 = internal_m.get("price_rent_sqm", 0)
             y_btl = internal_m.get("gross_yield", 0)
 
-            lines.append(f"\n🔍 No constan oportunidades de entrada activas en el catálogo de HIVEX para **{zone_title}** en este instante.")
+            lines.append(f"\n🔍 No constan oportunidades de entrada activas ni en el catálogo de HIVEX ni tras el rastreo en tiempo real Out-of-HIVEX (portales externos) para **{zone_title}** en este instante.")
             if p_m2 > 0:
                 lines.append(f"\n📊 **Métricas de Referencia HIVEX ({zone_title}):**")
                 lines.append(f"• **Precio Compra Referencia:** {p_m2:,.0f} €/m²")
@@ -2585,7 +2617,7 @@ class AdvisorEngine:
                 if y_btl > 0:
                     lines.append(f"• **Yield BTL Bruto Objetivo:** {y_btl:.1f}%")
             lines.append(f"\n💡 **Recomendación del Asesor:**")
-            lines.append(f"He registrado tu alerta para notificarte en tiempo real en cuanto entre un activo en {zone_title}. Si deseas rastrear activamente fuera de HIVEX en portales externos, indícamelo expresamente.")
+            lines.append(f"Ya he ejecutado el rastreo activo Out-of-HIVEX en portales externos para {zone_title} sin encontrar anuncios verificados disponibles en este momento. He registrado tu alerta para notificarte en tiempo real en cuanto entre un activo en {zone_title}.")
 
         lines.append(f"\n📂 *Consulta guardada en la pestaña 'Consultas & Asesor Telegram' del dashboard web.*")
 
@@ -2626,7 +2658,7 @@ class AdvisorEngine:
             p_m2 = internal_m.get("price_sale_sqm", 0)
             r_m2 = internal_m.get("price_rent_sqm", 0)
             y_btl = internal_m.get("gross_yield", 0)
-            intro_lines.append(f"• <i>No constan activos disponibles actualmente en catálogo para esta delimitación exacta.</i>")
+            intro_lines.append(f"• <i>No constan activos disponibles actualmente ni en catálogo HIVEX ni en portales externos (Out-of-HIVEX) para esta delimitación exacta.</i>")
             if p_m2 > 0:
                 intro_lines.append(f"• <b>Compra Mkt Ref:</b> {p_m2:,.0f} €/m² | <b>Renta Ref:</b> {r_m2:.1f} €/m² | <b>Yield:</b> {y_btl:.1f}%")
             intro_lines.append(f"🔔 <i>He registrado tu alerta para avisarte de inmediato si ingresa una oportunidad aquí.</i>")
@@ -2927,6 +2959,7 @@ class AdvisorEngine:
             "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
             "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "encuentra", "encuéntrame",
             "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame", "dame", "trae", "tráeme", "traeme",
+            "envíame", "enviame", "mándame", "mandame", "detectes", "detectas", "oportunidades",
             "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
             "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
             "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "búsqueda de", "busqueda de", "búsqueda", "busqueda",
@@ -3023,7 +3056,11 @@ class AdvisorEngine:
                 "externo", "externa", "en internet", "en la web", "buscar en la red"
             ])
 
-            if (is_explicit_external or (len(matched_opps) == 0 and not internal_metrics.get("is_statistically_representative", False))):
+            # REGLA DE INGESTA DE OPORTUNIDADES HIVEX:
+            # Si hay 0 fichas de entrada en el catálogo interno (len(matched_opps) == 0) o si el usuario
+            # solicita explícitamente rastrear fuera de HIVEX, se activa automáticamente Out-of-HIVEX,
+            # independientemente de que existan precios medios de referencia en la zona.
+            if is_explicit_external or len(matched_opps) == 0:
                 logger.info(
                     f"[Advisor Process] Activando búsqueda fuera de HIVEX (out-hivex) de forma asíncrona y con await..."
                 )
@@ -3041,7 +3078,14 @@ class AdvisorEngine:
 
                 if newly_synced:
                     all_opps = self.get_live_catalog_opportunities(db=db)
+                    seen_sync_urls = {o.get("url") for o in all_opps if o.get("url")}
+                    for n_item in newly_synced:
+                        if n_item.get("url") not in seen_sync_urls:
+                            all_opps.append(n_item)
+                            seen_sync_urls.add(n_item.get("url"))
                     matched_opps = self.filter_opportunities(all_opps, criteria)
+                    if not matched_opps:
+                        matched_opps = list(newly_synced)
                     matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=target_count)
                     if matched_opps:
                         try:

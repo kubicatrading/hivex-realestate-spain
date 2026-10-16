@@ -14,9 +14,13 @@ def auth_headers():
 @pytest.fixture(autouse=True)
 def ensure_test_opportunities():
     db = SessionLocal()
+    orig_status_10 = None
+    orig_end_10 = None
+    created_10 = False
     try:
         auc10 = db.query(Auction).filter(Auction.id == 10).first()
         if not auc10:
+            created_10 = True
             auc10 = Auction(
                 id=10,
                 id_subasta="SUB-TEST-10",
@@ -24,11 +28,18 @@ def ensure_test_opportunities():
                 property_type="Vivienda",
                 starting_bid=100000.0,
                 appraisal_value=200000.0,
-                province="Madrid"
+                province="Madrid",
+                status="CELEBRANDOSE"
             )
             db.add(auc10)
             db.commit()
             db.refresh(auc10)
+        else:
+            orig_status_10 = auc10.status
+            orig_end_10 = auc10.auction_end_date
+            auc10.status = "CELEBRANDOSE"
+            auc10.auction_end_date = None
+            db.commit()
         
         opp10 = db.query(Opportunity).filter(Opportunity.auction_id == 10).first()
         if not opp10:
@@ -43,34 +54,16 @@ def ensure_test_opportunities():
             db.add(opp10)
             db.commit()
 
-        auc20 = db.query(Auction).filter(Auction.id == 20).first()
-        if not auc20:
-            auc20 = Auction(
-                id=20,
-                id_subasta="SUB-TEST-20",
-                title="Piso en subasta test 20",
-                property_type="Vivienda",
-                starting_bid=120000.0,
-                appraisal_value=200000.0,
-                province="Madrid"
-            )
-            db.add(auc20)
-            db.commit()
-            db.refresh(auc20)
-        
-        opp20 = db.query(Opportunity).filter(Opportunity.auction_id == 20).first()
-        if not opp20:
-            opp20 = Opportunity(
-                auction_id=auc20.id,
-                strategy=StrategyType.HOUSE_FLIPPING,
-                discount_percentage=0.40,
-                potential_gross_profit=80000.0,
-                overall_score=75.0,
-                rental_yield=6.2
-            )
-            db.add(opp20)
-            db.commit()
+        yield
     finally:
+        try:
+            auc10 = db.query(Auction).filter(Auction.id == 10).first()
+            if auc10 and not created_10:
+                auc10.status = orig_status_10
+                auc10.auction_end_date = orig_end_10
+                db.commit()
+        except Exception:
+            db.rollback()
         db.close()
 
 def test_zero_false_positives_without_active_sync(auth_headers):

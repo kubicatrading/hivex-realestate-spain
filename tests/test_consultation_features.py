@@ -510,3 +510,63 @@ async def test_alerts_worker_respects_active_consultations_and_photo_guardian(in
     sent_ok = await real_bot.send_photo_card("88888", bad_subasta_no_photo)
     assert sent_ok is False
     assert len(real_bot_msgs) == 0
+
+
+@pytest.mark.asyncio
+async def test_out_hivex_triggered_when_zero_catalog_matches_despite_statistically_representative_zone(in_memory_db, monkeypatch):
+    """
+    REGLA DE INGESTA DE OPORTUNIDADES (Out-of-HIVEX):
+    Cuando el usuario solicita oportunidades (ej. "Envíame oportunidades que detectes en Villanueva del pardillo (Urbanización Las Vegas)")
+    y hay 0 coincidencias en el catálogo interno de HIVEX, se DEBE activar automáticamente sync_portal_opportunities_on_demand (Out-of-HIVEX)
+    incluso si la zona ya cuenta con precios de referencia estadísticamente representativos (2.800 €/m², 17.5 €/m²/mes).
+    """
+    prompt = "Envíame oportunidades que detectes en Villanueva del pardillo (Urbanización Las Vegas)"
+    criteria = advisor_engine._parse_query_intent_heuristics(prompt)
+    assert criteria["query_type"] == "SEARCH_OPPORTUNITIES"
+    assert criteria["province"] == "Madrid"
+    assert "Las Vegas" in (criteria.get("zone_or_neighborhood") or "")
+    assert "Villanueva" in (criteria.get("zone_or_neighborhood") or "")
+    assert "(" not in (criteria.get("zone_or_neighborhood") or "")
+    assert ")" not in (criteria.get("zone_or_neighborhood") or "")
+
+    out_hivex_calls = []
+    synced_card = {
+        "id": "MKT-FOTOCASA-VDP-LASVEGAS-1",
+        "source_type": "market",
+        "primary_portal": "Fotocasa",
+        "title": "Chalet pareado en Urbanización Las Vegas, Villanueva del Pardillo",
+        "address": "Avenida de las Vegas, Urbanización Las Vegas, 28229 Villanueva del Pardillo, Madrid",
+        "locality": "Villanueva del Pardillo",
+        "province": "Madrid",
+        "postal_code": "28229",
+        "property_type": "CHALET",
+        "listing_price": 465000.0,
+        "estimated_reference_value": 540000.0,
+        "discount_percentage": 13.9,
+        "surface_m2": 210.0,
+        "rental_yield": 6.4,
+        "overall_score": 84.5,
+        "url": "https://www.fotocasa.es/es/comprar/vivienda/villanueva-del-pardillo/las-vegas/189999999/d",
+        "images": ["https://static.fotocasa.es/images/ads/aa/bb/cc/189999999_1.jpg"]
+    }
+
+    monkeypatch.setattr(advisor_engine, "get_live_catalog_opportunities", lambda db=None: [])
+    async def mock_sync_on_demand(criteria, prompt_text="", target_count=5, db=None):
+        out_hivex_calls.append({"criteria": criteria, "prompt_text": prompt_text})
+        return [synced_card]
+
+    monkeypatch.setattr(advisor_engine, "sync_portal_opportunities_on_demand", mock_sync_on_demand)
+    monkeypatch.setattr(advisor_engine, "verify_and_filter_active_market_opportunities", lambda opps, target_count=20: opps)
+
+    res = await advisor_engine.process_user_query(
+        user_name="Juanma OMS",
+        prompt_text=prompt,
+        telegram_chat_id="999111",
+        db=in_memory_db
+    )
+
+    assert len(out_hivex_calls) == 1
+    assert res["matched_count"] == 1
+    assert res["matched_opportunities"][0]["id"] == "MKT-FOTOCASA-VDP-LASVEGAS-1"
+    assert res["should_display_cards"] is True
+

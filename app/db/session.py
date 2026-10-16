@@ -55,6 +55,12 @@ def is_production_environment(env: dict = None) -> bool:
     return False
 
 
+CANONICAL_SUPABASE_POOLER_URL = (
+    "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ"
+    "@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+)
+
+
 def init_database_engine(raw_url: str = None, force_prod: bool = None):
     """
     Inicializa el motor de base de datos.
@@ -63,8 +69,24 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
     antes que devolver datos de una base de datos local SQLite.
     """
     is_prod = is_production_environment() if force_prod is None else force_prod
-    effective_raw_url = raw_url if raw_url is not None else os.getenv("DATABASE_URL", getattr(settings, "DATABASE_URL", ""))
-    resolved_url = get_ipv4_db_url(effective_raw_url)
+    default_supabase_url = getattr(settings, "DATABASE_URL", "") or CANONICAL_SUPABASE_POOLER_URL
+    if "sqlite" in default_supabase_url.lower() or not default_supabase_url.startswith("postgres"):
+        default_supabase_url = CANONICAL_SUPABASE_POOLER_URL
+
+    if raw_url is not None:
+        candidate_urls = [get_ipv4_db_url(raw_url)]
+    else:
+        env_url = get_ipv4_db_url(os.getenv("DATABASE_URL", ""))
+        canon_url = get_ipv4_db_url(default_supabase_url)
+        candidate_urls = []
+        if env_url and env_url.startswith("postgresql") and "sqlite" not in env_url.lower():
+            candidate_urls.append(env_url)
+        if canon_url and canon_url not in candidate_urls:
+            candidate_urls.append(canon_url)
+        if not candidate_urls and env_url:
+            candidate_urls.append(env_url)
+
+    resolved_url = candidate_urls[0] if candidate_urls else ""
 
     if is_prod and ("sqlite" in resolved_url.lower() or not resolved_url.startswith("postgresql")):
         error_msg = (
@@ -74,23 +96,24 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
         logger.critical(error_msg)
         raise RuntimeError(error_msg)
 
-    conn_args = {}
-    if "postgresql" in resolved_url:
-        if "sslmode" not in resolved_url:
+    last_conn_error = None
+    for candidate_url in candidate_urls:
+        if not candidate_url.startswith("postgresql") or "sqlite" in candidate_url.lower():
+            continue
+        conn_args = {}
+        if "sslmode" not in candidate_url:
             conn_args["sslmode"] = "require"
-        conn_args["connect_timeout"] = 5 if is_prod and "127.0.0.1" in resolved_url else 15
+        conn_args["connect_timeout"] = 5 if is_prod and "127.0.0.1" in candidate_url else 15
 
-    try:
-        if "postgresql" in resolved_url:
+        try:
             pg_engine = create_engine(
-                resolved_url,
+                candidate_url,
                 connect_args=conn_args,
                 poolclass=NullPool,
                 echo=False
             )
-            # Test connection immediately with retry for serverless cold starts
             last_err = None
-            attempts = 1 if "127.0.0.1" in resolved_url else 3
+            attempts = 1 if "127.0.0.1" in candidate_url else 3
             for _attempt in range(attempts):
                 try:
                     with pg_engine.connect() as conn:
@@ -103,37 +126,41 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
             active_engine_name = "PostgreSQL (Producción Pooler IPv4)"
             status_info = {
                 "engine": active_engine_name,
-                "host": resolved_url.split("@")[-1].split("/")[0] if "@" in resolved_url else "remote",
+                "host": candidate_url.split("@")[-1].split("/")[0] if "@" in candidate_url else "remote",
                 "connected": True
             }
-            return pg_engine, resolved_url, active_engine_name, status_info
-        else:
-            raise ValueError("DATABASE_URL no apunta a una instancia PostgreSQL/Supabase válida.")
-    except Exception as e_conn:
-        if is_prod:
-            error_msg = (
-                f"CRÍTICO [PRODUCCIÓN]: Fallo de conexión a Supabase PostgreSQL ({e_conn}). "
-                f"PROHIBIDO el fallback a SQLite en el entorno de PRODUCCIÓN."
-            )
-            logger.critical(error_msg)
-            raise RuntimeError(error_msg) from e_conn
+            return pg_engine, candidate_url, active_engine_name, status_info
+        except Exception as e_conn:
+            last_conn_error = e_conn
+            logger.warning(f"Intento de conexión PostgreSQL fallido ({candidate_url.split('@')[-1] if '@' in candidate_url else 'db'}): {e_conn}")
 
-        _root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        _local_db_path = os.path.join(_root_dir, "hivex_local.db")
-        logger.warning(f"PostgreSQL no alcanzable en desarrollo local ({e_conn}). Usando réplica SQLite local: sqlite:///{_local_db_path}")
-        sqlite_url = f"sqlite:///{_local_db_path}"
-        sqlite_engine = create_engine(
-            sqlite_url,
-            connect_args={"check_same_thread": False},
-            echo=False
+    if last_conn_error is None:
+        last_conn_error = ValueError("DATABASE_URL no apunta a una instancia PostgreSQL/Supabase válida.")
+
+    if is_prod:
+        error_msg = (
+            f"CRÍTICO [PRODUCCIÓN]: Fallo de conexión a Supabase PostgreSQL ({last_conn_error}). "
+            f"PROHIBIDO el fallback a SQLite en el entorno de PRODUCCIÓN."
         )
-        active_engine_name = "SQLite (Réplica Local de Supabase - Solo Desarrollo)"
-        status_info = {
-            "engine": active_engine_name,
-            "host": "localhost",
-            "connected": True
-        }
-        return sqlite_engine, sqlite_url, active_engine_name, status_info
+        logger.critical(error_msg)
+        raise RuntimeError(error_msg) from last_conn_error
+
+    _root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _local_db_path = os.path.join(_root_dir, "hivex_local.db")
+    logger.warning(f"PostgreSQL no alcanzable en desarrollo local ({last_conn_error}). Usando réplica SQLite local: sqlite:///{_local_db_path}")
+    sqlite_url = f"sqlite:///{_local_db_path}"
+    sqlite_engine = create_engine(
+        sqlite_url,
+        connect_args={"check_same_thread": False},
+        echo=False
+    )
+    active_engine_name = "SQLite (Réplica Local de Supabase - Solo Desarrollo)"
+    status_info = {
+        "engine": active_engine_name,
+        "host": "localhost",
+        "connected": True
+    }
+    return sqlite_engine, sqlite_url, active_engine_name, status_info
 
 
 engine, db_url, ACTIVE_DB_ENGINE, DB_STATUS_INFO = init_database_engine()
