@@ -167,7 +167,24 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
     return sqlite_engine, sqlite_url, active_engine_name, status_info
 
 
-engine, db_url, ACTIVE_DB_ENGINE, DB_STATUS_INFO = init_database_engine()
+try:
+    engine, db_url, ACTIVE_DB_ENGINE, DB_STATUS_INFO = init_database_engine()
+except Exception as _boot_err:
+    logger.error(f"Error en conexión inicial de arranque a Supabase PostgreSQL: {_boot_err}")
+    db_url = CANONICAL_SUPABASE_POOLER_URL
+    engine = create_engine(
+        db_url,
+        poolclass=NullPool,
+        echo=False,
+        connect_args={"connect_timeout": 5},
+    )
+    ACTIVE_DB_ENGINE = "PostgreSQL (Supabase Cloud - Lazy Pool)"
+    DB_STATUS_INFO = {
+        "engine": ACTIVE_DB_ENGINE,
+        "host": "aws-1-eu-west-1.pooler.supabase.com",
+        "connected": False,
+        "boot_error": str(_boot_err),
+    }
 
 
 def run_db_migrations(target_engine):
@@ -195,7 +212,8 @@ def run_db_migrations(target_engine):
         pass
 
 
-run_db_migrations(engine)
+if not is_production_environment():
+    run_db_migrations(engine)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
