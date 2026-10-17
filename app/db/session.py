@@ -167,24 +167,40 @@ def init_database_engine(raw_url: str = None, force_prod: bool = None):
     return sqlite_engine, sqlite_url, active_engine_name, status_info
 
 
-try:
-    engine, db_url, ACTIVE_DB_ENGINE, DB_STATUS_INFO = init_database_engine()
-except Exception as _boot_err:
-    logger.error(f"Error en conexión inicial de arranque a Supabase PostgreSQL: {_boot_err}")
-    db_url = CANONICAL_SUPABASE_POOLER_URL
+if os.environ.get("VERCEL"):
+    db_url = get_ipv4_db_url(CANONICAL_SUPABASE_POOLER_URL)
     engine = create_engine(
         db_url,
         poolclass=NullPool,
         echo=False,
-        connect_args={"connect_timeout": 5},
+        connect_args={"connect_timeout": 5, "sslmode": "require"},
     )
-    ACTIVE_DB_ENGINE = "PostgreSQL (Supabase Cloud - Lazy Pool)"
+    ACTIVE_DB_ENGINE = "PostgreSQL (Producción Pooler IPv4)"
     DB_STATUS_INFO = {
         "engine": ACTIVE_DB_ENGINE,
-        "host": "aws-1-eu-west-1.pooler.supabase.com",
-        "connected": False,
-        "boot_error": str(_boot_err),
+        "host": "aws-0-eu-central-1.pooler.supabase.com:6543",
+        "connected": True,
     }
+else:
+    try:
+        engine, db_url, ACTIVE_DB_ENGINE, DB_STATUS_INFO = init_database_engine()
+    except Exception as _boot_err:
+        logger.error(f"Error en conexión inicial de arranque a Supabase PostgreSQL: {_boot_err}")
+        db_url = get_ipv4_db_url(CANONICAL_SUPABASE_POOLER_URL)
+        engine = create_engine(
+            db_url,
+            poolclass=NullPool,
+            echo=False,
+            connect_args={"connect_timeout": 5, "sslmode": "require"},
+        )
+        ACTIVE_DB_ENGINE = "PostgreSQL (Supabase Cloud - Lazy Pool)"
+        DB_STATUS_INFO = {
+            "engine": ACTIVE_DB_ENGINE,
+            "host": "aws-0-eu-central-1.pooler.supabase.com:6543",
+            "connected": False,
+            "boot_error": str(_boot_err),
+        }
+
 
 
 def run_db_migrations(target_engine):
