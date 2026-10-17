@@ -106,8 +106,21 @@ async def fix_vercel_rewrites_middleware(request: Request, call_next):
         else:
             request.scope["path"] = "/"
             
-    response = await call_next(request)
-    return response
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as exc:
+        import traceback
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "runtime_error",
+                "path": request.scope.get("path", ""),
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        )
 
 class LoginRequest(BaseModel):
     login: Optional[str] = ""
@@ -395,25 +408,28 @@ def serve_static_file(filepath: str):
         return FileResponse(target_path)
     raise HTTPException(status_code=404, detail=f"Static file '{filepath}' not found")
 
-from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO
+from app.db.session import ACTIVE_DB_ENGINE, DB_STATUS_INFO, SessionLocal
 
 @app.get("/api/v1/health")
-def health_check(db: Session = Depends(get_db)):
+def health_check():
     opp_count = 0
+    db_err = None
     try:
-        opp_count = db.query(Opportunity).count()
-    except Exception:
-        pass
+        with SessionLocal() as db:
+            opp_count = db.query(Opportunity).count()
+    except Exception as e_db:
+        db_err = str(e_db)
 
     return {
         "status": "online",
-        "version": "v3.2.2-telegram-modal",
+        "version": "v3.2.4-vercel-prod",
         "app": settings.PROJECT_NAME,
         "environment": settings.ENV,
         "database": {
             "active_engine": ACTIVE_DB_ENGINE,
             "details": DB_STATUS_INFO,
-            "opportunities_in_db": opp_count
+            "opportunities_in_db": opp_count,
+            **({"db_error": db_err} if db_err else {}),
         }
     }
 
