@@ -11,3 +11,5 @@ beautifulsoup4>=4.12.3
 python-dotenv>=1.0.1
 python-telegram-bot>=21.0.1
 pypdf>=6.0.0
+Pillow>=10.2.0
+

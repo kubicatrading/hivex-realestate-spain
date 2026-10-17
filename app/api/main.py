@@ -60,22 +60,23 @@ from app.core.auth import (
 
 from fastapi.middleware.cors import CORSMiddleware
 
-try:
-    Base.metadata.create_all(bind=engine)
-    with engine.connect() as conn:
-        for col_def in [
-            "rental_yield FLOAT",
-            "estimated_monthly_rent FLOAT",
-            "yield_score FLOAT",
-            "yield_color VARCHAR",
-        ]:
-            try:
-                conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS {col_def};"))
-                conn.commit()
-            except Exception:
-                pass
-except Exception as e:
-    pass
+if not os.environ.get("VERCEL"):
+    try:
+        Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            for col_def in [
+                "rental_yield FLOAT",
+                "estimated_monthly_rent FLOAT",
+                "yield_score FLOAT",
+                "yield_color VARCHAR",
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS {col_def};"))
+                    conn.commit()
+                except Exception:
+                    pass
+    except Exception as e:
+        pass
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -322,6 +323,8 @@ if os.path.exists(static_dir):
 
 @app.on_event("startup")
 def startup_event():
+    if os.environ.get("VERCEL"):
+        return
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
