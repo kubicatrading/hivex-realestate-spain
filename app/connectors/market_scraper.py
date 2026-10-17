@@ -702,6 +702,12 @@ class MarketScraper:
             )
             combined = _clean_surrogates(final_items)
 
+        # Persistir también en Supabase PostgreSQL para supervivencia permanente en Vercel Serverless (read-only FS)
+        try:
+            self.persist_market_opportunities_to_db(new_items)
+        except Exception as e_db_save:
+            logger.warning(f"Aviso persistiendo oportunidades de mercado en PostgreSQL: {e_db_save}")
+
         targets = [
             Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
@@ -722,32 +728,218 @@ class MarketScraper:
                     os.fsync(f.fileno())
                 tmp_tgt.replace(resolved)
             except Exception as e_tgt:
-                logger.warning(f"Error guardando catálogo en {tgt}: {e_tgt}")
+                logger.debug(f"Catálogo en {tgt} en modo solo-lectura (Serverless): {e_tgt}")
+
+    @classmethod
+    def persist_market_opportunities_to_db(cls, items: List[Dict[str, Any]], db: Any = None) -> int:
+        """
+        Persiste oportunidades de mercado (on_demand o sincronizadas en vivo) de forma permanente
+        en Supabase PostgreSQL (tabla company_knowledge_base con query_key='market_opp:<ID>').
+        Garantiza que en entornos Serverless con sistema de archivos de solo lectura (/var/task),
+        las oportunidades descubiertas bajo demanda sobrevivan entre instancias y reinicios.
+        """
+        if not items:
+            return 0
+        from datetime import datetime
+        from app.db.session import SessionLocal
+        from app.db.models import CompanyKnowledgeBase
+
+        close_db = False
+        session = db
+        if session is None:
+            session = SessionLocal()
+            close_db = True
+
+        saved_count = 0
+        try:
+            for item in items:
+                opp_id = str(item.get("id") or "").strip().upper()
+                if not opp_id or opp_id in cls.SYNTHETIC_BLACKLIST_IDS:
+                    continue
+                valid_imgs = cls.ensure_twenty_images(item.get("images"), item_id=opp_id)
+                if not valid_imgs:
+                    continue
+                item_copy = dict(item)
+                item_copy["id"] = opp_id
+                item_copy["images"] = valid_imgs
+
+                q_key = f"market_opp:{opp_id}"[:150]
+                prov = str(item_copy.get("province") or "España")[:100]
+                loc = str(item_copy.get("locality") or "")[:100] or None
+                zone = str(item_copy.get("address") or item_copy.get("title") or "")[:100] or None
+                cp = str(item_copy.get("postal_code") or "")[:100] or None
+                price_sqm = float(item_copy.get("area_m2_price") or item_copy.get("property_m2_price") or 0.0)
+                yield_pct = float(item_copy.get("rental_yield") or 0.0)
+                disc_pct = float(item_copy.get("discount_percentage") or item_copy.get("discount_vs_market") or 0.0)
+                payload_str = json.dumps(item_copy, ensure_ascii=False)
+
+                existing = session.query(CompanyKnowledgeBase).filter(
+                    CompanyKnowledgeBase.query_key == q_key
+                ).first()
+                if existing:
+                    existing.province = prov
+                    existing.locality = loc
+                    existing.zone_or_district = zone
+                    existing.postal_codes_csv = cp
+                    existing.avg_price_sale_sqm = price_sqm
+                    existing.gross_yield_pct = yield_pct
+                    existing.discount_vs_market_pct = disc_pct
+                    existing.source = "ON_DEMAND_MARKET_OPP"
+                    existing.raw_payload_json = payload_str
+                    existing.updated_at = datetime.utcnow()
+                else:
+                    new_row = CompanyKnowledgeBase(
+                        query_key=q_key,
+                        province=prov,
+                        locality=loc,
+                        zone_or_district=zone,
+                        postal_codes_csv=cp,
+                        avg_price_sale_sqm=price_sqm,
+                        gross_yield_pct=yield_pct,
+                        discount_vs_market_pct=disc_pct,
+                        source="ON_DEMAND_MARKET_OPP",
+                        raw_payload_json=payload_str,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow(),
+                    )
+                    session.add(new_row)
+                saved_count += 1
+
+            if saved_count > 0:
+                session.commit()
+        except Exception as e_db:
+            logger.warning(f"[MarketScraper DB Persist] Error guardando en Supabase PostgreSQL: {e_db}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        finally:
+            if close_db and session is not None:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+        return saved_count
+
+    @classmethod
+    def purge_market_opportunity_in_db(cls, opp_id: str, db: Any = None) -> bool:
+        """
+        Registra la baja/purga permanente de un inmueble en Supabase PostgreSQL (source='PURGED_MARKET_OPP')
+        para que ninguna instancia Serverless vuelva a servirlo aunque el JSON base sea de solo lectura.
+        """
+        clean_id = str(opp_id or "").strip().upper()
+        if not clean_id:
+            return False
+        from datetime import datetime
+        from app.db.session import SessionLocal
+        from app.db.models import CompanyKnowledgeBase
+
+        close_db = False
+        session = db
+        if session is None:
+            session = SessionLocal()
+            close_db = True
+
+        try:
+            q_key = f"market_opp:{clean_id}"[:150]
+            existing = session.query(CompanyKnowledgeBase).filter(
+                CompanyKnowledgeBase.query_key == q_key
+            ).first()
+            if existing:
+                existing.source = "PURGED_MARKET_OPP"
+                existing.raw_payload_json = "{}"
+                existing.updated_at = datetime.utcnow()
+            else:
+                session.add(CompanyKnowledgeBase(
+                    query_key=q_key,
+                    province="España",
+                    source="PURGED_MARKET_OPP",
+                    raw_payload_json="{}",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                ))
+            session.commit()
+            return True
+        except Exception as e_p:
+            logger.warning(f"[MarketScraper DB Purge] Error registrando purga en PostgreSQL para {clean_id}: {e_p}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            if close_db and session is not None:
+                try:
+                    session.close()
+                except Exception:
+                    pass
 
     def _build_verified_market_catalog(self) -> List[Dict[str, Any]]:
         """
         REGLA DE ORO DE HIVEX: CERO DATOS SIMULADOS.
-        Inmuebles 100% reales extraídos con sus identificadores únicos de portal (Idealista/Fotocasa/etc.),
-        enlaces directos a las fichas de los inmuebles, fotos reales del CDN y datos económicos contrastados.
+        Combina el catálogo base empaquetado (verified_market_catalog.json) con las oportunidades
+        descubiertas y persistidas dinámicamente en Supabase PostgreSQL (ON_DEMAND_MARKET_OPP),
+        excluyendo aquellas marcadas como dadas de baja (PURGED_MARKET_OPP).
         """
         import json
         from pathlib import Path
         candidate_paths = [
+            Path("/tmp/verified_market_catalog.json"),
             Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json",
             Path.cwd() / "app" / "data" / "verified_market_catalog.json",
             Path("/var/task/app/data/verified_market_catalog.json"),
-            Path("/tmp/verified_market_catalog.json"),
         ]
+        base_data: List[Dict[str, Any]] = []
         for catalog_path in candidate_paths:
             if catalog_path.exists():
                 try:
                     with open(catalog_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if data:
-                            return data
+                        if data and isinstance(data, list):
+                            base_data = data
+                            break
                 except Exception as e:
                     logger.error(f"Error cargando catálogo verificado de mercado desde {catalog_path}: {e}")
-        return []
+
+        # Fusionar con oportunidades on-demand y purgas persistidas en Supabase PostgreSQL
+        purged_ids = set()
+        db_items_by_id: Dict[str, Dict[str, Any]] = {}
+        try:
+            from app.db.session import SessionLocal
+            from app.db.models import CompanyKnowledgeBase
+            db = SessionLocal()
+            try:
+                rows = db.query(CompanyKnowledgeBase).filter(
+                    CompanyKnowledgeBase.query_key.like("market_opp:%")
+                ).all()
+                for r in rows:
+                    oid = r.query_key.split("market_opp:", 1)[-1].strip().upper()
+                    if r.source == "PURGED_MARKET_OPP":
+                        purged_ids.add(oid)
+                    elif r.source == "ON_DEMAND_MARKET_OPP" and r.raw_payload_json:
+                        try:
+                            parsed = json.loads(r.raw_payload_json)
+                            if isinstance(parsed, dict) and parsed.get("id"):
+                                db_items_by_id[oid] = parsed
+                        except Exception:
+                            pass
+            finally:
+                db.close()
+        except Exception as e_db_cat:
+            logger.debug(f"Aviso fusionando catálogo on-demand desde PostgreSQL: {e_db_cat}")
+
+        merged_by_id: Dict[str, Dict[str, Any]] = {}
+        for item in base_data:
+            oid = str(item.get("id") or "").strip().upper()
+            if not oid or oid in purged_ids:
+                continue
+            merged_by_id[oid] = item
+
+        for oid, db_item in db_items_by_id.items():
+            if oid not in purged_ids:
+                merged_by_id[oid] = db_item
+
+        return list(merged_by_id.values())
 
     def _process_market_listing(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """

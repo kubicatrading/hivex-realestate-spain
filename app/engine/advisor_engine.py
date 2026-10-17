@@ -975,62 +975,57 @@ class AdvisorEngine:
                 except Exception:
                     pass
 
-        # 2. Carga de Catálogo Market Verificado
-        catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
-        if not catalog_path.exists():
-            catalog_path = Path("app/data/verified_market_catalog.json")
-        if catalog_path.exists():
-            try:
-                with open(catalog_path, "r", encoding="utf-8") as f:
-                    market_items = json.load(f)
-                for item in market_items:
-                    item_id = str(item.get("id") or "").strip().upper()
-                    if item_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
-                        continue
-                    valid_imgs = MarketScraper.ensure_twenty_images(item.get("images"))
-                    # REGLA DE ORO: Si un anuncio de portal no tiene fotos reales válidas, no está activo/vigente
-                    if not valid_imgs:
-                        continue
+        # 2. Carga de Catálogo Market Verificado (JSON empaquetado + Oportunidades On-Demand en Supabase PostgreSQL)
+        try:
+            market_items = MarketScraper()._build_verified_market_catalog()
+            for item in market_items:
+                item_id = str(item.get("id") or "").strip().upper()
+                if item_id in MarketScraper.SYNTHETIC_BLACKLIST_IDS:
+                    continue
+                valid_imgs = MarketScraper.ensure_twenty_images(item.get("images"))
+                # REGLA DE ORO: Si un anuncio de portal no tiene fotos reales válidas, no está activo/vigente
+                if not valid_imgs:
+                    continue
 
-                    price = float(item.get("price") or item.get("listing_price") or 0)
-                    mkt_val = float(item.get("estimated_reference_value") or item.get("market_valuation") or price)
-                    disc = float(item.get("discount_percentage") or 0)
-                    if disc <= 0 and mkt_val > price and mkt_val > 0:
-                        disc = round(((mkt_val - price) / mkt_val) * 100, 1)
+                price = float(item.get("price") or item.get("listing_price") or 0)
+                mkt_val = float(item.get("estimated_reference_value") or item.get("market_valuation") or price)
+                disc = float(item.get("discount_percentage") or 0)
+                if disc <= 0 and mkt_val > price and mkt_val > 0:
+                    disc = round(((mkt_val - price) / mkt_val) * 100, 1)
 
-                    all_opps.append({
-                        "id": str(item.get("id")),
-                        "source_type": "market",
-                        "primary_portal": item.get("primary_portal") or item.get("portal") or "Idealista",
-                        "strategy": item.get("strategy", "HOUSE_FLIPPING"),
-                        "property_type": item.get("property_type") or "Vivienda",
-                        "title": item.get("title", "Oportunidad Residencial"),
-                        "description": item.get("description") or "",
-                        "locality": item.get("locality", "España"),
-                        "province": item.get("province", "España"),
-                        "address": item.get("address") or item.get("full_address") or "",
-                        "postal_code": item.get("postal_code") or "",
-                        "listing_price": price,
-                        "estimated_reference_value": mkt_val,
-                        "discount_percentage": disc,
-                        "potential_gross_profit": max(0.0, round(mkt_val - price, 2)),
-                        "rental_yield": float(item.get("rental_yield") or 0.0),
-                        "estimated_monthly_rent": float(item.get("estimated_monthly_rent") or 0.0),
-                        "overall_score": float(item.get("overall_score") or 80.0),
-                        "poi_score": float(item.get("poi_score") or 75.0),
-                        "surface_m2": float(item.get("surface_m2") or 80.0),
-                        "rooms": item.get("rooms") or 0,
-                        "bathrooms": item.get("bathrooms") or 0,
-                        "area_m2_price": float(item.get("area_m2_price") or 0.0),
-                        "discount_vs_market": disc,
-                        "land_type": item.get("land_type", "URBANO"),
-                        "is_solar": item.get("is_solar", False),
-                        "url": item.get("url") or item.get("portal_url") or "",
-                        "portal_url": item.get("portal_url") or item.get("url") or "",
-                        "images": valid_imgs
-                    })
-            except Exception as e_cat:
-                logger.warning(f"Aviso cargando catálogo de mercado: {e_cat}")
+                all_opps.append({
+                    "id": str(item.get("id")),
+                    "source_type": "market",
+                    "primary_portal": item.get("primary_portal") or item.get("portal") or "Idealista",
+                    "strategy": item.get("strategy", "HOUSE_FLIPPING"),
+                    "property_type": item.get("property_type") or "Vivienda",
+                    "title": item.get("title", "Oportunidad Residencial"),
+                    "description": item.get("description") or "",
+                    "locality": item.get("locality", "España"),
+                    "province": item.get("province", "España"),
+                    "address": item.get("address") or item.get("full_address") or "",
+                    "postal_code": item.get("postal_code") or "",
+                    "listing_price": price,
+                    "estimated_reference_value": mkt_val,
+                    "discount_percentage": disc,
+                    "potential_gross_profit": max(0.0, round(mkt_val - price, 2)),
+                    "rental_yield": float(item.get("rental_yield") or 0.0),
+                    "estimated_monthly_rent": float(item.get("estimated_monthly_rent") or 0.0),
+                    "overall_score": float(item.get("overall_score") or 80.0),
+                    "poi_score": float(item.get("poi_score") or 75.0),
+                    "surface_m2": float(item.get("surface_m2") or 80.0),
+                    "rooms": item.get("rooms") or 0,
+                    "bathrooms": item.get("bathrooms") or 0,
+                    "area_m2_price": float(item.get("area_m2_price") or 0.0),
+                    "discount_vs_market": disc,
+                    "land_type": item.get("land_type", "URBANO"),
+                    "is_solar": item.get("is_solar", False),
+                    "url": item.get("url") or item.get("portal_url") or "",
+                    "portal_url": item.get("portal_url") or item.get("url") or "",
+                    "images": valid_imgs
+                })
+        except Exception as e_cat:
+            logger.warning(f"Aviso cargando catálogo de mercado: {e_cat}")
 
         # 3. Incluir oportunidades sincronizadas en la sesión activa (solo si tienen fotos reales válidas)
         if self._cached_catalog_opps:
@@ -1915,7 +1910,7 @@ class AdvisorEngine:
                     discovered_opps, target_count=max(target_count, 50)
                 )
 
-        # 4. PERSISTENCIA EN MEMORIA Y EN PLATAFORMA (verified_market_catalog.json) SOLO DE OPORTUNIDADES VERIFICADAS
+        # 4. PERSISTENCIA EN MEMORIA, EN SUPABASE POSTGRESQL Y EN CATÁLOGO JSON SOLO DE OPORTUNIDADES VERIFICADAS
         if discovered_opps:
             if self._cached_catalog_opps is None:
                 self._cached_catalog_opps = []
@@ -1925,6 +1920,15 @@ class AdvisorEngine:
                     self._cached_catalog_opps.append(opp)
                     cached_ids.add(str(opp.get("id")))
 
+            # 4a. Persistencia permanente en Supabase PostgreSQL (garantiza supervivencia en Vercel Serverless donde el FS es read-only)
+            try:
+                from app.connectors.market_scraper import MarketScraper
+                db_saved = MarketScraper.persist_market_opportunities_to_db(discovered_opps)
+                logger.info(f"[Advisor Sync] Persistidas {db_saved} oportunidades on_demand en Supabase PostgreSQL (company_knowledge_base)")
+            except Exception as e_db_persist:
+                logger.warning(f"[Advisor Sync] Aviso persistiendo oportunidades on_demand en PostgreSQL: {e_db_persist}")
+
+            # 4b. Persistencia en catálogo JSON local / /tmp (desarrollo local y caché efímera de contenedor)
             try:
                 from pathlib import Path
                 catalog_path = Path(__file__).resolve().parent.parent / "data" / "verified_market_catalog.json"
@@ -1950,12 +1954,17 @@ class AdvisorEngine:
                         new_items_added += 1
 
                 if new_items_added > 0:
+                    try:
+                        with open("/tmp/verified_market_catalog.json", "w", encoding="utf-8") as f_tmp:
+                            json.dump(existing_items, f_tmp, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
                     with open(catalog_path, "w", encoding="utf-8") as f:
                         json.dump(existing_items, f, ensure_ascii=False, indent=2)
                     logger.info(f"[Advisor Sync] Persistidas {new_items_added} nuevas oportunidades en verified_market_catalog.json")
 
             except Exception as e_save:
-                logger.warning(f"[Advisor Sync] Catálogo en disco solo-lectura (Serverless), oportunidades mantenidas en memoria: {e_save}")
+                logger.info(f"[Advisor Sync] Catálogo en disco solo-lectura (Serverless), oportunidades persistidas en Supabase PostgreSQL y memoria: {e_save}")
 
         return discovered_opps
 

@@ -187,11 +187,18 @@ class CatalogGuardian:
 
     def purge_opportunity(self, opp_id: str) -> bool:
         """
-        Elimina de forma permanente e inmediata un inmueble del catálogo de mercado en disco.
+        Elimina de forma permanente e inmediata un inmueble del catálogo de mercado (en PostgreSQL y en disco).
         """
         clean_id = str(opp_id).strip().upper()
+        db_purged = False
+        try:
+            from app.connectors.market_scraper import MarketScraper
+            db_purged = MarketScraper.purge_market_opportunity_in_db(clean_id)
+        except Exception as e_db_p:
+            logger.warning(f"[CatalogGuardian] Aviso purgando {clean_id} en PostgreSQL: {e_db_p}")
+
         if not self.catalog_path.exists():
-            return False
+            return db_purged
 
         try:
             with open(self.catalog_path, "r", encoding="utf-8") as f:
@@ -208,10 +215,10 @@ class CatalogGuardian:
                     json.dump(filtered_items, f, ensure_ascii=False, indent=2)
                 logger.info(f"[CatalogGuardian] Purgada oportunidad {clean_id} del catálogo (total restante: {len(filtered_items)})")
                 return True
-            return False
+            return db_purged
         except Exception as e:
-            logger.error(f"[CatalogGuardian] Error purgando oportunidad {clean_id}: {e}")
-            return False
+            logger.info(f"[CatalogGuardian] Catálogo en disco solo-lectura, purga de {clean_id} aplicada en PostgreSQL ({db_purged}): {e}")
+            return db_purged
 
     def audit_catalog(self, max_items: Optional[int] = 30, allow_idealista_credits: bool = False) -> Dict[str, Any]:
         """

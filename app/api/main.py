@@ -2267,21 +2267,20 @@ def enrich_opportunity_gallery(
         except Exception as e_nm_gal:
             logger.warning(f"Aviso enriqueciendo galería Street View para {clean_id}: {e_nm_gal}")
 
-    # 1. Buscar la oportunidad en el catálogo de mercado
+    # 1. Buscar la oportunidad en el catálogo de mercado (JSON empaquetado + Supabase PostgreSQL)
     target_item = None
     catalog_path = Path("app/data/verified_market_catalog.json")
     catalog_items = []
     
-    if catalog_path.exists():
-        try:
-            with open(catalog_path, "r", encoding="utf-8") as f:
-                catalog_items = json.load(f)
-            for it in catalog_items:
-                if str(it.get("id", "")).strip().upper() == clean_id.upper():
-                    target_item = it
-                    break
-        except Exception as e_c:
-            print(f"Error leyendo catálogo para enriquecimiento: {e_c}")
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        catalog_items = MarketScraper()._build_verified_market_catalog()
+        for it in catalog_items:
+            if str(it.get("id", "")).strip().upper() == clean_id.upper():
+                target_item = it
+                break
+    except Exception as e_c:
+        print(f"Error leyendo catálogo para enriquecimiento: {e_c}")
 
     # Si el inmueble no existe en catálogo o fue retirado
     if not target_item:
@@ -2311,7 +2310,7 @@ def enrich_opportunity_gallery(
     if len(enriched_images) >= 10:
         return {
             "status": "success",
-            "opportunity_id": opportunity_id,
+            "opportunity_id": clean_id,
             "images": enriched_images,
             "count": len(enriched_images),
             "cached": True,
@@ -2378,15 +2377,20 @@ def enrich_opportunity_gallery(
                 print(f"[Enrich Gallery] Advertencia procesando fotos de {portal_url}: {e_g}")
 
     # REGLA DE ORO: CERO datos simulados o fotos de otros inmuebles.
-    # Si se extrajeron fotos legítimas adicionales de este anuncio, guardar en catálogo
+    # Si se extrajeron fotos legítimas adicionales de este anuncio, persistir en Supabase PostgreSQL y en catálogo JSON
     if target_item and enriched_images and len(enriched_images) > len(target_item.get("images", [])):
         target_item["images"] = enriched_images
+        try:
+            from app.connectors.market_scraper import MarketScraper
+            MarketScraper.persist_market_opportunities_to_db([target_item], db=db)
+        except Exception as e_db_w:
+            logger.warning(f"Aviso persistiendo galería enriquecida en PostgreSQL: {e_db_w}")
         try:
             with open(catalog_path, "w", encoding="utf-8") as f:
                 json.dump(catalog_items, f, ensure_ascii=False, indent=2)
             print(f"[Enrich Gallery] Guardadas {len(enriched_images)} fotos legítimas para {clean_id}")
         except Exception as e_w:
-            print(f"Error guardando catálogo actualizado: {e_w}")
+            logger.debug(f"Catálogo en disco solo-lectura, galería enriquecida persistida en PostgreSQL: {e_w}")
 
     return {
         "success": True,
