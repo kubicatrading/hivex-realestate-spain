@@ -20,7 +20,9 @@ def get_ipv4_db_url(raw_url: str) -> str:
     clean_url = raw_url.strip()
 
     if clean_url.startswith("postgres://"):
-        clean_url = clean_url.replace("postgres://", "postgresql://", 1)
+        clean_url = clean_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif clean_url.startswith("postgresql://"):
+        clean_url = clean_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     # Escapar '#' en la parte de usuario:contraseña si no está escapado
     if "@" in clean_url:
@@ -56,7 +58,7 @@ def is_production_environment(env: dict = None) -> bool:
 
 
 CANONICAL_SUPABASE_POOLER_URL = (
-    "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ"
+    "postgresql+psycopg2://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ"
     "@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
 )
 
