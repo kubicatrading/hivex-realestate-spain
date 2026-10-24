@@ -447,7 +447,8 @@ class TelegramAdvisorBot:
         self,
         chat_id: int,
         opp: Dict[str, Any],
-        reply_to_message_id: Optional[int] = None
+        reply_to_message_id: Optional[int] = None,
+        pre_rendered_card_bytes: Optional[bytes] = None
     ) -> bool:
         """
         Envía una alerta idéntica a la plantilla de WhatsApp solicitada:
@@ -476,9 +477,12 @@ class TelegramAdvisorBot:
         )
 
         # 1. Intentar renderizar la ficha gráfica estilo WhatsApp con fotos agrupadas y cuerpo blanco
+        render_exception = False
+        card_bytes = pre_rendered_card_bytes
         try:
-            from app.services.card_image_generator import generate_whatsapp_style_card
-            card_bytes = await asyncio.to_thread(generate_whatsapp_style_card, opp)
+            if not card_bytes:
+                from app.services.card_image_generator import generate_whatsapp_style_card
+                card_bytes = await asyncio.to_thread(generate_whatsapp_style_card, opp)
             if card_bytes:
                 photo_url = f"{self.api_base}/sendPhoto"
                 files = {"photo": ("hivex_card.png", card_bytes, "image/png")}
@@ -512,18 +516,21 @@ class TelegramAdvisorBot:
                             await asyncio.sleep(1.0)
                             files = {"photo": ("hivex_card.png", card_bytes, "image/png")}
         except Exception as e_card:
+            render_exception = True
             logger.warning(f"Excepción renderizando tarjeta gráfica WhatsApp: {repr(e_card)}", exc_info=True)
 
         # REGLA ESTRICTA UNIVERSAL (CatalogGuardian): Ninguna oportunidad (ni market ni subasta BOE, ni en plataforma ni Out-of-HIVEX)
         # puede enviarse sin al menos 1 fotografía real verificada. Prohibido el fallback a mensaje de texto sin foto.
-        logger.warning(
-            f"[TelegramAdvisorBot] Bloqueado envío de oportunidad {opp_id} por carecer de fotografías reales verificadas."
-        )
-        try:
-            from app.services.catalog_guardian import CatalogGuardian
-            CatalogGuardian().purge_opportunity(opp_id)
-        except Exception:
-            pass
+        if not render_exception and not card_bytes:
+            logger.warning(
+                f"[TelegramAdvisorBot] Bloqueado envío de oportunidad {opp_id} por carecer de fotografías reales descargables."
+            )
+            if not opp.get("images"):
+                try:
+                    from app.services.catalog_guardian import CatalogGuardian
+                    CatalogGuardian().purge_opportunity(opp_id)
+                except Exception:
+                    pass
         return False
 
     async def handle_callback_query(self, callback_query: Dict[str, Any]) -> Dict[str, Any]:
@@ -736,6 +743,182 @@ class TelegramAdvisorBot:
 
         return None
 
+    def evaluate_messages_semantic_cohesion(self, prev_text: str, curr_text: str) -> bool:
+        """
+        Evalúa mediante análisis semántico profundo si dos (o más) mensajes seguidos del mismo usuario
+        (sin contestación intermedia del bot) responden a la pregunta:
+        "¿Estos mensajes seguidos están relacionados y se pueden responder de una sola vez, en una misma respuesta?"
+
+        - Si la respuesta es SÍ (True): se concatenan y envían a Gemini en un único prompt.
+          * Ej1: Msg1="¿me puedes decir el yield de la zona de carabanchel?" +
+                 Msg2="¿me puedes comparar con el yield de Pinto?"
+            -> Aunque son 2 zonas geográficas distintas, están relacionados (comparativa analítica de yields)
+               y se pueden y deben contestar en una misma respuesta comparativa -> True.
+          * Continuaciones/filtros adicionales sobre una misma búsqueda (ej. añadir precio, m2, habitaciones o
+            instrucciones de entrega como "Y envíame por aquí las oportunidades q descubras") -> True.
+        - Si la respuesta es NO (False): se tratan como preguntas/consultas distintas.
+          * Ej2: Msg1="¿me puedes enviar oportunidades de la zona de carabanchel?" +
+                 Msg2="¿me puedes enviar oportunidades de la zona de Pinto?"
+            -> Son dos búsquedas de oportunidades independientes en zonas distintas que deben desembocar en
+               plataforma en dos consultas guardadas (SavedConsultation) distintas y dos respuestas distintas -> False.
+        """
+        prev_clean = (prev_text or "").strip()
+        curr_clean = (curr_text or "").strip()
+        if not prev_clean or not curr_clean:
+            return False
+
+        p_low = prev_clean.lower()
+        c_low = curr_clean.lower()
+
+        # Si el segundo mensaje es una consulta de auditoría del estado de alertas en plataforma o incidencia técnica,
+        # no forma parte de los criterios de búsqueda del mensaje anterior
+        platform_audit_patterns = [
+            "alertas configuradas", "ninguna de las alertas", "configuradas en plataforma",
+            "activas en plataforma", "mis alertas", "estado de alertas", "por qué cuando le pregunto",
+            "por que cuando le pregunto"
+        ]
+        if any(pat in c_low for pat in platform_audit_patterns) or any(pat in p_low for pat in platform_audit_patterns):
+            return False
+
+        from app.engine.advisor_engine import advisor_engine
+        # Evaluar sobre la última oración de prev_clean por si ya acumula varios mensajes concatenados
+        prev_clauses = [s.strip() for s in re.split(r'\.\s+', prev_clean) if s.strip()]
+        last_prev_clause = prev_clauses[-1] if prev_clauses else prev_clean
+
+        prev_parsed = advisor_engine._parse_query_intent_heuristics(last_prev_clause)
+        curr_parsed = advisor_engine._parse_query_intent_heuristics(curr_clean)
+
+        prev_loc = (prev_parsed.get("zone_or_neighborhood") or prev_parsed.get("municipality") or prev_parsed.get("province") or "").strip().lower()
+        curr_loc = (curr_parsed.get("zone_or_neighborhood") or curr_parsed.get("municipality") or curr_parsed.get("province") or "").strip().lower()
+        has_different_zones = bool(prev_loc and curr_loc and prev_loc != curr_loc)
+
+        # Marcadores semánticos de relación comparativa / contraste analítico entre mensajes
+        comparative_markers = [
+            "comparar", "compara", "comparado", "comparativa", "compárame", "comparame",
+            "compáralo", "comparalo", "frente a", "respecto a", "en comparación", "en comparacion",
+            "versus", " vs ", "diferencia con", "diferencia entre", "mejor que", "peor que",
+            "cuál renta más", "cual renta mas", "cuál tiene mejor", "cual tiene mejor"
+        ]
+        is_comparative_followup = any(m in c_low for m in comparative_markers)
+
+        # Marcadores de solicitud de fichas / oportunidades (que generan SavedConsultation en plataforma)
+        listing_request_markers = [
+            "oportunidades", "enviar oportunidades", "envíame oportunidades", "enviame oportunidades",
+            "búscame", "buscame", "muéstrame", "muestrame", "enséñame", "enseñame",
+            "mándame", "mandame", "pásame", "pasame", "dame pisos", "dame las oportunidades",
+            "buscar pisos", "busca pisos", "busca chalets", "busca fincas", "busca locales",
+            "busca terrenos", "enviar pisos", "envíame pisos", "enviame pisos",
+            "crear alerta", "configura alerta", "dar de alta"
+        ]
+        prev_is_listing_search = (
+            prev_parsed.get("query_type") in ("SEARCH_OPPORTUNITIES", "SCHEDULED_ALERT")
+            and any(m in p_low for m in listing_request_markers)
+        )
+        curr_is_listing_search = (
+            curr_parsed.get("query_type") in ("SEARCH_OPPORTUNITIES", "SCHEDULED_ALERT")
+            and any(m in c_low for m in listing_request_markers)
+        )
+
+        # Marcadores de consulta analítica / asesoría de mercado (yield, rentabilidad, precios/m2, diagnóstico)
+        advisory_markers = [
+            "yield", "rentabilidad", "retorno", "roi", "precio medio", "precios", "€/m2", "€/m²",
+            "cómo está el mercado", "como esta el mercado", "análisis", "analisis", "diagnóstico", "diagnostico"
+        ]
+        prev_is_advisory = (
+            prev_parsed.get("query_type") in ("ROI_BTL_CALC", "DISTRICT_ANALYSIS", "SCORING_CROSSREF")
+            or any(m in p_low for m in advisory_markers)
+        ) and not prev_is_listing_search
+        curr_is_advisory = (
+            curr_parsed.get("query_type") in ("ROI_BTL_CALC", "DISTRICT_ANALYSIS", "SCORING_CROSSREF")
+            or any(m in c_low for m in advisory_markers)
+            or is_comparative_followup
+        ) and not curr_is_listing_search
+
+        if has_different_zones:
+            # CASO EJ1: Dos zonas distintas pero es una comparativa o análisis conjunto (ej. Yield Carabanchel vs Yield Pinto)
+            # Se pueden y deben responder de una sola vez en un único informe comparativo.
+            if is_comparative_followup and not curr_is_listing_search:
+                logger.info(
+                    f"[Semantic Cohesion] ✅ Mensajes con zonas distintas ('{prev_loc}' vs '{curr_loc}') "
+                    f"pero con relación comparativa/analítica directa -> Concatenar en 1 respuesta."
+                )
+                return True
+            if prev_is_advisory and curr_is_advisory and any(
+                c_low.startswith(prefix) for prefix in ("¿y ", "y ", "¿qué tal ", "que tal ", "¿cómo ", "como ")
+            ):
+                logger.info(
+                    f"[Semantic Cohesion] ✅ Consultas analíticas encadenadas ('{prev_loc}' y '{curr_loc}') -> Concatenar en 1 respuesta."
+                )
+                return True
+
+            # CASO EJ2: Dos búsquedas de oportunidades en zonas distintas -> NO están relacionadas para una sola respuesta;
+            # deben generar 2 consultas guardadas distintas en plataforma y 2 respuestas distintas en el grupo.
+            logger.info(
+                f"[Semantic Cohesion] ❌ Mensajes con zonas distintas ('{prev_loc}' vs '{curr_loc}') "
+                f"que solicitan búsquedas/consultas independientes -> NO concatenar (2 consultas separadas)."
+            )
+            return False
+
+        # Si NO cambian a una zona incompatible (misma zona o el segundo mensaje no especifica otra zona):
+        # Si ambos mensajes son peticiones completas e independientes de búsqueda de tipos de activos distintos
+        # (ej. Msg1="envíame pisos en Carabanchel", Msg2="envíame locales en Carabanchel") sin conectores de unión,
+        # también son 2 consultas distintas en plataforma.
+        prev_prop = prev_parsed.get("property_type")
+        curr_prop = curr_parsed.get("property_type")
+        if (
+            prev_is_listing_search
+            and curr_is_listing_search
+            and prev_prop
+            and curr_prop
+            and prev_prop != curr_prop
+            and not any(c_low.startswith(conn) for conn in ("y ", "también ", "tambien ", "además ", "ademas ", "o "))
+        ):
+            logger.info(
+                f"[Semantic Cohesion] ❌ Dos búsquedas independientes de distinta tipología ('{prev_prop}' vs '{curr_prop}') -> NO concatenar."
+            )
+            return False
+
+        # En cualquier otro caso del mismo usuario sin respuesta intermedia del bot (refinamientos, filtros añadidos,
+        # continuaciones como "Y envíame por aquí las oportunidades q descubras", matices sobre la misma pregunta):
+        # están relacionados y se responden de una sola vez.
+        return True
+
+    def _is_contextual_confirmation_or_continuation(self, text_Input: str) -> bool:
+        """
+        Determina si un mensaje sin zona explícita es una confirmación o continuación directa
+        de la propuesta inmediatamente anterior del asistente (ej: 'Sí, configura...', 'Vale, envíamelas',
+        'Y que tengan salida de humos'), evitando heredar por error ubicaciones mencionadas por el bot
+        cuando el usuario hace una pregunta general sobre la plataforma o sus alertas.
+        """
+        t_low = (text_Input or "").strip().lower()
+        if not t_low:
+            return False
+
+        # Nunca heredar ubicación del asistente si el usuario pregunta por el estado de las alertas en plataforma
+        non_contextual_patterns = [
+            "alertas configuradas", "ninguna de las alertas", "configuradas en plataforma",
+            "activas en plataforma", "mis alertas", "qué alertas", "que alertas",
+            "estás seguro", "estas seguro", "no hay oportunidades nuevas"
+        ]
+        if any(pat in t_low for pat in non_contextual_patterns):
+            return False
+
+        # Patrones claros de confirmación, continuación o anáfora implícita hacia el turno del asistente
+        continuation_starts = (
+            "sí", "si,", "si ", "vale", "ok", "adelante", "perfecto", "de acuerdo", "hazlo",
+            "configura", "búscame", "buscame", "muéstrame", "muestrame", "envíame", "enviame",
+            "mándame", "mandame", "y ", "pero ", "además", "ademas", "también", "tambien",
+            "que tengan", "que permitan", "con ", "sin ", "por menos", "máximo", "maximo", "mínimo", "minimo"
+        )
+        if t_low.startswith(continuation_starts):
+            return True
+
+        continuation_phrases = [
+            "esos locales", "esos pisos", "esas oportunidades", "esos activos", "esos inmuebles",
+            "en la búsqueda", "en la busqueda", "las oportunidades q descubras", "las oportunidades que descubras"
+        ]
+        return any(p in t_low for p in continuation_phrases)
+
     def synthesize_conversation_prompt(
         self,
         chat_id: Any,
@@ -748,7 +931,9 @@ class TelegramAdvisorBot:
         1. Si responde a un mensaje específico con Reply nativo de Telegram.
         2. Si hace referencia a 'misma zona' o 'misma búsqueda': busca en el banco de memoria la última búsqueda activa.
            Si no encuentra nada, activa fallback conversacional para solicitar confirmación de zona de forma natural.
-        3. Concatena mensajes consecutivos del mismo usuario o chat con punto y seguido sin exigir palabras clave.
+        3. Si el mensaje anterior (sin respuesta del bot en medio) es del mismo usuario, evalúa semánticamente:
+           "¿Estos mensajes seguidos están relacionados y se pueden responder de una sola vez, en una misma respuesta?"
+           Si es así, concatena, reconstruye y envía a Gemini en un único prompt.
         Retorna (prompt_to_process, clarification_question).
         """
         clean_text = (current_text or "").strip()
@@ -782,22 +967,19 @@ class TelegramAdvisorBot:
         # Es anáfora hacia una búsqueda anterior SOLO si el usuario NO especifica una nueva zona en este mensaje
         is_anaphora = not has_explicit_zone and any(ana in clean_lower for ana in anaphora_triggers)
 
-        # 2. Consultar historial reciente en BD para este chat
+        # 2. Consultar historial en BD para este chat (sin límite de tiempo, comprobando el último mensaje recibido)
         last_assistant_msg = None
-        recent_user_msgs = []
+        last_overall_msg = None
         try:
             with SessionLocal() as db_hist:
+                last_overall_msg = db_hist.query(TelegramConversationMessage).filter(
+                    TelegramConversationMessage.telegram_chat_id == str(chat_id)
+                ).order_by(TelegramConversationMessage.id.desc()).first()
+
                 last_assistant_msg = db_hist.query(TelegramConversationMessage).filter(
                     TelegramConversationMessage.telegram_chat_id == str(chat_id),
                     TelegramConversationMessage.role == "assistant"
                 ).order_by(TelegramConversationMessage.id.desc()).first()
-
-                window_ago = datetime.utcnow() - timedelta(minutes=25)
-                recent_user_msgs = db_hist.query(TelegramConversationMessage).filter(
-                    TelegramConversationMessage.telegram_chat_id == str(chat_id),
-                    TelegramConversationMessage.role == "user",
-                    TelegramConversationMessage.created_at >= window_ago
-                ).order_by(TelegramConversationMessage.id.desc()).limit(3).all()
         except Exception as e_hist:
             logger.warning(f"Error recuperando historial para concatenación de prompt: {e_hist}")
 
@@ -818,24 +1000,78 @@ class TelegramAdvisorBot:
                 )
                 return clean_text, fallback_question
 
-        # 4. Concatenación de mensajes consecutivos: SOLO si el mensaje actual es una continuación o refinamiento
-        # (ej: "y con piscina", "de más de 100m2", "con pozo"), NO si es una búsqueda completa independiente
-        if recent_user_msgs:
-            last_u = recent_user_msgs[0]
-            prev_u_text = (last_u.content or "").strip()
-            affirmation_words = {"sí", "si", "vale", "ok", "adelante", "hazlo", "de acuerdo", "perfecto"}
-            
-            is_new_independent_search = any(
-                clean_lower.startswith(prefix) for prefix in [
-                    "búscame", "buscame", "busca", "buscar", "encuentra", "dime", "muéstrame", "muestrame",
-                    "quiero", "necesito", "dame", "analiza", "cuál es", "cual es", "qué tal", "que tal"
-                ]
-            ) or has_explicit_zone
+        # 4. Concatenación y reconstrucción de mensajes consecutivos del mismo usuario (sin ventana de tiempo):
+        # SOLO si el mensaje inmediatamente anterior en la conversación es de rol 'user' (NO existe contestación
+        # del bot en medio), pertenece al MISMO usuario y supera la evaluación semántica de cohesión.
+        if last_overall_msg and last_overall_msg.role == "user":
+            last_u = last_overall_msg
+            prev_u_uid = str(last_u.telegram_user_id or "").strip()
+            curr_u_uid = str(user_id or "").strip()
+            is_same_user = (not prev_u_uid or not curr_u_uid or prev_u_uid == curr_u_uid)
 
-            if not is_new_independent_search and prev_u_text and prev_u_text != clean_text and prev_u_text.lower() not in affirmation_words:
-                logger.info(f"[Prompt Chaining] Concatenando refinamiento previo del usuario con punto y seguido: '{prev_u_text}. {clean_text}'")
-                combined_text = f"{prev_u_text}. {clean_text}"
-                return combined_text, None
+            prev_u_text = (last_u.content or "").strip()
+            prev_u_clean = re.sub(
+                r"\[(?:Contexto conversacional|Mensaje citado del asistente).*?\]\s*",
+                "",
+                prev_u_text,
+                flags=re.IGNORECASE | re.DOTALL
+            ).strip()
+            affirmation_words = {"sí", "si", "vale", "ok", "adelante", "hazlo", "de acuerdo", "perfecto"}
+
+            if is_same_user and prev_u_clean:
+                if clean_lower in prev_u_clean.lower():
+                    # Si el texto ya forma parte del mensaje reconstruido del mismo usuario, devolver el prompt reconstruido sin duplicar
+                    combined_parsed = advisor_engine._parse_query_intent_heuristics(prev_u_clean)
+                    if (
+                        not combined_parsed.get("province")
+                        and not combined_parsed.get("zone_or_neighborhood")
+                        and last_assistant_msg
+                        and last_assistant_msg.content
+                        and self._is_contextual_confirmation_or_continuation(prev_u_clean)
+                    ):
+                        asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
+                        asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+                        if asst_loc:
+                            return f"[Contexto conversacional: {asst_loc}] {prev_u_clean}", None
+                    return prev_u_clean, None
+
+                if (
+                    prev_u_clean.lower() != clean_lower
+                    and prev_u_clean.lower() not in affirmation_words
+                    and self.evaluate_messages_semantic_cohesion(prev_u_clean, clean_text)
+                ):
+                    logger.info(
+                        f"[Prompt Reconstruction] Mensajes consecutivos del mismo usuario ({curr_u_uid or 'chat'}) "
+                        f"sin respuesta intermedia del bot están relacionados y pueden responderse en una sola respuesta. "
+                        f"Concatenando para Gemini: '{prev_u_clean}. {clean_text}'"
+                    )
+                    combined_text = f"{prev_u_clean}. {clean_text}"
+                    combined_parsed = advisor_engine._parse_query_intent_heuristics(combined_text)
+                    if (
+                        not combined_parsed.get("province")
+                        and not combined_parsed.get("zone_or_neighborhood")
+                        and last_assistant_msg
+                        and last_assistant_msg.content
+                        and self._is_contextual_confirmation_or_continuation(combined_text)
+                    ):
+                        asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
+                        asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+                        if asst_loc:
+                            combined_text = f"[Contexto conversacional: {asst_loc}] {combined_text}"
+                    return combined_text, None
+
+        # Si el usuario confirma o continúa una propuesta del asistente ("Sí, configura...") sin zona explícita, heredar ubicación del asistente
+        if (
+            not has_explicit_zone
+            and not current_parsed.get("province")
+            and last_assistant_msg
+            and last_assistant_msg.content
+            and self._is_contextual_confirmation_or_continuation(clean_text)
+        ):
+            asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
+            asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+            if asst_loc:
+                return f"[Contexto conversacional: {asst_loc}] {clean_text}", None
 
         return clean_text, None
 
@@ -934,6 +1170,29 @@ class TelegramAdvisorBot:
 
             # 2. PROCESAR MENSAJE (TEXTO O AUDIO)
             if text_content:
+                # Comprobación por identidad de usuario (sin ventana de tiempo de 180s):
+                # Si el último mensaje del chat es del mismo usuario y contiene exactamente el mismo texto
+                # (reintento de webhook de Telegram), se ignora; si es un mensaje adicional del mismo usuario,
+                # continúa hacia synthesize_conversation_prompt para concatenar, reconstruir y enviar un único texto a Gemini.
+                if not is_edited and "PYTEST_CURRENT_TEST" not in os.environ:
+                    try:
+                        with SessionLocal() as db_idem:
+                            recent_u = db_idem.query(TelegramConversationMessage).filter(
+                                TelegramConversationMessage.telegram_chat_id == str(chat_id),
+                                TelegramConversationMessage.role == "user"
+                            ).order_by(TelegramConversationMessage.id.desc()).first()
+                            if recent_u and recent_u.content:
+                                prev_uid = str(recent_u.telegram_user_id or "").strip()
+                                curr_uid = str(user_id or "").strip()
+                                if (not prev_uid or not curr_uid or prev_uid == curr_uid):
+                                    r_low = recent_u.content.strip().lower()
+                                    t_low = text_content.strip().lower()
+                                    if r_low == t_low or r_low.endswith(f". {t_low}"):
+                                        logger.info(f"[Webhook Idempotency] Ignorando reintento idéntico del mismo usuario ({curr_uid}) en chat {chat_id}: '{text_content[:50]}'")
+                                        return {"status": "ignored", "reason": "Duplicate webhook retry (same user & text)"}
+                    except Exception as e_idem:
+                        logger.debug(f"Aviso verificando mensaje previo del usuario en BD: {e_idem}")
+
                 # Comprobar si es comando para el DevAgent (/dev, /agent, /desarrollo)
                 if text_content.lower().startswith(("/dev", "/agent", "/desarrollo")):
                     dev_handled = await self.handle_dev_agent_command(
@@ -1048,6 +1307,44 @@ class TelegramAdvisorBot:
             # Enviar indicador de 'escribiendo...' a Telegram mientras se ejecuta el razonamiento
             await self.send_chat_action(chat_id, "typing")
 
+            # Registrar inmediatamente el turno 'user' en curso (o actualizar el existente si se acaba de concatenar
+            # sin respuesta intermedia del bot), de modo que si el mismo usuario envía un segundo mensaje seguido
+            # antes de que el bot conteste, el último registro en BD sea role='user' de ese mismo usuario.
+            clean_user_turn = re.sub(
+                r"\[(?:Contexto conversacional|Mensaje citado del asistente).*?\]\s*",
+                "",
+                prompt_to_process or text_content or "",
+                flags=re.IGNORECASE | re.DOTALL
+            ).strip()
+            if clean_user_turn and not (voice or audio):
+                try:
+                    with SessionLocal() as db_pre:
+                        last_msg_pre = db_pre.query(TelegramConversationMessage).filter(
+                            TelegramConversationMessage.telegram_chat_id == str(chat_id)
+                        ).order_by(TelegramConversationMessage.id.desc()).first()
+                        prev_clean_content = (last_msg_pre.content or "").strip() if last_msg_pre else ""
+                        is_concatenated_turn = bool(
+                            last_msg_pre
+                            and last_msg_pre.role == "user"
+                            and (not last_msg_pre.telegram_user_id or str(last_msg_pre.telegram_user_id) == str(user_id))
+                            and prev_clean_content
+                            and prev_clean_content.lower() in clean_user_turn.lower()
+                        )
+                        if is_concatenated_turn:
+                            last_msg_pre.content = clean_user_turn
+                        else:
+                            db_pre.add(TelegramConversationMessage(
+                                telegram_chat_id=str(chat_id),
+                                telegram_user_id=str(user_id) if user_id else None,
+                                user_id=db_user.id if db_user else None,
+                                role="user",
+                                content_type="text",
+                                content=clean_user_turn
+                            ))
+                        db_pre.commit()
+                except Exception as e_pre_msg:
+                    logger.debug(f"Aviso registrando turno de usuario en curso: {e_pre_msg}")
+
             # Ejecutar consulta en el Motor Asesor (process_user_query abre su propia sesión corta al persistir)
             res = await advisor_engine.process_user_query(
                 user_name=user_display_name,
@@ -1066,45 +1363,73 @@ class TelegramAdvisorBot:
 
             if matched_opps and should_display_cards:
                 target_count = int(res.get("criteria", {}).get("target_count") or 20)
-                cards_to_send = matched_opps[:target_count]
+                candidate_cards = matched_opps[:target_count]
 
-                # 1. Notificación previa: si hubo ampliación geográfica (is_relaxed), enviar aviso explícito FIRST
-                if res.get("is_relaxed"):
-                    crit = res.get("criteria", {})
-                    zone_label = crit.get("zone_or_neighborhood") or crit.get("postal_code") or "la micro-zona solicitada"
-                    prov_label = crit.get("province") or "Madrid"
-                    exact_count = res.get("exact_zone_count", 0)
-                    if exact_count == 0:
-                        warning_msg = (
-                            f"⚠️ <b>Aviso de Búsqueda HIVEX</b>\n\n"
-                            f"No constan activos exactos registrados en la micro-dirección: <b>{zone_label}</b>.\n\n"
-                            f"Para satisfacer tu petición y no dejar la consulta vacía, hemos ampliado la búsqueda al ámbito de la provincia / corona metropolitana de <b>{prov_label}</b>, seleccionando las <b>{len(cards_to_send)} mejores oportunidades</b> disponibles por scoring de rentabilidad y descuento.\n\n"
-                            f"<i>A continuación volcamos las {len(cards_to_send)} fichas interactivas completas:</i>"
-                        )
+                # Pre-renderizar las tarjetas EN PARALELO (máx 8 concurrentes) para no exceder el timeout de 60s del webhook de Telegram
+                from app.services.card_image_generator import generate_whatsapp_style_card
+                render_sem = asyncio.Semaphore(8)
+
+                async def _render_single_card(opp_item: Dict[str, Any]):
+                    async with render_sem:
+                        try:
+                            c_bytes = await asyncio.to_thread(generate_whatsapp_style_card, opp_item)
+                            if c_bytes:
+                                return (opp_item, c_bytes)
+                        except Exception as e_pre:
+                            logger.warning(f"[Advisor Bot] Error pre-renderizando ficha {opp_item.get('id')}: {e_pre}")
+                        return None
+
+                raw_rendered = await asyncio.gather(*(_render_single_card(opp) for opp in candidate_cards))
+                rendered_cards = [pair for pair in raw_rendered if pair is not None]
+
+                if rendered_cards:
+                    # 1. Notificación previa: si hubo ampliación geográfica (is_relaxed), enviar aviso explícito FIRST
+                    if res.get("is_relaxed"):
+                        crit = res.get("criteria", {})
+                        zone_label = crit.get("zone_or_neighborhood") or crit.get("postal_code") or "la micro-zona solicitada"
+                        prov_label = crit.get("province") or "Madrid"
+                        exact_count = res.get("exact_zone_count", 0)
+                        if exact_count == 0:
+                            warning_msg = (
+                                f"⚠️ <b>Aviso de Búsqueda HIVEX</b>\n\n"
+                                f"No constan activos exactos registrados en la micro-dirección: <b>{zone_label}</b>.\n\n"
+                                f"Para satisfacer tu petición y no dejar la consulta vacía, hemos ampliado la búsqueda al ámbito de la provincia / corona metropolitana de <b>{prov_label}</b>, seleccionando las <b>{len(rendered_cards)} mejores oportunidades</b> disponibles por scoring de rentabilidad y descuento.\n\n"
+                                f"<i>A continuación volcamos las {len(rendered_cards)} fichas interactivas completas:</i>"
+                            )
+                        else:
+                            warning_msg = (
+                                f"🎯 <b>Resultados de Búsqueda HIVEX</b>\n\n"
+                                f"Se han localizado <b>{exact_count} oportunidades exclusivas</b> en la micro-zona de <b>{zone_label}</b>.\n\n"
+                                f"Para completar tu solicitud con las <b>{len(rendered_cards)} mejores opciones</b> del mercado, hemos añadido las más rentables de la corona metropolitana de <b>{prov_label}</b>.\n\n"
+                                f"<i>A continuación volcamos las {len(rendered_cards)} fichas interactivas (las {exact_count} primeras corresponden a la micro-zona exacta):</i>"
+                            )
+                        await self.send_message(chat_id, warning_msg, parse_mode="HTML", reply_to_message_id=message_id)
+                        await asyncio.sleep(0.5)
+                    elif intro_text:
+                        await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
+                        await asyncio.sleep(0.35)
                     else:
-                        warning_msg = (
-                            f"🎯 <b>Resultados de Búsqueda HIVEX</b>\n\n"
-                            f"Se han localizado <b>{exact_count} oportunidades exclusivas</b> en la micro-zona de <b>{zone_label}</b>.\n\n"
-                            f"Para completar tu solicitud con las <b>{len(cards_to_send)} mejores opciones</b> del mercado, hemos añadido las más rentables de la corona metropolitana de <b>{prov_label}</b>.\n\n"
-                            f"<i>A continuación volcamos las {len(cards_to_send)} fichas interactivas (las {exact_count} primeras corresponden a la micro-zona exacta):</i>"
+                        await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
+                        await asyncio.sleep(0.35)
+
+                    # 2. Despachar exactamente las oportunidades pre-renderizadas garantizando la entrega íntegra dentro del timeout de webhook
+                    for idx, (opp, c_bytes) in enumerate(rendered_cards):
+                        sent = await self.send_photo_card(
+                            chat_id=chat_id,
+                            opp=opp,
+                            pre_rendered_card_bytes=c_bytes
                         )
-                    await self.send_message(chat_id, warning_msg, parse_mode="HTML", reply_to_message_id=message_id)
-                    await asyncio.sleep(1.2)
-                elif intro_text:
-                    await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
-                    await asyncio.sleep(0.5)
+                        if not sent:
+                            logger.warning(f"[Advisor Bot] Tarjeta {idx+1}/{len(rendered_cards)} ({opp.get('id')}) falló en primer intento. Reintentando...")
+                            await asyncio.sleep(0.8)
+                            await self.send_photo_card(
+                                chat_id=chat_id,
+                                opp=opp,
+                                pre_rendered_card_bytes=c_bytes
+                            )
+                        await asyncio.sleep(0.35)
                 else:
                     await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
-                    await asyncio.sleep(0.5)
-
-                # 2. Despachar exactamente las oportunidades solicitadas garantizando la entrega íntegra
-                for idx, opp in enumerate(cards_to_send):
-                    sent = await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    if not sent:
-                        logger.warning(f"[Advisor Bot] Tarjeta {idx+1}/{len(cards_to_send)} ({opp.get('id')}) falló en primer intento. Reintentando...")
-                        await asyncio.sleep(1.2)
-                        await self.send_photo_card(chat_id=chat_id, opp=opp)
-                    await asyncio.sleep(0.85)
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
@@ -1233,15 +1558,24 @@ class TelegramAdvisorBot:
         import re
         txt = text_content.strip().lower()
 
-        # Regex para detectar intenciones sobre alertas/búsquedas
-        list_match = bool(re.search(r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas)\b', txt))
-        
         deact_verbs = r'(desactiva|desactivar|pausa|pausar|inactiva|inactivar|deten|detén|detener|cancela|cancelar|apaga|apagar|silencia|silenciar)'
         act_verbs = r'(activa|activar|reanuda|reanudar|reactiva|reactivar|enciende|encender|habilita|habilitar)'
         alert_nouns = r'(?:la\s+|las\s+|mi\s+|mis\s+)?(?:alerta|alertas|búsqueda|busqueda|búsquedas|busquedas|radar)'
 
         is_deactivate = bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/pausar") or txt.startswith("/desactivar")
         is_activate = bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/activar") or txt.startswith("/reanudar")
+
+        # Regex para detectar intenciones de listar alertas/búsquedas o verificar novedades de alertas en plataforma
+        list_match = (not is_deactivate and not is_activate) and bool(
+            re.search(
+                r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas|alertas configuradas|consultas configuradas|consultas activas)\b',
+                txt
+            )
+            or (
+                re.search(r'\b(alerta|alertas|consulta|consultas)\b', txt)
+                and re.search(r'\b(plataforma|configurada|configuradas|ninguna de las|no hay oportunidades nuevas)\b', txt)
+            )
+        )
 
         if not (list_match or is_deactivate or is_activate):
             return False

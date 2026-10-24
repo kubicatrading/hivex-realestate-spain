@@ -570,3 +570,158 @@ async def test_out_hivex_triggered_when_zero_catalog_matches_despite_statistical
     assert res["matched_opportunities"][0]["id"] == "MKT-FOTOCASA-VDP-LASVEGAS-1"
     assert res["should_display_cards"] is True
 
+
+def test_same_user_prompt_concatenation_and_reconstruction_without_time_limit(in_memory_db, monkeypatch):
+    """
+    Verifica que en lugar de depender de ventanas de tiempo (180s / 25m), se comprueba si el
+    mensaje anterior en TelegramConversationMessage pertenece al mismo usuario (telegram_user_id).
+    Si es del mismo usuario, concatena, reconstruye y devuelve un único prompt unificado para Gemini.
+    """
+    bot = TelegramAdvisorBot()
+    import app.services.telegram_advisor_bot as tg_module
+    from contextlib import contextmanager
+
+    @contextmanager
+    def mock_session():
+        yield in_memory_db
+
+    monkeypatch.setattr(tg_module, "SessionLocal", mock_session)
+
+    # Mensaje previo del asistente proponiendo Madrid (hace 3 horas)
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="assistant",
+        content="En Madrid la rentabilidad de locales para cambio de uso a vivienda supera el 9,5%.",
+        created_at=datetime.utcnow() - timedelta(hours=3)
+    ))
+    # Primer mensaje del usuario Juanma (hace 2 horas -> fuera de cualquier ventana de 180s o 25m)
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="user",
+        content="Sí, configura, pero ten en cuenta en la búsqueda que esos locales deben permitir la reconversión?",
+        created_at=datetime.utcnow() - timedelta(hours=2)
+    ))
+    in_memory_db.commit()
+
+    # Segundo mensaje del MISMO usuario (1450113787)
+    reconstructed_prompt, clarify = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="1450113787",
+        current_text="Y envíame por aquí las oportunidades q descubras"
+    )
+    assert clarify is None
+    assert "Sí, configura, pero ten en cuenta en la búsqueda que esos locales deben permitir la reconversión?. Y envíame por aquí las oportunidades q descubras" in reconstructed_prompt
+    assert "Madrid" in reconstructed_prompt
+
+    # Si un usuario DISTINTO (999999) envía un mensaje en el mismo grupo, NO concatena el mensaje de 1450113787
+    other_user_prompt, clarify_other = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="999999",
+        current_text="Quiero ver pisos en Sevilla"
+    )
+    assert clarify_other is None
+    assert other_user_prompt == "Quiero ver pisos en Sevilla"
+
+    # Si entre el mensaje anterior del mismo usuario y el último mensaje YA existe una contestación del bot (role='assistant'),
+    # NO se concatena con el mensaje anterior del usuario
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="assistant",
+        content="He configurado la alerta y aquí tienes las 10 oportunidades detectadas en Madrid."
+    ))
+    in_memory_db.commit()
+
+    after_bot_reply_prompt, clarify_after = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="1450113787",
+        current_text="Y que tengan salida de humos"
+    )
+    assert clarify_after is None
+    assert "reconversión" not in after_bot_reply_prompt
+    assert "Y que tengan salida de humos" in after_bot_reply_prompt
+
+
+def test_semantic_cohesion_evaluation_ej1_comparative_vs_ej2_independent_searches(in_memory_db, monkeypatch):
+    """
+    Verifica la regla semántica profunda para decidir si dos o más mensajes seguidos del mismo usuario
+    (sin contestación del bot en medio) están relacionados y se pueden responder de una sola vez:
+    - Ej1: "¿me puedes decir el yield de la zona de carabanchel?" + "¿me puedes comparar con el yield de Pinto?"
+      -> SÍ están relacionados y se contestan en una misma respuesta comparativa (SE CONCATENAN).
+    - Ej2: "¿me puedes enviar oportunidades de la zona de carabanchel?" + "¿me puedes enviar oportunidades de la zona de Pinto?"
+      -> NO están relacionados para una única respuesta, sino que son 2 búsquedas de oportunidades independientes (NO SE CONCATENAN).
+    - También verifica que una pregunta sobre el estado de alertas en plataforma NO herede 'Carabanchel' del mensaje anterior del bot.
+    """
+    bot = TelegramAdvisorBot()
+    import app.services.telegram_advisor_bot as tg_module
+    from contextlib import contextmanager
+
+    @contextmanager
+    def mock_session():
+        yield in_memory_db
+
+    monkeypatch.setattr(tg_module, "SessionLocal", mock_session)
+
+    # --- EJEMPLO 1: Comparativa de Yield entre Carabanchel y Pinto (SÍ concatena) ---
+    in_memory_db.query(TelegramConversationMessage).delete()
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="user",
+        content="¿me puedes decir el yield de la zona de carabanchel?"
+    ))
+    in_memory_db.commit()
+
+    ej1_prompt, ej1_clarify = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="1450113787",
+        current_text="¿me puedes comparar con el yield de Pinto?"
+    )
+    assert ej1_clarify is None
+    assert "¿me puedes decir el yield de la zona de carabanchel?" in ej1_prompt
+    assert "¿me puedes comparar con el yield de Pinto?" in ej1_prompt
+
+    # --- EJEMPLO 2: Dos peticiones independientes de envío de oportunidades (NO concatena) ---
+    in_memory_db.query(TelegramConversationMessage).delete()
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="user",
+        content="¿me puedes enviar oportunidades de la zona de carabanchel?"
+    ))
+    in_memory_db.commit()
+
+    ej2_prompt, ej2_clarify = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="1450113787",
+        current_text="¿me puedes enviar oportunidades de la zona de Pinto?"
+    )
+    assert ej2_clarify is None
+    assert "carabanchel" not in ej2_prompt.lower()
+    assert ej2_prompt == "¿me puedes enviar oportunidades de la zona de Pinto?"
+
+    # --- INCIDENCIA SUPERGRUPO: Pregunta por alertas en plataforma tras respuesta del bot que mencionaba Carabanchel ---
+    in_memory_db.query(TelegramConversationMessage).delete()
+    in_memory_db.add(TelegramConversationMessage(
+        telegram_chat_id="-1003904392737",
+        telegram_user_id="1450113787",
+        role="assistant",
+        content="En Madrid (distritos como Carabanchel, Tetuán o Puente de Vallecas) el cambio de uso supera el 9,5%."
+    ))
+    in_memory_db.commit()
+
+    alert_check_prompt, alert_clarify = bot.synthesize_conversation_prompt(
+        chat_id="-1003904392737",
+        user_id="1450113787",
+        current_text="estás seguro que no hay oportunidades nuevas de ninguna de las alertas configuradas en plataforma?"
+    )
+    assert alert_clarify is None
+    assert "carabanchel" not in alert_check_prompt.lower()
+    assert alert_check_prompt == "estás seguro que no hay oportunidades nuevas de ninguna de las alertas configuradas en plataforma?"
+
+
+
+
+

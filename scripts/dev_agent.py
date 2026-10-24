@@ -389,6 +389,10 @@ def execute_agent_loop(
             print("✅ El DevAgent ha completado la tarea sin más llamadas a herramientas.")
             final_summary = "\n".join(text_parts).strip()
             if final_summary:
+                try:
+                    Path("/tmp/dev_agent_summary.txt").write_text(final_summary, encoding="utf-8")
+                except Exception:
+                    pass
                 send_telegram_update(
                     f"📋 <b>Informe Técnico de DevAgent ({html.escape(active_model)}):</b>\n\n{html.escape(final_summary[:3500])}",
                     chat_id, bot_token, reply_to_message_id
@@ -454,11 +458,46 @@ def execute_agent_loop(
                 }
             })
 
-        # Añadir respuestas de función al historial
+        # Añadir respuestas de función al historial (en Gemini generateContent REST API, functionResponse exige role='user')
         contents.append({
-            "role": "function",
+            "role": "user",
             "parts": function_response_parts
         })
+
+    # Si se alcanzó max_steps, forzar una llamada final de síntesis SIN herramientas para responder siempre al usuario
+    try:
+        contents.append({
+            "role": "user",
+            "parts": [{"text": (
+                "Has alcanzado el límite de pasos de exploración. Con toda la información recopilada hasta ahora, "
+                "redacta inmediatamente tu diagnóstico técnico completo y la respuesta detallada para el usuario."
+            )}]
+        })
+        synth_payload = {
+            "contents": contents,
+            "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096}
+        }
+        for model in models_to_try:
+            for key_idx, cand_key in enumerate(candidate_keys):
+                if (model, key_idx) in unavailable_pairs:
+                    continue
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={cand_key}"
+                with httpx.Client(timeout=60.0) as client:
+                    r = client.post(url, json=synth_payload)
+                    if r.status_code == 200:
+                        cand = r.json().get("candidates", [{}])[0]
+                        t_parts = [p["text"] for p in cand.get("content", {}).get("parts", []) if "text" in p and not p.get("thought")]
+                        final_summary = "\n".join(t_parts).strip()
+                        if final_summary:
+                            Path("/tmp/dev_agent_summary.txt").write_text(final_summary, encoding="utf-8")
+                            send_telegram_update(
+                                f"📋 <b>Informe Técnico de DevAgent ({html.escape(model)}):</b>\n\n{html.escape(final_summary[:3500])}",
+                                chat_id, bot_token, reply_to_message_id
+                            )
+                            return final_summary
+    except Exception as e_synth:
+        print(f"Aviso en síntesis final: {e_synth}")
 
     limit_msg = "DevAgent alcanzó el límite de pasos máximos (25). Por favor revisa los logs."
     send_telegram_update(f"⏳ {limit_msg}", chat_id, bot_token, reply_to_message_id)

@@ -47,13 +47,18 @@ jobs:
 
       - name: Notificar Inicio en Telegram
         if: ${{ inputs.telegram_chat_id != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_INPUT: ${{ inputs.task }}
+          CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
+          MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
         run: |
-          python -c "
+          python - << 'PYEOF'
           import httpx, os, html
           token = os.getenv('TELEGRAM_BOT_TOKEN')
-          chat_id = '${{ inputs.telegram_chat_id }}'
-          msg_id = '${{ inputs.telegram_message_id }}'
-          task = html.escape('''${{ inputs.task }}''')
+          chat_id = os.getenv('CHAT_ID_INPUT', '')
+          msg_id = os.getenv('MSG_ID_INPUT', '')
+          task = html.escape(os.getenv('TASK_INPUT', ''))
           text = f'⚙️ <b>DevAgent iniciado en GitHub Actions</b>\n\n🎯 <b>Tarea:</b> <i>{task}</i>\n\nAnalizando repositorio y preparando solución...'
           if token and chat_id:
               try:
@@ -61,26 +66,27 @@ jobs:
                       'chat_id': chat_id,
                       'text': text,
                       'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
                   }, timeout=10.0)
               except Exception as e:
                   print(f'Error: {e}')
-          "
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PYEOF
 
       - name: Ejecutar Autonomous DevAgent
         id: dev_agent
-        run: |
-          python scripts/dev_agent.py \
-            --task "${{ inputs.task }}" \
-            --chat-id "${{ inputs.telegram_chat_id }}" \
-            --message-id "${{ inputs.telegram_message_id }}"
         env:
           PAID_GEMINI_API_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_INPUT: ${{ inputs.task }}
+          CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
+          MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
+        run: |
+          python scripts/dev_agent.py \
+            --task "$TASK_INPUT" \
+            --chat-id "$CHAT_ID_INPUT" \
+            --message-id "$MSG_ID_INPUT"
 
       - name: Ejecutar Tests de Verificación
         run: |
@@ -91,6 +97,8 @@ jobs:
 
       - name: Comprobar cambios y hacer Commit & Push
         id: git_push
+        env:
+          TASK_INPUT: ${{ inputs.task }}
         run: |
           git config user.name "HIVEX DevAgent"
           git config user.email "devagent@hivex.internal"
@@ -98,7 +106,8 @@ jobs:
           if ! git diff --staged --quiet; then
             DIFF_STAT=$(git diff --staged --stat | head -n 12)
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            git commit -m "feat(dev-agent): ${{ inputs.task }}"
+            ShortTask=$(printf '%s' "$TASK_INPUT" | tr '\n' ' ' | cut -c 1-72)
+            git commit -m "feat(dev-agent): $ShortTask"
             git push origin main
             COMMIT_HASH=$(git rev-parse --short HEAD)
             echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
@@ -112,16 +121,27 @@ jobs:
 
       - name: Notificar Resultado Exitoso en Telegram
         if: success() && inputs.telegram_chat_id != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_INPUT: ${{ inputs.task }}
+          CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
+          MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
+          HAS_CHANGES: ${{ steps.git_push.outputs.has_changes }}
+          COMMIT_HASH: ${{ steps.git_push.outputs.commit_hash }}
+          DIFF_STAT: ${{ steps.git_push.outputs.diff_stat }}
         run: |
-          python -c "
+          python - << 'PYEOF'
           import httpx, os, html
+          from pathlib import Path
           token = os.getenv('TELEGRAM_BOT_TOKEN')
-          chat_id = '${{ inputs.telegram_chat_id }}'
-          msg_id = '${{ inputs.telegram_message_id }}'
-          task = html.escape('''${{ inputs.task }}''')
-          has_changes = '${{ steps.git_push.outputs.has_changes }}' == 'true'
-          commit = '${{ steps.git_push.outputs.commit_hash }}'
-          diff = html.escape('''${{ steps.git_push.outputs.diff_stat }}''')
+          chat_id = os.getenv('CHAT_ID_INPUT', '')
+          msg_id = os.getenv('MSG_ID_INPUT', '')
+          task = html.escape(os.getenv('TASK_INPUT', ''))
+          has_changes = os.getenv('HAS_CHANGES') == 'true'
+          commit = os.getenv('COMMIT_HASH', '')
+          diff = html.escape(os.getenv('DIFF_STAT', ''))
+          summary_path = Path('/tmp/dev_agent_summary.txt')
+          summary_txt = summary_path.read_text(encoding='utf-8').strip() if summary_path.exists() else ''
           
           if has_changes:
               msg = (
@@ -133,11 +153,15 @@ jobs:
                   f'🌐 Vercel ha iniciado el despliegue automático.'
               )
           else:
-              msg = (
-                  f'ℹ️ <b>DevAgent: Análisis completado sin modificaciones</b>\n\n'
-                  f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
-                  f'El agente concluyó la tarea sin requerir modificaciones de código.'
-              )
+              if summary_txt:
+                  # El informe detallado ya fue enviado por scripts/dev_agent.py; enviamos cierre breve
+                  msg = f'✅ <b>DevAgent: Diagnóstico finalizado</b> (sin cambios requeridos en repositorio).'
+              else:
+                  msg = (
+                      f'ℹ️ <b>DevAgent: Análisis completado sin modificaciones</b>\n\n'
+                      f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
+                      f'El agente concluyó la tarea sin requerir modificaciones de código.'
+                  )
           
           if token and chat_id:
               try:
@@ -145,24 +169,27 @@ jobs:
                       'chat_id': chat_id,
                       'text': msg,
                       'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
                   }, timeout=15.0)
               except Exception as e:
                   print(f'Error: {e}')
-          "
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PYEOF
 
       - name: Notificar Error en Telegram
         if: failure() && inputs.telegram_chat_id != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_INPUT: ${{ inputs.task }}
+          CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
+          MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
         run: |
-          python -c "
+          python - << 'PYEOF'
           import httpx, os, html
           from pathlib import Path
           token = os.getenv('TELEGRAM_BOT_TOKEN')
-          chat_id = '${{ inputs.telegram_chat_id }}'
-          msg_id = '${{ inputs.telegram_message_id }}'
-          task = html.escape('''${{ inputs.task }}''')
+          chat_id = os.getenv('CHAT_ID_INPUT', '')
+          msg_id = os.getenv('MSG_ID_INPUT', '')
+          task = html.escape(os.getenv('TASK_INPUT', ''))
           log_snippet = ''
           log_path = Path('/tmp/pytest_run.log')
           if log_path.exists():
@@ -179,10 +206,8 @@ jobs:
                       'chat_id': chat_id,
                       'text': msg,
                       'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id != 'None' else None
+                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
                   }, timeout=15.0)
               except Exception as e:
                   print(f'Error: {e}')
-          "
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PYEOF
