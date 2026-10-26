@@ -61,15 +61,8 @@ jobs:
           task = html.escape(os.getenv('TASK_INPUT', ''))
           text = f'⚙️ <b>DevAgent iniciado en GitHub Actions</b>\n\n🎯 <b>Tarea:</b> <i>{task}</i>\n\nAnalizando repositorio y preparando solución...'
           if token and chat_id:
-              try:
-                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
-                      'chat_id': chat_id,
-                      'text': text,
-                      'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
-                  }, timeout=10.0)
-              except Exception as e:
-                  print(f'Error: {e}')
+              from scripts.dev_agent import send_telegram_update
+              send_telegram_update(text, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF
 
       - name: Ejecutar Autonomous DevAgent
@@ -164,15 +157,8 @@ jobs:
                   )
           
           if token and chat_id:
-              try:
-                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
-                      'chat_id': chat_id,
-                      'text': msg,
-                      'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
-                  }, timeout=15.0)
-              except Exception as e:
-                  print(f'Error: {e}')
+              from scripts.dev_agent import send_telegram_update
+              send_telegram_update(msg, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF
 
       - name: Notificar Error en Telegram
@@ -201,13 +187,6 @@ jobs:
               f'La tarea no pudo completarse o los tests fallaron.{log_snippet}'
           )
           if token and chat_id:
-              try:
-                  httpx.post(f'https://api.telegram.org/bot{token}/sendMessage', json={
-                      'chat_id': chat_id,
-                      'text': msg,
-                      'parse_mode': 'HTML',
-                      'reply_to_message_id': int(msg_id) if msg_id and msg_id.isdigit() else None
-                  }, timeout=15.0)
-              except Exception as e:
-                  print(f'Error: {e}')
+              from scripts.dev_agent import send_telegram_update
+              send_telegram_update(msg, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF

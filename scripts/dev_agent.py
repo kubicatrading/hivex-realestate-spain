@@ -24,21 +24,39 @@ def send_telegram_update(
     bot_token: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> None:
-    """Envía actualizaciones de progreso en tiempo real al chat de Telegram del usuario."""
-    token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
-    if not chat_id or not token:
+    """Envía actualizaciones de progreso en tiempo real al chat privado de Telegram con fallback resiliente."""
+    token = (bot_token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    target_chat = str(chat_id or os.getenv("CHAT_ID_INPUT") or "").strip()
+    if not target_chat or not token:
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
+    payload: Dict[str, Any] = {
+        "chat_id": target_chat,
         "text": text,
         "parse_mode": "HTML"
     }
     if reply_to_message_id:
-        payload["reply_to_message_id"] = int(reply_to_message_id)
+        try:
+            payload["reply_to_message_id"] = int(reply_to_message_id)
+        except Exception:
+            pass
     try:
-        with httpx.Client(timeout=10.0) as client:
-            client.post(url, json=payload)
+        with httpx.Client(timeout=12.0) as client:
+            r = client.post(url, json=payload)
+            if r.status_code != 200 and "reply_to_message_id" in payload:
+                # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
+                fallback_payload = dict(payload)
+                fallback_payload.pop("reply_to_message_id", None)
+                r = client.post(url, json=fallback_payload)
+            if r.status_code != 200:
+                # Último fallback en texto plano sin parse_mode HTML
+                plain_payload = {
+                    "chat_id": target_chat,
+                    "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                }
+                r2 = client.post(url, json=plain_payload)
+                if r2.status_code != 200:
+                    print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
     except Exception as e:
         print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
 
@@ -314,10 +332,7 @@ def execute_agent_loop(
     ]
 
     print(f"🚀 Iniciando HIVEX DevAgent para la tarea: {task}")
-    send_telegram_update(
-        f"🤖 <b>DevAgent Activo (Gemini 4 Argon):</b> Analizando código para:\n<i>{html.escape(task)}</i>",
-        chat_id, bot_token, reply_to_message_id
-    )
+    announced_active_model: Optional[str] = None
     
     for step in range(1, max_steps + 1):
         print(f"\n--- [Paso {step}/{max_steps}] Razonando con Gemini ---")
@@ -365,6 +380,13 @@ def execute_agent_loop(
             send_telegram_update(f"❌ {err_msg}", chat_id, bot_token, reply_to_message_id)
             return err_msg
 
+        if announced_active_model != active_model:
+            announced_active_model = active_model
+            send_telegram_update(
+                f"🤖 <b>[Paso {step}/{max_steps} · {html.escape(active_model)}]</b> Modelo activo conectado. Analizando tarea:\n<i>{html.escape(task[:300])}</i>",
+                chat_id, bot_token, reply_to_message_id
+            )
+
         candidate = resp_data.get("candidates", [{}])[0]
         content = candidate.get("content", {})
         parts = content.get("parts", [])
@@ -381,7 +403,7 @@ def execute_agent_loop(
             if function_calls and len(thought_text) > 10:
                 short_thought = thought_text[:500] + ("..." if len(thought_text) > 500 else "")
                 send_telegram_update(
-                    f"💭 <i>{html.escape(short_thought)}</i>",
+                    f"💭 <b>[Paso {step}/{max_steps} · {html.escape(active_model)}]</b>\n<i>{html.escape(short_thought)}</i>",
                     chat_id, bot_token, reply_to_message_id
                 )
 

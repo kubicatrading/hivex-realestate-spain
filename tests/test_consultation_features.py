@@ -722,6 +722,113 @@ def test_semantic_cohesion_evaluation_ej1_comparative_vs_ej2_independent_searche
     assert alert_check_prompt == "estás seguro que no hay oportunidades nuevas de ninguna de las alertas configuradas en plataforma?"
 
 
+def test_universal_semantic_cohesion_matrix_and_assistant_header_extraction():
+    """
+    Valida la Fórmula Universal de Cohesión Semántica Multi-Factor en una batería amplia de escenarios
+    y verifica que _extract_assistant_header_location solo extraiga la ubicación de la cabecera del bot
+    (ignorando las fichas individuales del cuerpo como '9. Local comercial en venta en PAU de Carabanchel, Madrid').
+    """
+    bot = TelegramAdvisorBot()
+
+    # 1. Extracción de ubicación de cabecera vs cuerpo de fichas
+    msg_128_madrid = (
+        "Hola **jsaavedra**, he analizado tu consulta sobre el mercado en **Madrid**.\n\n"
+        "🏆 **Top Oportunidades Detectadas (10 seleccionadas):**\n"
+        "**1. Local comercial en venta en Puente de Vallecas, Madrid**\n"
+        "**9. Local comercial en venta en PAU de Carabanchel, Madrid (Apto Cambio de Uso a Vivienda)**\n"
+    )
+    assert bot._extract_assistant_header_location(msg_128_madrid) == "Madrid"
+
+    # 2. Batería de casos que SÍ deben concatenarse (True)
+    cohesive_cases = [
+        ("¿me puedes decir el yield de la zona de carabanchel?", "¿me puedes comparar con el yield de Pinto?"),
+        ("¿qué precio medio tienen los pisos en Getafe?", "¿y en Leganés?"),
+        ("¿cuántas oportunidades tenemos en Carabanchel?", "¿y cuántas hay en Chamberí?"),
+        ("¿Son interesantes en rentabilidad los locales comerciales que se reconvierten en vivienda?", "Sí, configura, pero ten en cuenta en la búsqueda que esos locales deben permitir la reconversión?"),
+        ("Sí, configura, pero ten en cuenta en la búsqueda que esos locales deben permitir la reconversión?", "Y envíame por aquí las oportunidades q descubras"),
+        ("Búscame pisos en Carabanchel", "Que tengan al menos 3 habitaciones y terraza"),
+        ("Quiero ver chalets en Villanueva del Pardillo", "Máximo 450.000 euros"),
+        ("¿Cuál es la rentabilidad media en Tetuán?", "¿Y qué precio por m2 tiene frente a Chamberí?"),
+        ("Envíame locales en Madrid", "¿Y qué yield medio tienen esos locales?"),
+    ]
+    for m1, m2 in cohesive_cases:
+        assert bot.evaluate_messages_semantic_cohesion(m1, m2) is True, f"Debería concatenar: {m1!r} + {m2!r}"
+
+    # 3. Batería de casos que NO deben concatenarse (False -> consultas separadas)
+    separate_cases = [
+        ("¿me puedes enviar oportunidades de la zona de carabanchel?", "¿me puedes enviar oportunidades de la zona de Pinto?"),
+        ("Búscame pisos en Carabanchel", "¿Y me puedes enviar oportunidades de Pinto?"),
+        ("Envíame oportunidades de chalets en Las Rozas", "También búscame pisos en Getafe"),
+        ("Muéstrame pisos en Carabanchel", "Muéstrame locales comerciales en Carabanchel"),
+        ("Envíame locales en Madrid", "estás seguro que no hay oportunidades nuevas de ninguna de las alertas configuradas en plataforma?"),
+        ("¿Qué rentabilidad hay en Madrid?", "/alertas"),
+    ]
+    for m1, m2 in separate_cases:
+        assert bot.evaluate_messages_semantic_cohesion(m1, m2) is False, f"NO debería concatenar: {m1!r} + {m2!r}"
+
+
+@pytest.mark.asyncio
+async def test_kpi_and_quantitative_queries_without_cards_never_saved_as_consultations(in_memory_db, monkeypatch):
+    """
+    Verifica que las consultas sobre KPIs o cuantitativas de mercado que no dispongan de documentos
+    visuales de oportunidades (fichas) NUNCA se guarden como alertas en SavedConsultation.
+    """
+    from app.engine.advisor_engine import advisor_engine
+    in_memory_db.query(SavedConsultation).delete()
+    in_memory_db.commit()
+
+    kpi_queries = [
+        "¿me puedes decir el yield de la zona de carabanchel?",
+        "¿Cuántas oportunidades tenemos en Carabanchel?",
+        "¿Qué precio medio por m2 tienen los pisos en Chamberí?",
+        "¿Cuánto se desvía el precio de venta respecto al mercado en Madrid?",
+    ]
+    for q in kpi_queries:
+        res = await advisor_engine.process_user_query(
+            user_name="jsaavedra",
+            prompt_text=q,
+            telegram_chat_id="-1003904392737",
+            db=in_memory_db
+        )
+        assert res.get("should_display_cards") is False, f"Query KPI no debe mostrar fichas: {q}"
+        assert res.get("consultation_id") is None, f"Query KPI sin fichas no debe guardarse en SavedConsultation: {q}"
+
+    saved_count = in_memory_db.query(SavedConsultation).count()
+    assert saved_count == 0
+
+
+def test_dev_agent_send_telegram_update_fallback_on_bad_reply_id(monkeypatch):
+    """
+    Verifica que send_telegram_update en scripts/dev_agent.py reintente automáticamente sin
+    reply_to_message_id cuando Telegram devuelve HTTP 400 (ej. message to be replied not found).
+    """
+    from scripts.dev_agent import send_telegram_update
+
+    calls = []
+
+    class DummyResp:
+        def __init__(self, status_code, text="OK"):
+            self.status_code = status_code
+            self.text = text
+
+    def fake_post(self, url, json=None, **kwargs):
+        calls.append(json)
+        if "reply_to_message_id" in (json or {}):
+            return DummyResp(400, "Bad Request: message to be replied not found")
+        return DummyResp(200, "OK")
+
+    monkeypatch.setattr("httpx.Client.post", fake_post)
+    send_telegram_update(
+        "🤖 <b>[Paso 1/25 · gemini-2.5-flash]</b> Modelo activo conectado.",
+        chat_id="1450113787",
+        bot_token="fake_token",
+        reply_to_message_id=999999
+    )
+    assert len(calls) == 2
+    assert "reply_to_message_id" in calls[0]
+    assert "reply_to_message_id" not in calls[1]
+
+
 
 
 

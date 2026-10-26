@@ -896,36 +896,53 @@ class AdvisorEngine:
         is_alert = any(w in q_lower for w in ["avísame", "avisame", "alerta", "notifícame", "notificame", "programa una alerta", "guardar búsqueda", "cuando salga", "si sale"])
 
         # Clasificación del Tipo de Consulta
-        is_explicit_search = any(w in q_lower for w in [
+        has_explicit_search_verb = any(w in q_lower for w in [
             "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
-            "haz búsqueda", "haz busqueda", "busca", "buscar", "búsqueda de", "busqueda de", "encuentra",
-            "enséñame", "enseñame", "muéstrame", "muestrame", "envíame", "enviame", "mándame", "mandame",
-            "qué hay", "dime qué", "dime que", "detectes", "detectas", "añadir a la búsqueda", "añade a la búsqueda",
+            "haz búsqueda", "haz busqueda", "busca", "buscar", "búscame", "buscame", "busco",
+            "búsqueda de", "busqueda de", "encuentra", "encuéntrame", "encuentrame",
+            "enséñame", "enseñame", "muéstrame", "muestrame", "envíame", "enviame", "enviar oportunidades",
+            "enviar pisos", "enviar inmuebles", "mándame", "mandame", "pásame", "pasame", "sácame", "sacame",
+            "tráeme", "traeme", "localiza", "localízame", "localizame", "rastrea", "rastrear",
+            "detectes", "detectas", "añadir a la búsqueda", "añade a la búsqueda",
             "consulta nueva", "nueva consulta", "créame una consulta", "creame una consulta",
-            "oportunidades", "inmuebles", "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica",
-            "fincas", "terrenos", "solares", "suelo", "parcelas", "subastas"
+            "des de alta", "dar de alta", "dame de alta", "dame las fichas", "dame las oportunidades",
+            "dame los pisos", "ver pisos", "ver oportunidades", "ver fichas", "ver inmuebles",
+            "listar", "listado de", "quiero ver"
         ])
 
-        if is_explicit_search:
+        is_kpi_or_market_question = any(w in q_lower for w in [
+            "cuántas", "cuantas", "cuántos", "cuantos", "qué cantidad", "que cantidad",
+            "cuánto volumen", "cuanto volumen", "número de", "numero de",
+            "cuánto se desvía", "cuanto se desvia", "desviación", "desviacion",
+            "diferencia de precio", "precio venta vs", "precio de venta vs", "desvío", "desvio",
+            "rentabilidad", "yield", "retorno", "roi", "tir", "cap rate", "kpi", "kpis",
+            "métrica", "metrica", "métricas", "metricas", "estadística", "estadistica", "estadísticas", "estadisticas",
+            "barrio", "distrito", "renta media", "demografía", "demografia",
+            "precios de ", "precios en ", "precio m2", "precio por m2", "€/m2", "€/m²", "eur/m2",
+            "precio medio", "precios medios", "qué precio", "que precio", "a qué precio", "a que precio",
+            "cuánto cuesta", "cuanto cuesta", "cuánto vale", "cuanto vale", "a cuánto está", "a cuanto esta",
+            "mejor zona", "mejores zonas", "dónde invertir", "donde invertir",
+            "dónde comprar", "donde comprar", "qué zona", "que zona", "qué barrio", "que barrio",
+            "cuál es la mejor", "cual es la mejor", "recomiendas", "recomienda", "recomiéndame", "recomiendame",
+            "cómo está el mercado", "como esta el mercado", "qué tal está", "que tal esta",
+            "qué opinas", "que opinas", "cómo ves", "como ves", "son interesantes", "merece la pena", "vale la pena",
+            "compara", "comparar", "comparativa", "compárame", "comparame", "versus", " vs ",
+            "frente a", "respecto a", "diferencia entre"
+        ])
+
+        if has_explicit_search_verb:
             query_type = "SEARCH_OPPORTUNITIES"
         elif is_alert:
             query_type = "SCHEDULED_ALERT"
-        elif any(w in q_lower for w in [
-            "barrio", "distrito", "renta media", "demografía", "demografia",
-            "precios de ruzafa", "precios de chamberí", "precio m2 en", "precio medio",
-            "mejor zona", "mejores zonas", "dónde invertir", "donde invertir",
-            "dónde comprar", "donde comprar", "qué zona", "que zona", "qué barrio", "que barrio",
-            "cuál es la mejor", "cual es la mejor", "recomiendas invertir", "recomiendas comprar"
-        ]):
-            query_type = "DISTRICT_ANALYSIS"
-        elif any(w in q_lower for w in ["compara", "comparativa", "versus", " vs ", "diferencia entre"]):
-            query_type = "DISTRICT_ANALYSIS"
-        elif min_yield is not None or any(w in q_lower for w in ["rentabilidad", "yield", "retorno", "roi"]):
+        elif is_kpi_or_market_question:
+            if min_yield is not None or any(w in q_lower for w in ["rentabilidad", "yield", "retorno", "roi", "tir", "cap rate"]):
+                query_type = "ROI_BTL_CALC"
+            else:
+                query_type = "DISTRICT_ANALYSIS"
+        elif min_yield is not None:
             query_type = "ROI_BTL_CALC"
-        elif any(w in q_lower for w in ["mejor", "top", "ranking", "scoring", "compara", "cruce"]):
+        elif any(w in q_lower for w in ["mejor", "top", "ranking", "scoring", "cruce"]):
             query_type = "SCORING_CROSSREF"
-        elif any(w in q_lower for w in ["busca", "encuentra", "qué hay", "dime", "oportunidades", "inmuebles", "pisos", "subastas"]):
-            query_type = "SEARCH_OPPORTUNITIES"
         else:
             query_type = "SEARCH_OPPORTUNITIES"
 
@@ -3461,19 +3478,17 @@ class AdvisorEngine:
             "listado de", "pásame las fichas", "pásame", "pasame", "quiero ver", "sácame las", "sacame las",
             "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
             "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
-            "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "encuentra", "encuéntrame",
-            "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame", "dame", "trae", "tráeme", "traeme",
-            "envíame", "enviame", "mándame", "mandame", "detectes", "detectas", "oportunidades",
-            "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
+            "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "busco",
+            "encuentra", "encuéntrame", "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame",
+            "dame pisos", "dame inmuebles", "trae", "tráeme", "traeme",
+            "envíame", "enviame", "enviar oportunidades", "enviar pisos", "mándame", "mandame",
+            "detectes", "detectas", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
             "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
-            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "misma consulta", "des de alta", "dar de alta",
-            "búsqueda de", "busqueda de", "búsqueda", "busqueda",
-            "fincas rústicas", "fincas rusticas", "finca rústica", "finca rustica", "pisos", "chalets"
+            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "misma consulta",
+            "des de alta", "dar de alta", "dame de alta", "nueva consulta", "consulta nueva",
+            "créame una consulta", "creame una consulta", "búsqueda de", "busqueda de"
         ]
-        is_explicit_listing_request = (
-            criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
-            or any(v in prompt_lower for v in explicit_show_verbs)
-        )
+        has_explicit_show_verb = any(v in prompt_lower for v in explicit_show_verbs)
 
         # 2. Preguntas cuantitativas de conteo o volumen (ej: "¿Cuántas oportunidades tenemos en Carabanchel?")
         is_count_query = any(w in prompt_lower for w in [
@@ -3488,21 +3503,40 @@ class AdvisorEngine:
             "precio venta vs", "precio de venta vs", "desvío", "desvio"
         ])
 
+        # 3B. Preguntas de KPIs de mercado (yield, rentabilidad, precio medio, €/m2, comparativas entre zonas)
+        is_kpi_market_query = any(w in prompt_lower for w in [
+            "yield", "rentabilidad", "retorno", "roi", "tir", "cap rate", "kpi", "kpis",
+            "métrica", "metrica", "métricas", "metricas", "estadística", "estadistica", "estadísticas", "estadisticas",
+            "precio medio", "precios medios", "qué precio", "que precio", "a qué precio", "a que precio",
+            "cuánto cuesta", "cuanto cuesta", "cuánto vale", "cuanto vale", "a cuánto está", "a cuanto esta",
+            "precio m2", "precio por m2", "€/m2", "€/m²", "eur/m2", "precios de ", "precios en ",
+            "compara", "comparar", "comparativa", "compárame", "comparame", "versus", " vs ",
+            "frente a", "respecto a", "diferencia entre", "cómo está el mercado", "como esta el mercado"
+        ])
+
         # 4. Preguntas de asesoría / recomendación de zonas / dónde invertir
         is_zone_recommendation_query = any(w in prompt_lower for w in [
             "cuáles son las zona", "cuales son las zona", "qué zona", "que zona",
-            "dónde comprar", "donde comprar", "qué municipio", "que municipio",
-            "qué barrio", "que barrio", "recomienda", "recomiéndame", "recomiendame",
-            "zonas con", "zona con", "mejores zonas", "dónde hay", "donde hay"
-        ]) and not is_explicit_listing_request
+            "dónde comprar", "donde comprar", "dónde invertir", "donde invertir",
+            "qué municipio", "que municipio", "qué barrio", "que barrio",
+            "recomienda", "recomiéndame", "recomiendame", "recomiendas",
+            "zonas con", "zona con", "mejores zonas", "mejor zona", "dónde hay", "donde hay",
+            "son interesantes", "merece la pena", "vale la pena", "qué opinas", "que opinas", "cómo ves", "como ves"
+        ]) and not has_explicit_show_verb
 
-        is_quantitative_query = (is_count_query or is_deviation_query) and not is_explicit_listing_request
+        is_explicit_listing_request = has_explicit_show_verb or (
+            criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
+            and not (is_count_query or is_deviation_query or is_kpi_market_query or is_zone_recommendation_query)
+        )
+
+        is_quantitative_query = (is_count_query or is_deviation_query) and not has_explicit_show_verb
 
         is_advisory_inquiry = (
             (criteria.get("query_type") in [
                 "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
-            ] or is_zone_recommendation_query)
-            and not is_explicit_listing_request
+            ] or is_zone_recommendation_query or is_kpi_market_query)
+            and not has_explicit_show_verb
+            and not is_quantitative_query
         )
 
         should_display_cards = False
@@ -3748,8 +3782,9 @@ class AdvisorEngine:
                 )
                 target_db.add(msg_assistant)
 
-                # REQUISITO 2: Las consultas que no implican entregar fichas en Telegram, no se guardan en el módulo de oportunidades,
-                # salvo cuando el usuario solicita explícitamente dar de alta / registrar una consulta o alerta de búsqueda.
+                # REQUISITO 2: Las consultas sobre KPIs, cuantitativas de mercado o asesoría que no dispongan
+                # de documentos visuales de oportunidades (fichas) NUNCA requieren ser guardadas como alertas
+                # en el apartado de consultas de la plataforma (SavedConsultation).
                 is_explicit_consultation_registration = any(
                     phrase in clean_description.lower()
                     for phrase in [
@@ -3758,7 +3793,14 @@ class AdvisorEngine:
                         "creame una consulta", "añadir una búsqueda", "añadir búsqueda"
                     ]
                 ) or bool(criteria.get("is_alert"))
-                should_save_to_visual_module = (should_display_cards and matched_opps and len(matched_opps) > 0) or (is_explicit_listing_request and is_explicit_consultation_registration)
+                is_kpi_or_quantitative_without_cards = (is_quantitative_query or is_advisory_inquiry) and not should_display_cards
+                should_save_to_visual_module = (
+                    not is_kpi_or_quantitative_without_cards
+                    and (
+                        (should_display_cards and matched_opps and len(matched_opps) > 0)
+                        or (is_explicit_listing_request and is_explicit_consultation_registration)
+                    )
+                )
 
                 if not should_save_to_visual_module:
                     target_db.commit()

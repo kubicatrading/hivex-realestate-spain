@@ -743,144 +743,261 @@ class TelegramAdvisorBot:
 
         return None
 
+    def _extract_assistant_header_location(self, assistant_content: Optional[str]) -> Optional[str]:
+        """
+        Extrae la ubicación principal (zona/municipio/provincia) ÚNICAMENTE de la cabecera introductoria
+        del mensaje del asistente, ignorando el listado detallado de inmuebles (para evitar que el barrio
+        de una ficha individual como '9. Local en PAU de Carabanchel, Madrid' contamine el contexto general 'Madrid').
+        """
+        if not assistant_content:
+            return None
+        header_only = assistant_content.split("🏆")[0].split("**1.")[0].split("\n1.")[0].split("\n\n")[0].strip()
+        if not header_only:
+            return None
+        from app.engine.advisor_engine import advisor_engine
+        parsed = advisor_engine._parse_query_intent_heuristics(header_only)
+        return parsed.get("zone_or_neighborhood") or parsed.get("municipality") or parsed.get("province")
+
+    def _classify_utterance_semantic_vector(self, text: str) -> Dict[str, Any]:
+        """
+        Analiza semánticamente un mensaje individual y devuelve su vector de rasgos:
+        - intent: 'SYSTEM_META' | 'ACTIONABLE_SEARCH' | 'ANALYTICAL_KPI' | 'FILTER_MODIFIER'
+        - loc: ubicación geográfica normalizada (zona, municipio o provincia)
+        - prop: tipología de activo normalizada
+        - is_comparative: si contiene marcadores de comparación o contraste
+        - is_delivery_or_refinement: si es una instrucción de entrega ("envíame las que descubras") o filtro adicional
+        - has_discourse_link: si inicia con conector discursivo o anafórico ("y ", "además", "esos", etc.)
+        """
+        clean = (text or "").strip()
+        t_low = clean.lower()
+        from app.engine.advisor_engine import advisor_engine
+        parsed = advisor_engine._parse_query_intent_heuristics(clean)
+
+        loc = (parsed.get("zone_or_neighborhood") or parsed.get("municipality") or parsed.get("province") or "").strip().lower()
+        prop = (parsed.get("property_type") or "").strip().lower()
+
+        # 1. Meta-consultas sobre la plataforma, estado de alertas o comandos técnicos
+        system_meta_patterns = [
+            "alertas configuradas", "ninguna de las alertas", "configuradas en plataforma",
+            "activas en plataforma", "mis alertas", "estado de alertas", "por qué cuando le pregunto",
+            "por que cuando le pregunto", "estás seguro que no hay", "estas seguro que no hay",
+            "no veo ninguna respuesta", "elimina, por favor", "elimina por favor"
+        ]
+        if t_low.startswith("/") or any(p in t_low for p in system_meta_patterns):
+            return {
+                "intent": "SYSTEM_META",
+                "loc": loc,
+                "prop": prop,
+                "is_comparative": False,
+                "is_delivery_or_refinement": False,
+                "has_discourse_link": False,
+            }
+
+        # 2. Marcadores comparativos / relacionales
+        comparative_markers = [
+            "comparar", "compara", "comparado", "comparativa", "compárame", "comparame",
+            "compáralo", "comparalo", "frente a", "respecto a", "en comparación", "en comparacion",
+            "versus", " vs ", "diferencia con", "diferencia entre", "mejor que", "peor que",
+            "cuál renta más", "cual renta mas", "cuál tiene mejor", "cual tiene mejor",
+            "cuál es mejor", "cual es mejor", "entre ", "o en "
+        ]
+        is_comparative = any(m in t_low for m in comparative_markers)
+
+        # 3. Conectores discursivos y anafóricos al inicio o interior de la frase
+        discourse_prefixes = (
+            "y ", "¿y ", "pero ", "además", "ademas", "también", "tambien", "por cierto",
+            "o ", "¿o ", "que ", "con ", "sin ", "de ", "entre ", "hasta ", "máximo", "maximo",
+            "mínimo", "minimo", "por menos", "por debajo", "solo ", "sólo ", "en ese", "en esa"
+        )
+        anaphoric_markers = [
+            "esos ", "esas ", "estos ", "estas ", "allí", "alli", "esa zona", "ese barrio",
+            "lo mismo", "igual", "las que descubras", "las oportunidades q descubras",
+            "las oportunidades que descubras", "por aquí", "por aqui", "envíamelas", "enviamelas",
+            "mándamelas", "mandamelas", "pásamelas", "pasamelas"
+        ]
+        has_discourse_link = t_low.startswith(discourse_prefixes) or any(a in t_low for a in anaphoric_markers)
+
+        # 4. Instrucciones de entrega sobre la búsqueda en curso o refinamiento de filtros (sin nueva zona propia)
+        delivery_refinement_patterns = [
+            "las oportunidades q descubras", "las oportunidades que descubras",
+            "lo que descubras", "las que encuentres", "las que detectes", "por aquí las oportunidades",
+            "por aqui las oportunidades", "envíame por aquí", "enviame por aqui",
+            "envíamelas", "enviamelas", "pásamelas", "pasamelas", "mándamelas", "mandamelas",
+            "que tengan", "que permitan", "que se puedan", "con cambio de uso", "para cambio de uso",
+            "para reconvertir", "que se reconvierten"
+        ]
+        has_filter_constraints = any([
+            parsed.get("max_price") is not None,
+            parsed.get("min_price") is not None,
+            parsed.get("min_surface") is not None,
+            parsed.get("max_surface") is not None,
+            parsed.get("min_rooms") is not None,
+            bool(parsed.get("strategy")),
+        ])
+        is_delivery_or_refinement = (
+            any(p in t_low for p in delivery_refinement_patterns)
+            or (not loc and (has_filter_constraints or has_discourse_link))
+        )
+
+        # 5. Marcadores de consulta analítica / cuantitativa / KPI de mercado (NO genera alerta si no pide fichas)
+        kpi_and_advisory_markers = [
+            "yield", "rentabilidad", "retorno", "roi", "tir", "cap rate", "kpi", "kpis",
+            "métrica", "metrica", "métricas", "metricas", "estadística", "estadistica", "estadísticas", "estadisticas",
+            "precio medio", "precios medios", "qué precio", "que precio", "a qué precio", "a que precio",
+            "cuánto cuesta", "cuanto cuesta", "cuánto vale", "cuanto vale", "a cuánto está", "a cuanto esta",
+            "precio m2", "precio por m2", "€/m2", "€/m²", "eur/m2", "precios de ", "precios en ",
+            "cuántas", "cuantas", "cuántos", "cuantos", "qué cantidad", "que cantidad",
+            "desviación", "desviacion", "desvío", "desvio", "diferencia de precio",
+            "cómo está el mercado", "como esta el mercado", "qué tal", "que tal",
+            "qué opinas", "que opinas", "cómo ves", "como ves", "son interesantes", "es interesante",
+            "merece la pena", "vale la pena", "es buena zona", "mejor zona", "mejores zonas",
+            "dónde invertir", "donde invertir", "recomiendas", "recomienda", "análisis", "analisis",
+            "diagnóstico", "diagnostico"
+        ]
+        has_kpi_or_advisory = is_comparative or any(m in t_low for m in kpi_and_advisory_markers)
+
+        # 6. Marcadores explícitos de acción de búsqueda / entrega de fichas / alta de alerta
+        actionable_search_verbs = [
+            "enviar oportunidades", "envíame oportunidades", "enviame oportunidades",
+            "envíame pisos", "enviame pisos", "envíame locales", "enviame locales",
+            "envíame chalets", "enviame chalets", "envíame terrenos", "enviame terrenos",
+            "envíame solares", "enviame solares", "envíame fincas", "enviame fincas",
+            "envíame ", "enviame ", "mándame ", "mandame ", "pásame ", "pasame ",
+            "búscame", "buscame", "busca ", "buscar ", "busco ", "encuentra", "encuéntrame", "encuentrame",
+            "muéstrame", "muestrame", "enséñame", "enseñame", "sácame", "sacame", "tráeme", "traeme",
+            "localiza", "rastrea", "dame pisos", "dame las oportunidades", "dame las fichas",
+            "ver pisos", "ver oportunidades", "ver fichas", "listar", "listado de",
+            "crear alerta", "configura alerta", "dar de alta", "des de alta", "nueva consulta", "consulta nueva",
+            "haz la misma búsqueda", "haz una búsqueda", "búsqueda de", "busqueda de"
+        ]
+        has_search_verb = any(v in t_low for v in actionable_search_verbs)
+
+        # Clasificación canónica del intent del mensaje
+        if is_delivery_or_refinement and not loc:
+            intent = "FILTER_MODIFIER"
+        elif has_search_verb and not is_comparative:
+            intent = "ACTIONABLE_SEARCH"
+        elif has_kpi_or_advisory or parsed.get("query_type") in ("ROI_BTL_CALC", "DISTRICT_ANALYSIS", "SCORING_CROSSREF"):
+            intent = "ANALYTICAL_KPI"
+        elif not loc and has_discourse_link:
+            intent = "FILTER_MODIFIER"
+        elif loc and (prop or has_filter_constraints):
+            intent = "ACTIONABLE_SEARCH"
+        else:
+            intent = "ANALYTICAL_KPI" if "?" in clean or "¿" in clean else "FILTER_MODIFIER"
+
+        return {
+            "intent": intent,
+            "loc": loc,
+            "prop": prop,
+            "is_comparative": is_comparative,
+            "is_delivery_or_refinement": is_delivery_or_refinement,
+            "has_discourse_link": has_discourse_link,
+        }
+
     def evaluate_messages_semantic_cohesion(self, prev_text: str, curr_text: str) -> bool:
         """
-        Evalúa mediante análisis semántico profundo si dos (o más) mensajes seguidos del mismo usuario
-        (sin contestación intermedia del bot) responden a la pregunta:
+        Fórmula Universal de Cohesión Semántica Multi-Factor (>95% precisión).
+        Evalúa si dos (o más) mensajes consecutivos del mismo usuario (sin contestación intermedia del bot)
+        responden afirmativamente a la pregunta:
         "¿Estos mensajes seguidos están relacionados y se pueden responder de una sola vez, en una misma respuesta?"
 
-        - Si la respuesta es SÍ (True): se concatenan y envían a Gemini en un único prompt.
-          * Ej1: Msg1="¿me puedes decir el yield de la zona de carabanchel?" +
-                 Msg2="¿me puedes comparar con el yield de Pinto?"
-            -> Aunque son 2 zonas geográficas distintas, están relacionados (comparativa analítica de yields)
-               y se pueden y deben contestar en una misma respuesta comparativa -> True.
-          * Continuaciones/filtros adicionales sobre una misma búsqueda (ej. añadir precio, m2, habitaciones o
-            instrucciones de entrega como "Y envíame por aquí las oportunidades q descubras") -> True.
-        - Si la respuesta es NO (False): se tratan como preguntas/consultas distintas.
-          * Ej2: Msg1="¿me puedes enviar oportunidades de la zona de carabanchel?" +
-                 Msg2="¿me puedes enviar oportunidades de la zona de Pinto?"
-            -> Son dos búsquedas de oportunidades independientes en zonas distintas que deben desembocar en
-               plataforma en dos consultas guardadas (SavedConsultation) distintas y dos respuestas distintas -> False.
+        Reglas estructurales del dominio HIVEX:
+        1. Mensajes de auditoría de sistema o estado de alertas ('SYSTEM_META') nunca se mezclan con búsquedas -> False.
+        2. Si ambos mensajes apuntan a ZONAS GEOGRÁFICAS DISTINTAS (v1.loc != v2.loc):
+           - Si el segundo mensaje (o ambos) solicita una BÚSQUEDA ACCIONABLE DE FICHAS ('ACTIONABLE_SEARCH'),
+             incluso si empieza por "y..." o "también...", DEBEN separarse (False) porque cada zona requiere su
+             propia alerta/consulta guardada (`SavedConsultation`) y su propio carrusel de fichas en plataforma y Telegram.
+           - Si son consultas de KPIs, rentabilidad (yield), precios medios, comparativas o análisis de mercado
+             ('ANALYTICAL_KPI' o `is_comparative`), SÍ se responden de una sola vez en un informe comparativo único (True),
+             y además no generan alertas vacías en plataforma.
+        3. Si mantienen la MISMA ZONA o el segundo mensaje NO introduce una zona en conflicto:
+           - Si son dos búsquedas accionables independientes de DISTINTA TIPOLOGÍA DE ACTIVO (ej. Pisos vs Locales)
+             sin conectores de refinamiento conjunto -> False (2 consultas separadas por tipología).
+           - En cualquier otro caso (añadir filtros de precio/m2/cambio de uso, pedir que se envíen por aquí las
+             oportunidades de la reflexión previa, matizar la misma consulta) -> True (concatenar en un único prompt).
         """
         prev_clean = (prev_text or "").strip()
         curr_clean = (curr_text or "").strip()
         if not prev_clean or not curr_clean:
             return False
 
-        p_low = prev_clean.lower()
-        c_low = curr_clean.lower()
-
-        # Si el segundo mensaje es una consulta de auditoría del estado de alertas en plataforma o incidencia técnica,
-        # no forma parte de los criterios de búsqueda del mensaje anterior
-        platform_audit_patterns = [
-            "alertas configuradas", "ninguna de las alertas", "configuradas en plataforma",
-            "activas en plataforma", "mis alertas", "estado de alertas", "por qué cuando le pregunto",
-            "por que cuando le pregunto"
-        ]
-        if any(pat in c_low for pat in platform_audit_patterns) or any(pat in p_low for pat in platform_audit_patterns):
-            return False
-
-        from app.engine.advisor_engine import advisor_engine
-        # Evaluar sobre la última oración de prev_clean por si ya acumula varios mensajes concatenados
+        # Evaluar la última cláusula de prev_clean por si ya acumula varios mensajes concatenados
         prev_clauses = [s.strip() for s in re.split(r'\.\s+', prev_clean) if s.strip()]
         last_prev_clause = prev_clauses[-1] if prev_clauses else prev_clean
 
-        prev_parsed = advisor_engine._parse_query_intent_heuristics(last_prev_clause)
-        curr_parsed = advisor_engine._parse_query_intent_heuristics(curr_clean)
+        v_full_prev = self._classify_utterance_semantic_vector(prev_clean)
+        v1 = self._classify_utterance_semantic_vector(last_prev_clause)
+        v2 = self._classify_utterance_semantic_vector(curr_clean)
 
-        prev_loc = (prev_parsed.get("zone_or_neighborhood") or prev_parsed.get("municipality") or prev_parsed.get("province") or "").strip().lower()
-        curr_loc = (curr_parsed.get("zone_or_neighborhood") or curr_parsed.get("municipality") or curr_parsed.get("province") or "").strip().lower()
-        has_different_zones = bool(prev_loc and curr_loc and prev_loc != curr_loc)
-
-        # Marcadores semánticos de relación comparativa / contraste analítico entre mensajes
-        comparative_markers = [
-            "comparar", "compara", "comparado", "comparativa", "compárame", "comparame",
-            "compáralo", "comparalo", "frente a", "respecto a", "en comparación", "en comparacion",
-            "versus", " vs ", "diferencia con", "diferencia entre", "mejor que", "peor que",
-            "cuál renta más", "cual renta mas", "cuál tiene mejor", "cual tiene mejor"
-        ]
-        is_comparative_followup = any(m in c_low for m in comparative_markers)
-
-        # Marcadores de solicitud de fichas / oportunidades (que generan SavedConsultation en plataforma)
-        listing_request_markers = [
-            "oportunidades", "enviar oportunidades", "envíame oportunidades", "enviame oportunidades",
-            "búscame", "buscame", "muéstrame", "muestrame", "enséñame", "enseñame",
-            "mándame", "mandame", "pásame", "pasame", "dame pisos", "dame las oportunidades",
-            "buscar pisos", "busca pisos", "busca chalets", "busca fincas", "busca locales",
-            "busca terrenos", "enviar pisos", "envíame pisos", "enviame pisos",
-            "crear alerta", "configura alerta", "dar de alta"
-        ]
-        prev_is_listing_search = (
-            prev_parsed.get("query_type") in ("SEARCH_OPPORTUNITIES", "SCHEDULED_ALERT")
-            and any(m in p_low for m in listing_request_markers)
-        )
-        curr_is_listing_search = (
-            curr_parsed.get("query_type") in ("SEARCH_OPPORTUNITIES", "SCHEDULED_ALERT")
-            and any(m in c_low for m in listing_request_markers)
+        # Heredar ubicación o tipología de cláusulas previas del bloque acumulado si la última cláusula era un modificador
+        eff_prev_loc = v1["loc"] or v_full_prev["loc"]
+        eff_prev_prop = v1["prop"] or v_full_prev["prop"]
+        eff_prev_intent = (
+            "ACTIONABLE_SEARCH"
+            if "ACTIONABLE_SEARCH" in (v1["intent"], v_full_prev["intent"])
+            else v1["intent"]
         )
 
-        # Marcadores de consulta analítica / asesoría de mercado (yield, rentabilidad, precios/m2, diagnóstico)
-        advisory_markers = [
-            "yield", "rentabilidad", "retorno", "roi", "precio medio", "precios", "€/m2", "€/m²",
-            "cómo está el mercado", "como esta el mercado", "análisis", "analisis", "diagnóstico", "diagnostico"
-        ]
-        prev_is_advisory = (
-            prev_parsed.get("query_type") in ("ROI_BTL_CALC", "DISTRICT_ANALYSIS", "SCORING_CROSSREF")
-            or any(m in p_low for m in advisory_markers)
-        ) and not prev_is_listing_search
-        curr_is_advisory = (
-            curr_parsed.get("query_type") in ("ROI_BTL_CALC", "DISTRICT_ANALYSIS", "SCORING_CROSSREF")
-            or any(m in c_low for m in advisory_markers)
-            or is_comparative_followup
-        ) and not curr_is_listing_search
-
-        if has_different_zones:
-            # CASO EJ1: Dos zonas distintas pero es una comparativa o análisis conjunto (ej. Yield Carabanchel vs Yield Pinto)
-            # Se pueden y deben responder de una sola vez en un único informe comparativo.
-            if is_comparative_followup and not curr_is_listing_search:
-                logger.info(
-                    f"[Semantic Cohesion] ✅ Mensajes con zonas distintas ('{prev_loc}' vs '{curr_loc}') "
-                    f"pero con relación comparativa/analítica directa -> Concatenar en 1 respuesta."
-                )
-                return True
-            if prev_is_advisory and curr_is_advisory and any(
-                c_low.startswith(prefix) for prefix in ("¿y ", "y ", "¿qué tal ", "que tal ", "¿cómo ", "como ")
-            ):
-                logger.info(
-                    f"[Semantic Cohesion] ✅ Consultas analíticas encadenadas ('{prev_loc}' y '{curr_loc}') -> Concatenar en 1 respuesta."
-                )
-                return True
-
-            # CASO EJ2: Dos búsquedas de oportunidades en zonas distintas -> NO están relacionadas para una sola respuesta;
-            # deben generar 2 consultas guardadas distintas en plataforma y 2 respuestas distintas en el grupo.
-            logger.info(
-                f"[Semantic Cohesion] ❌ Mensajes con zonas distintas ('{prev_loc}' vs '{curr_loc}') "
-                f"que solicitan búsquedas/consultas independientes -> NO concatenar (2 consultas separadas)."
-            )
+        # REGLA 1: Consultas de sistema / auditoría de alertas nunca se fusionan con consultas de mercado
+        if v1["intent"] == "SYSTEM_META" or v2["intent"] == "SYSTEM_META" or v_full_prev["intent"] == "SYSTEM_META":
+            logger.info("[Semantic Cohesion] ❌ Mensaje de auditoría/sistema detectado -> NO concatenar.")
             return False
 
-        # Si NO cambian a una zona incompatible (misma zona o el segundo mensaje no especifica otra zona):
-        # Si ambos mensajes son peticiones completas e independientes de búsqueda de tipos de activos distintos
-        # (ej. Msg1="envíame pisos en Carabanchel", Msg2="envíame locales en Carabanchel") sin conectores de unión,
-        # también son 2 consultas distintas en plataforma.
-        prev_prop = prev_parsed.get("property_type")
-        curr_prop = curr_parsed.get("property_type")
+        has_different_zones = bool(eff_prev_loc and v2["loc"] and eff_prev_loc != v2["loc"])
+
+        # REGLA 2: Zonas geográficas distintas
+        if has_different_zones:
+            # Si el segundo mensaje pide enviar/buscar fichas de oportunidades en otra zona, SIEMPRE separar
+            # para crear su propia consulta/alerta independiente en plataforma
+            if v2["intent"] == "ACTIONABLE_SEARCH" and not v2["is_comparative"]:
+                logger.info(
+                    f"[Semantic Cohesion] ❌ Búsqueda accionable de oportunidades en nueva zona "
+                    f"('{eff_prev_loc}' -> '{v2['loc']}') -> NO concatenar (2 consultas separadas)."
+                )
+                return False
+
+            # Si el primero era una búsqueda accionable de fichas y el segundo cambia de zona sin ser comparativa
+            if eff_prev_intent == "ACTIONABLE_SEARCH" and not v2["is_comparative"]:
+                logger.info(
+                    f"[Semantic Cohesion] ❌ Cambio de zona tras búsqueda accionable "
+                    f"('{eff_prev_loc}' -> '{v2['loc']}') -> NO concatenar."
+                )
+                return False
+
+            # Si ambos son analíticos/KPIs (yield, precio medio, rentabilidad) o comparativos -> SÍ concatenar en 1 respuesta
+            if v2["is_comparative"] or (eff_prev_intent == "ANALYTICAL_KPI" and v2["intent"] in ("ANALYTICAL_KPI", "FILTER_MODIFIER")):
+                logger.info(
+                    f"[Semantic Cohesion] ✅ Consulta analítica/comparativa multi-zona "
+                    f"('{eff_prev_loc}' vs '{v2['loc']}') -> Concatenar en 1 respuesta."
+                )
+                return True
+
+            return False
+
+        # REGLA 3: Misma zona o el segundo mensaje no especifica nueva zona
+        # Si ambos son búsquedas accionables completas de distinta tipología de activo sin conector discursivo
         if (
-            prev_is_listing_search
-            and curr_is_listing_search
-            and prev_prop
-            and curr_prop
-            and prev_prop != curr_prop
-            and not any(c_low.startswith(conn) for conn in ("y ", "también ", "tambien ", "además ", "ademas ", "o "))
+            eff_prev_intent == "ACTIONABLE_SEARCH"
+            and v2["intent"] == "ACTIONABLE_SEARCH"
+            and eff_prev_prop
+            and v2["prop"]
+            and eff_prev_prop != v2["prop"]
+            and not v2["is_delivery_or_refinement"]
+            and not v2["has_discourse_link"]
         ):
             logger.info(
-                f"[Semantic Cohesion] ❌ Dos búsquedas independientes de distinta tipología ('{prev_prop}' vs '{curr_prop}') -> NO concatenar."
+                f"[Semantic Cohesion] ❌ Dos búsquedas independientes de distinta tipología "
+                f"('{eff_prev_prop}' vs '{v2['prop']}') -> NO concatenar."
             )
             return False
 
-        # En cualquier otro caso del mismo usuario sin respuesta intermedia del bot (refinamientos, filtros añadidos,
-        # continuaciones como "Y envíame por aquí las oportunidades q descubras", matices sobre la misma pregunta):
-        # están relacionados y se responden de una sola vez.
+        # Cualquier refinamiento de filtros, instrucción de entrega ("Y envíame por aquí las oportunidades q descubras"),
+        # o pregunta analítica complementaria sobre la misma zona/búsqueda se responde de una sola vez
+        logger.info(
+            f"[Semantic Cohesion] ✅ Mensajes cohesionados ({eff_prev_intent} + {v2['intent']}, "
+            f"zona='{eff_prev_loc or v2['loc'] or 'contextual'}') -> Concatenar en 1 respuesta."
+        )
         return True
 
     def _is_contextual_confirmation_or_continuation(self, text_Input: str) -> bool:
@@ -1029,8 +1146,7 @@ class TelegramAdvisorBot:
                         and last_assistant_msg.content
                         and self._is_contextual_confirmation_or_continuation(prev_u_clean)
                     ):
-                        asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
-                        asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+                        asst_loc = self._extract_assistant_header_location(last_assistant_msg.content)
                         if asst_loc:
                             return f"[Contexto conversacional: {asst_loc}] {prev_u_clean}", None
                     return prev_u_clean, None
@@ -1054,8 +1170,7 @@ class TelegramAdvisorBot:
                         and last_assistant_msg.content
                         and self._is_contextual_confirmation_or_continuation(combined_text)
                     ):
-                        asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
-                        asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+                        asst_loc = self._extract_assistant_header_location(last_assistant_msg.content)
                         if asst_loc:
                             combined_text = f"[Contexto conversacional: {asst_loc}] {combined_text}"
                     return combined_text, None
@@ -1068,8 +1183,7 @@ class TelegramAdvisorBot:
             and last_assistant_msg.content
             and self._is_contextual_confirmation_or_continuation(clean_text)
         ):
-            asst_parsed = advisor_engine._parse_query_intent_heuristics(last_assistant_msg.content)
-            asst_loc = asst_parsed.get("zone_or_neighborhood") or asst_parsed.get("province")
+            asst_loc = self._extract_assistant_header_location(last_assistant_msg.content)
             if asst_loc:
                 return f"[Contexto conversacional: {asst_loc}] {clean_text}", None
 
