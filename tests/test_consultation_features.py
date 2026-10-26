@@ -829,6 +829,142 @@ def test_dev_agent_send_telegram_update_fallback_on_bad_reply_id(monkeypatch):
     assert "reply_to_message_id" not in calls[1]
 
 
+def test_supergroup_identifies_cyildirim_instead_of_overwriting_with_jsaavedra(in_memory_db):
+    """
+    Verifica que cuando un usuario registrado como Ceren (cyildirim, telegram_id=8963408509)
+    escribe en el supergrupo oficial de HIVEX (-1003904392737), verify_or_link_user identifica
+    a 'cyildirim' por su telegram_id/username en lugar de devolver siempre 'jsaavedra'.
+    """
+    from app.db.models import User
+    bot = TelegramAdvisorBot()
+
+    u_juanma = User(
+        username="jsaavedra",
+        email="juanma@hivex.internal",
+        hashed_password="h",
+        salt="s",
+        is_active=True,
+        is_admin=True,
+        telegram_id="1450113787",
+        telegram_username="Juanma_OMS",
+    )
+    u_ceren = User(
+        username="cyildirim",
+        email="cerendeinert@hotmail.de",
+        hashed_password="h",
+        salt="s",
+        is_active=True,
+        is_admin=True,
+        telegram_id="8963408509",
+        telegram_username="cyildirim",
+    )
+    in_memory_db.add_all([u_juanma, u_ceren])
+    in_memory_db.commit()
+
+    # 1. Ceren escribe en el supergrupo (-1003904392737) -> debe ser identificada como cyildirim
+    ok_ceren, db_user_ceren, reason_ceren = bot.verify_or_link_user(
+        db=in_memory_db,
+        telegram_user_id="8963408509",
+        telegram_username="cyildirim",
+        first_name="Ceren",
+        chat_id="-1003904392737",
+    )
+    assert ok_ceren is True
+    assert db_user_ceren is not None
+    assert db_user_ceren.username == "cyildirim"
+
+    # 2. Juanma escribe en el supergrupo (-1003904392737) -> identificado como jsaavedra
+    ok_jm, db_user_jm, _ = bot.verify_or_link_user(
+        db=in_memory_db,
+        telegram_user_id="1450113787",
+        telegram_username="Juanma_OMS",
+        first_name="Juanma",
+        chat_id="-1003904392737",
+    )
+    assert ok_jm is True
+    assert db_user_jm is not None
+    assert db_user_jm.username == "jsaavedra"
+
+    # 3. Miembro invitado del supergrupo sin fila en tabla `users` -> autorizado pero db_user=None (no suplanta a jsaavedra)
+    ok_guest, db_user_guest, _ = bot.verify_or_link_user(
+        db=in_memory_db,
+        telegram_user_id="777888999",
+        telegram_username="invitado_hivex",
+        first_name="Invitado",
+        chat_id="-1003904392737",
+    )
+    assert ok_guest is True
+    assert db_user_guest is None
+
+
+def test_ai_syntactic_and_semantic_cohesion_evaluation(monkeypatch):
+    """
+    Verifica que evaluate_messages_semantic_cohesion utilice el motor de IA (Gemini)
+    aplicando análisis sintáctico y semántico de las oraciones para decidir si forman
+    parte de la misma oración/pensamiento o son consultas independientes.
+    """
+    from app.core.config import settings
+    bot = TelegramAdvisorBot()
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_gemini_key_123")
+
+    captured_prompts = []
+
+    class MockGeminiResp:
+        def __init__(self, json_payload):
+            self.status_code = 200
+            self._payload = json_payload
+
+        def json(self):
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": json.dumps(self._payload)}]
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(self, url, json=None, **kwargs):
+        user_text = json["contents"][0]["parts"][0]["text"]
+        captured_prompts.append(user_text)
+        if "Que tengan al menos 3 habitaciones" in user_text:
+            return MockGeminiResp({
+                "should_concatenate": True,
+                "syntactic_relation": "SUBORDINATE_FILTER",
+                "reasoning": "La oración B es una proposición subordinada adjetiva sin verbo principal autónomo que modifica al sustantivo 'pisos' de la oración A.",
+                "reconstructed_sentence": "Búscame pisos en Carabanchel que tengan al menos 3 habitaciones y terraza."
+            })
+        return MockGeminiResp({
+            "should_concatenate": False,
+            "syntactic_relation": "INDEPENDENT_ACTIONABLE_SEARCHES",
+            "reasoning": "Ambas oraciones tienen estructura predicativa completa e independiente y solicitan búsquedas de activos en dos zonas distintas.",
+            "reconstructed_sentence": "¿me puedes enviar oportunidades de la zona de Pinto?"
+        })
+
+    monkeypatch.setattr("httpx.Client.post", fake_post)
+
+    # Caso 1: Subordinación sintáctica -> True
+    res_cohesive = bot.evaluate_messages_semantic_cohesion(
+        "Búscame pisos en Carabanchel",
+        "Que tengan al menos 3 habitaciones y terraza",
+        force_ai=True
+    )
+    assert res_cohesive is True
+    assert bot._last_ai_cohesion_result["syntactic_relation"] == "SUBORDINATE_FILTER"
+
+    # Caso 2: Oraciones independientes en distintas zonas -> False
+    res_independent = bot.evaluate_messages_semantic_cohesion(
+        "¿me puedes enviar oportunidades de la zona de carabanchel?",
+        "¿me puedes enviar oportunidades de la zona de Pinto?",
+        force_ai=True
+    )
+    assert res_independent is False
+    assert bot._last_ai_cohesion_result["syntactic_relation"] == "INDEPENDENT_ACTIONABLE_SEARCHES"
+    assert len(captured_prompts) == 2
+
+
+
 
 
 

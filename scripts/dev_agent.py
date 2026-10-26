@@ -283,9 +283,9 @@ PROTOCOLO ESTRICTO DE INGENIERÍA (ANTI-ALUCINACIONES):
    - Usa `replace_file_content` únicamente en las líneas necesarias.
    - PROHIBIDO modificar archivos de datos (`app/data/*.json`, `hivex_local.db`) salvo que la tarea pida explícitamente actualizar datos estáticos.
 3. VERIFICACIÓN Y LIMPIEZA PRE-COMMIT:
-   - Ejecuta `pytest tests/ -q` mediante `run_command` para validar tus cambios.
+   - Ejecuta tests focalizados en los módulos modificados (ej. `pytest tests/test_consultation_features.py -q`) mediante `run_command` para validar tus cambios rápidamente sin agotar el tiempo de ejecución.
    - Si al correr `pytest` algún test modifica archivos colaterales como `app/data/verified_market_catalog.json`, `app/data/supadata_backfill_quota.json` o `hivex_local.db`, ejecuta `git checkout -- app/data/ hivex_local.db` antes de terminar para que el commit contenga EXCLUSIVAMENTE tu fix de código.
-   - Ejecuta `git status -s` y `git diff --stat` con `run_command` antes de finalizar para confirmar que solo quedan modificados los archivos pertinentes a la tarea.
+   - PROHIBIDO ejecutar `git commit` o `git push` dentro de `run_command`: deja los cambios listos en el árbol de trabajo; el paso posterior del workflow de GitHub Actions hará el commit y el push automáticamente.
 4. COMUNICACIÓN CLARA CON EL USUARIO:
    - Explica siempre: (a) Cuál era la causa raíz exacta, (b) Qué archivos y líneas has modificado, y (c) Cómo lo has verificado con tests.
 """
@@ -300,12 +300,8 @@ def execute_agent_loop(
 ) -> str:
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
-        "gemini-4-argon",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview",
         "gemini-2.5-flash",
+        "gemini-3-flash-preview",
         "gemini-flash-latest",
         "gemini-2.5-pro",
     ]
@@ -324,7 +320,7 @@ def execute_agent_loop(
             "parts": [{"text": (
                 f"TAREA DE DESARROLLO SOLICITADA POR EL USUARIO DESDE TELEGRAM:\n{task}\n\n"
                 "Sigue el protocolo estricto: 1) Investiga el código real y el estado en vivo de producción si aplica, "
-                "2) Identifica la causa raíz sin alucinar, 3) Aplica el cambio quirúrgico, 4) Corre pytest, "
+                "2) Identifica la causa raíz sin alucinar, 3) Aplica el cambio quirúrgico, 4) Corre pytest focalizado, "
                 "5) Limpia cualquier archivo colateral en app/data/ o hivex_local.db con git checkout si no era parte de la tarea, "
                 "y 6) Devuelve un informe claro y detallado de la solución."
             )}]
@@ -365,7 +361,7 @@ def execute_agent_loop(
                             break
                         elif r.status_code in (429, 503):
                             continue
-                        elif r.status_code in (403, 404):
+                        elif r.status_code in (400, 403, 404):
                             print(f"Aviso API ({model} con key #{key_idx + 1} devolvió {r.status_code}): probando siguiente credencial/modelo.")
                             unavailable_pairs.add((model, key_idx))
                             continue

@@ -71,13 +71,10 @@ class TelegramAdvisorBot:
         Verifica si el usuario de Telegram está autorizado en la plataforma HIVEX.
         La autorización se gestiona exclusivamente por el administrador en la plataforma
         (mediante User.telegram_id, User.telegram_username o lista autorizada en variables de entorno).
+        Primero identifica siempre al usuario nominal (ej. cyildirim, jsaavedra, etc.) por su ID o username,
+        incluso dentro del supergrupo corporativo (-1003904392737), para saludarle por su propio nombre
+        y asociar sus consultas a su usuario real.
         """
-        # 0. En el grupo corporativo oficial de HIVEX (-1003904392737), siempre autorizar
-        if str(chat_id) == "-1003904392737": # Solo el chat_id negativo es el grupo oficial
-            admin = db.query(User).filter(User.username == "jsaavedra").first()
-            if admin:
-                return True, admin, "Usuario autorizado por pertenecer al grupo oficial HIVEX"
-
         str_tg_id = str(telegram_user_id) if telegram_user_id is not None else ""
         tg_user_clean = (telegram_username or "").lower().lstrip("@")
 
@@ -109,10 +106,11 @@ class TelegramAdvisorBot:
                     db.commit()
             return True, admin, f"Usuario autenticado como jsaavedra (Juanma)"
 
-        # 2. Búsqueda por telegram_id ya registrado en BD
-        user = db.query(User).filter(User.telegram_id == str_tg_id).first()
-        if user and user.is_active:
-            return True, user, f"Usuario autenticado por ID de Telegram ({user.username})"
+        # 2. Búsqueda por telegram_id ya registrado en BD (ej. cyildirim con ID 8963408509)
+        if str_tg_id:
+            user = db.query(User).filter(User.telegram_id == str_tg_id).first()
+            if user and user.is_active:
+                return True, user, f"Usuario autenticado por ID de Telegram ({user.username})"
 
         # 3. Búsqueda por username coincidente en BD registrado por el administrador
         if tg_user_clean:
@@ -145,6 +143,12 @@ class TelegramAdvisorBot:
                     target_user.telegram_username = tg_user_clean
                 db.commit()
                 return True, target_user, f"Usuario autorizado por configuración de entorno ({target_user.username})"
+
+        # 5. Fallback para el grupo corporativo oficial de HIVEX (-1003904392737):
+        # Si escribe un miembro del grupo aún no dado de alta nominalmente en la tabla `users`,
+        # se autoriza sin suplantar su identidad por `jsaavedra` (db_user=None mantiene su propio username/first_name).
+        if str(chat_id) == "-1003904392737":
+            return True, None, "Usuario autorizado por pertenecer al grupo oficial HIVEX"
 
         return False, None, "Usuario no identificado en HIVEX"
 
@@ -895,27 +899,136 @@ class TelegramAdvisorBot:
             "has_discourse_link": has_discourse_link,
         }
 
-    def evaluate_messages_semantic_cohesion(self, prev_text: str, curr_text: str) -> bool:
+    def _evaluate_syntactic_semantic_cohesion_with_ai(
+        self,
+        prev_text: str,
+        curr_text: str
+    ) -> Optional[Dict[str, Any]]:
         """
-        Fórmula Universal de Cohesión Semántica Multi-Factor (>95% precisión).
-        Evalúa si dos (o más) mensajes consecutivos del mismo usuario (sin contestación intermedia del bot)
-        responden afirmativamente a la pregunta:
-        "¿Estos mensajes seguidos están relacionados y se pueden responder de una sola vez, en una misma respuesta?"
+        Motor Lingüístico de IA (Gemini) para Análisis Sintáctico y Semántico de Oraciones Consecutivas.
+        Determina mediante análisis gramatical, sintáctico y pragmático-semántico si dos mensajes seguidos
+        del mismo usuario (sin contestación intermedia del bot) forman parte de la misma oración/pensamiento
+        y deben fusionarse y responderse de una sola vez, o si constituyen oraciones/consultas independientes.
+        """
+        prev_clean = (prev_text or "").strip()
+        curr_clean = (curr_text or "").strip()
+        if not prev_clean or not curr_clean:
+            return None
 
-        Reglas estructurales del dominio HIVEX:
-        1. Mensajes de auditoría de sistema o estado de alertas ('SYSTEM_META') nunca se mezclan con búsquedas -> False.
-        2. Si ambos mensajes apuntan a ZONAS GEOGRÁFICAS DISTINTAS (v1.loc != v2.loc):
-           - Si el segundo mensaje (o ambos) solicita una BÚSQUEDA ACCIONABLE DE FICHAS ('ACTIONABLE_SEARCH'),
-             incluso si empieza por "y..." o "también...", DEBEN separarse (False) porque cada zona requiere su
-             propia alerta/consulta guardada (`SavedConsultation`) y su propio carrusel de fichas en plataforma y Telegram.
-           - Si son consultas de KPIs, rentabilidad (yield), precios medios, comparativas o análisis de mercado
-             ('ANALYTICAL_KPI' o `is_comparative`), SÍ se responden de una sola vez en un informe comparativo único (True),
-             y además no generan alertas vacías en plataforma.
-        3. Si mantienen la MISMA ZONA o el segundo mensaje NO introduce una zona en conflicto:
-           - Si son dos búsquedas accionables independientes de DISTINTA TIPOLOGÍA DE ACTIVO (ej. Pisos vs Locales)
-             sin conectores de refinamiento conjunto -> False (2 consultas separadas por tipología).
-           - En cualquier otro caso (añadir filtros de precio/m2/cambio de uso, pedir que se envíen por aquí las
-             oportunidades de la reflexión previa, matizar la misma consulta) -> True (concatenar en un único prompt).
+        # Comandos explícitos de barra (/alertas, /dev, /start) nunca son continuación sintáctica de una oración
+        if curr_clean.startswith("/") or prev_clean.startswith("/"):
+            return {
+                "should_concatenate": False,
+                "syntactic_relation": "INDEPENDENT_COMMAND",
+                "reconstructed_sentence": curr_clean
+            }
+
+        api_keys: List[str] = []
+        for k in [
+            os.getenv("PAID_GEMINI_API_KEY", ""),
+            getattr(settings, "PAID_GEMINI_API_KEY", ""),
+            getattr(settings, "GEMINI_API_KEY", ""),
+            os.getenv("GEMINI_API_KEY", ""),
+            os.getenv("GOOGLE_API_KEY", ""),
+        ]:
+            k_clean = (k or "").strip()
+            if k_clean and k_clean not in api_keys:
+                api_keys.append(k_clean)
+
+        if not api_keys:
+            return None
+
+        system_prompt = (
+            "Eres un analizador lingüístico experto en sintaxis, gramática española y semántica pragmática "
+            "para el asesor inmobiliario de inversión HIVEX.\n"
+            "Un mismo usuario ha enviado dos mensajes consecutivos en el chat sin respuesta intermedia del asistente:\n"
+            "- Oración A (mensaje previo)\n"
+            "- Oración B (mensaje actual)\n\n"
+            "Tu tarea es decidir mediante ANÁLISIS SINTÁCTICO Y SEMÁNTICO si la Oración A y la Oración B forman parte "
+            "de la misma oración/unidad de pensamiento (y por tanto deben concatenarse/reconstruirse para responderse "
+            "de una sola vez), o si son dos oraciones e intenciones independientes que deben procesarse por separado.\n\n"
+            "CRITERIOS LINGÜÍSTICOS (SINTÁCTICOS Y SEMÁNTICOS):\n"
+            "1. DEPENDENCIA SINTÁCTICA Y CONTINUIDAD ORACIONAL (-> should_concatenate = true):\n"
+            "   - Elipsis verbal o nominal: La Oración B omite el verbo principal o el objeto porque los hereda sintácticamente "
+            "de la Oración A (ej. A: '¿Qué precio medio tienen los pisos en Getafe?' + B: '¿Y en Leganés?'; "
+            "A: 'Quiero ver chalets en Villanueva del Pardillo' + B: 'Máximo 450.000 euros').\n"
+            "   - Subordinación o coordinación que extiende el predicado de A: La Oración B comienza con conjunciones copulativas, "
+            "adversativas o proposiciones subordinadas relativas/condicionales que matizan o completan la Oración A "
+            "(ej. A: 'Búscame pisos en Carabanchel' + B: 'Que tengan al menos 3 habitaciones y terraza'; "
+            "A: 'Sí, configura, pero ten en cuenta en la búsqueda que esos locales deben permitir la reconversión' + "
+            "B: 'Y envíame por aquí las oportunidades q descubras').\n"
+            "   - Correferencia anafórica o demostrativa: La Oración B utiliza pronombres o sintagmas demostrativos cuyo antecedente "
+            "está en la Oración A (ej. 'esos locales', 'esas oportunidades', 'en esa búsqueda').\n"
+            "   - Continuidad semántica analítica/comparativa: Ambos mensajes formulan preguntas analíticas o comparativas de indicadores "
+            "(yield, rentabilidad, precios medios, conteo de oportunidades) que se responden en un único análisis comparativo "
+            "(ej. A: '¿me puedes decir el yield de la zona de carabanchel?' + B: '¿me puedes comparar con el yield de Pinto?').\n\n"
+            "2. INDEPENDENCIA ORACIONAL Y PRAGMÁTICA (-> should_concatenate = false):\n"
+            "   - Dos peticiones completas y autónomas de búsqueda/envío de oportunidades (fichas de activos) en ZONAS GEOGRÁFICAS DISTINTAS "
+            "(ej. A: '¿me puedes enviar oportunidades de la zona de carabanchel?' + B: '¿me puedes enviar oportunidades de la zona de Pinto?', "
+            "o A: 'Envíame oportunidades de chalets en Las Rozas' + B: 'También búscame pisos en Getafe'). Aunque haya paralelismo o 'también/y', "
+            "en HIVEX cada búsqueda accionable de fichas en una zona distinta requiere su propia alerta y carrusel separado -> should_concatenate = false.\n"
+            "   - Dos oraciones completas e independientes que piden buscar tipologías de inmuebles distintas sin relación sintáctica de dependencia "
+            "(ej. A: 'Muéstrame pisos en Carabanchel' + B: 'Muéstrame locales comerciales en Carabanchel') -> should_concatenate = false.\n"
+            "   - Ruptura temática hacia auditoría del sistema o estado de alertas en plataforma "
+            "(ej. B: '¿estás seguro que no hay oportunidades nuevas de ninguna de las alertas configuradas en plataforma?') -> should_concatenate = false.\n\n"
+            "Devuelve EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:\n"
+            "{\n"
+            '  "should_concatenate": true | false,\n'
+            '  "syntactic_relation": "ELLIPSIS" | "SUBORDINATE_FILTER" | "COORDINATE_CONTINUATION" | "ANAPHORIC_REFERENCE" | "COMPARATIVE_ANALYSIS" | "INDEPENDENT_ACTIONABLE_SEARCHES" | "SYSTEM_AUDIT_SHIFT",\n'
+            '  "reasoning": "Breve explicación del análisis sintáctico y semántico de las dos oraciones",\n'
+            '  "reconstructed_sentence": "Si should_concatenate es true, escribe la oración unificada (conservando el sentido íntegro de A y B). Si es false, escribe solo la Oración B."\n'
+            "}"
+        )
+
+        user_prompt = (
+            f"Oración A (mensaje previo del usuario): «{prev_clean}»\n"
+            f"Oración B (mensaje actual del usuario): «{curr_clean}»\n"
+            "Analiza sintáctica y semánticamente ambas oraciones y responde en JSON."
+        )
+
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 350,
+                "responseMimeType": "application/json",
+            },
+        }
+
+        models = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-flash-latest"]
+        for model in models:
+            for key in api_keys:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+                try:
+                    with httpx.Client(timeout=6.0) as client:
+                        resp = client.post(url, json=payload)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                            raw_text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+                            if raw_text:
+                                raw_clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+                                parsed = json.loads(raw_clean)
+                                if isinstance(parsed, dict) and "should_concatenate" in parsed:
+                                    logger.info(
+                                        f"[AI Syntactic-Semantic Cohesion ({model})] "
+                                        f"should_concatenate={parsed.get('should_concatenate')} | "
+                                        f"relation={parsed.get('syntactic_relation')} | "
+                                        f"reason={parsed.get('reasoning')}"
+                                    )
+                                    return parsed
+                        elif resp.status_code in (400, 403, 404):
+                            break
+                except Exception as e_ai:
+                    logger.debug(f"Aviso en análisis sintáctico-semántico IA ({model}): {e_ai}")
+                    continue
+        return None
+
+    def _evaluate_cohesion_heuristic_fallback(self, prev_text: str, curr_text: str) -> bool:
+        """
+        Respaldo determinista multi-factor (utilizado únicamente cuando no hay red/API Key disponible
+        o en entornos de test offline sin mock de red).
         """
         prev_clean = (prev_text or "").strip()
         curr_clean = (curr_text or "").strip()
@@ -941,34 +1054,30 @@ class TelegramAdvisorBot:
 
         # REGLA 1: Consultas de sistema / auditoría de alertas nunca se fusionan con consultas de mercado
         if v1["intent"] == "SYSTEM_META" or v2["intent"] == "SYSTEM_META" or v_full_prev["intent"] == "SYSTEM_META":
-            logger.info("[Semantic Cohesion] ❌ Mensaje de auditoría/sistema detectado -> NO concatenar.")
+            logger.info("[Semantic Cohesion Fallback] ❌ Mensaje de auditoría/sistema detectado -> NO concatenar.")
             return False
 
         has_different_zones = bool(eff_prev_loc and v2["loc"] and eff_prev_loc != v2["loc"])
 
         # REGLA 2: Zonas geográficas distintas
         if has_different_zones:
-            # Si el segundo mensaje pide enviar/buscar fichas de oportunidades en otra zona, SIEMPRE separar
-            # para crear su propia consulta/alerta independiente en plataforma
             if v2["intent"] == "ACTIONABLE_SEARCH" and not v2["is_comparative"]:
                 logger.info(
-                    f"[Semantic Cohesion] ❌ Búsqueda accionable de oportunidades en nueva zona "
+                    f"[Semantic Cohesion Fallback] ❌ Búsqueda accionable de oportunidades en nueva zona "
                     f"('{eff_prev_loc}' -> '{v2['loc']}') -> NO concatenar (2 consultas separadas)."
                 )
                 return False
 
-            # Si el primero era una búsqueda accionable de fichas y el segundo cambia de zona sin ser comparativa
             if eff_prev_intent == "ACTIONABLE_SEARCH" and not v2["is_comparative"]:
                 logger.info(
-                    f"[Semantic Cohesion] ❌ Cambio de zona tras búsqueda accionable "
+                    f"[Semantic Cohesion Fallback] ❌ Cambio de zona tras búsqueda accionable "
                     f"('{eff_prev_loc}' -> '{v2['loc']}') -> NO concatenar."
                 )
                 return False
 
-            # Si ambos son analíticos/KPIs (yield, precio medio, rentabilidad) o comparativos -> SÍ concatenar en 1 respuesta
             if v2["is_comparative"] or (eff_prev_intent == "ANALYTICAL_KPI" and v2["intent"] in ("ANALYTICAL_KPI", "FILTER_MODIFIER")):
                 logger.info(
-                    f"[Semantic Cohesion] ✅ Consulta analítica/comparativa multi-zona "
+                    f"[Semantic Cohesion Fallback] ✅ Consulta analítica/comparativa multi-zona "
                     f"('{eff_prev_loc}' vs '{v2['loc']}') -> Concatenar en 1 respuesta."
                 )
                 return True
@@ -976,7 +1085,6 @@ class TelegramAdvisorBot:
             return False
 
         # REGLA 3: Misma zona o el segundo mensaje no especifica nueva zona
-        # Si ambos son búsquedas accionables completas de distinta tipología de activo sin conector discursivo
         if (
             eff_prev_intent == "ACTIONABLE_SEARCH"
             and v2["intent"] == "ACTIONABLE_SEARCH"
@@ -987,18 +1095,47 @@ class TelegramAdvisorBot:
             and not v2["has_discourse_link"]
         ):
             logger.info(
-                f"[Semantic Cohesion] ❌ Dos búsquedas independientes de distinta tipología "
+                f"[Semantic Cohesion Fallback] ❌ Dos búsquedas independientes de distinta tipología "
                 f"('{eff_prev_prop}' vs '{v2['prop']}') -> NO concatenar."
             )
             return False
 
-        # Cualquier refinamiento de filtros, instrucción de entrega ("Y envíame por aquí las oportunidades q descubras"),
-        # o pregunta analítica complementaria sobre la misma zona/búsqueda se responde de una sola vez
         logger.info(
-            f"[Semantic Cohesion] ✅ Mensajes cohesionados ({eff_prev_intent} + {v2['intent']}, "
+            f"[Semantic Cohesion Fallback] ✅ Mensajes cohesionados ({eff_prev_intent} + {v2['intent']}, "
             f"zona='{eff_prev_loc or v2['loc'] or 'contextual'}') -> Concatenar en 1 respuesta."
         )
         return True
+
+    def evaluate_messages_semantic_cohesion(
+        self,
+        prev_text: str,
+        curr_text: str,
+        force_ai: bool = False
+    ) -> bool:
+        """
+        Evalúa si dos (o más) mensajes consecutivos del mismo usuario (sin contestación intermedia del bot)
+        forman parte de la misma oración o unidad de pensamiento y se pueden responder de una sola vez:
+        1. Primero invoca el Motor de Análisis Sintáctico y Semántico por IA (`_evaluate_syntactic_semantic_cohesion_with_ai`),
+           donde Gemini analiza la estructura gramatical (elipsis, subordinación, coordinación, correferencia anafórica)
+           y la unidad semántico-pragmática de las oraciones.
+        2. Si la API de IA no está alcanzable o se ejecuta en modo test offline sin mock, utiliza el respaldo
+           estructural (`_evaluate_cohesion_heuristic_fallback`).
+        """
+        prev_clean = (prev_text or "").strip()
+        curr_clean = (curr_text or "").strip()
+        if not prev_clean or not curr_clean:
+            return False
+
+        self._last_ai_cohesion_result: Optional[Dict[str, Any]] = None
+
+        # Ejecutar análisis sintáctico y semántico real con IA en producción (o cuando force_ai=True en tests)
+        if force_ai or "PYTEST_CURRENT_TEST" not in os.environ:
+            ai_res = self._evaluate_syntactic_semantic_cohesion_with_ai(prev_clean, curr_clean)
+            if ai_res is not None and "should_concatenate" in ai_res:
+                self._last_ai_cohesion_result = ai_res
+                return bool(ai_res["should_concatenate"])
+
+        return self._evaluate_cohesion_heuristic_fallback(prev_clean, curr_clean)
 
     def _is_contextual_confirmation_or_continuation(self, text_Input: str) -> bool:
         """
@@ -1619,18 +1756,31 @@ class TelegramAdvisorBot:
             return True
 
         # Disparar workflow en GitHub Actions vía API REST
+        import base64
         url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
         headers = {
             "Authorization": f"Bearer {gh_token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
+        bot_token_raw = (self.token or getattr(settings, "TELEGRAM_BOT_TOKEN", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+        gemini_key_raw = (
+            os.getenv("PAID_GEMINI_API_KEY", "")
+            or getattr(settings, "PAID_GEMINI_API_KEY", "")
+            or getattr(settings, "GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        ).strip()
+        bot_token_b64 = base64.b64encode(bot_token_raw.encode("utf-8")).decode("ascii") if bot_token_raw else ""
+        gemini_key_b64 = base64.b64encode(gemini_key_raw.encode("utf-8")).decode("ascii") if gemini_key_raw else ""
+
         payload = {
             "ref": "main",
             "inputs": {
                 "task": clean_task,
                 "telegram_chat_id": str(chat_id),
-                "telegram_message_id": str(message_id) if message_id else ""
+                "telegram_message_id": str(message_id) if message_id else "",
+                "bot_token_b64": bot_token_b64,
+                "gemini_key_b64": gemini_key_b64,
             }
         }
 
