@@ -16,14 +16,6 @@ on:
         description: 'Message ID para hacer reply en Telegram'
         required: false
         type: string
-      bot_token_b64:
-        description: 'Token de Telegram en base64 (fallback desde Vercel)'
-        required: false
-        type: string
-      gemini_key_b64:
-        description: 'API Key de Gemini en base64 (fallback desde Vercel)'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -53,43 +45,11 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
-      - name: Resolver Credenciales de Telegram y Gemini
-        env:
-          SECRET_TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          SECRET_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
-          VAR_PAID_GEMINI_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
-          INPUT_TG_B64: ${{ inputs.bot_token_b64 }}
-          INPUT_GEMINI_B64: ${{ inputs.gemini_key_b64 }}
-        run: |
-          python - << 'PYEOF'
-          import os, base64
-          tg_token = (os.getenv("SECRET_TG_TOKEN") or "").strip()
-          if not tg_token and os.getenv("INPUT_TG_B64"):
-              try:
-                  tg_token = base64.b64decode(os.getenv("INPUT_TG_B64")).decode("utf-8").strip()
-              except Exception:
-                  pass
-          gemini_key = (os.getenv("VAR_PAID_GEMINI_KEY") or os.getenv("SECRET_GEMINI_KEY") or "").strip()
-          if not gemini_key and os.getenv("INPUT_GEMINI_B64"):
-              try:
-                  gemini_key = base64.b64decode(os.getenv("INPUT_GEMINI_B64")).decode("utf-8").strip()
-              except Exception:
-                  pass
-          env_file = os.getenv("GITHUB_ENV")
-          if tg_token:
-              print(f"::add-mask::{tg_token}")
-              with open(env_file, "a", encoding="utf-8") as f:
-                  f.write(f"RESOLVED_TELEGRAM_BOT_TOKEN={tg_token}\n")
-          if gemini_key:
-              print(f"::add-mask::{gemini_key}")
-              with open(env_file, "a", encoding="utf-8") as f:
-                  f.write(f"RESOLVED_GEMINI_API_KEY={gemini_key}\n")
-          PYEOF
-
       - name: Notificar Inicio en Telegram
         if: ${{ inputs.telegram_chat_id != '' }}
         env:
-          TELEGRAM_BOT_TOKEN: ${{ env.RESOLVED_TELEGRAM_BOT_TOKEN }}
+          PYTHONPATH: .
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -109,10 +69,11 @@ jobs:
       - name: Ejecutar Autonomous DevAgent
         id: dev_agent
         env:
+          PYTHONPATH: .
           PAID_GEMINI_API_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
-          GEMINI_API_KEY: ${{ env.RESOLVED_GEMINI_API_KEY }}
-          GOOGLE_API_KEY: ${{ env.RESOLVED_GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ env.RESOLVED_TELEGRAM_BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -165,7 +126,8 @@ jobs:
       - name: Notificar Resultado Exitoso en Telegram
         if: success() && inputs.telegram_chat_id != ''
         env:
-          TELEGRAM_BOT_TOKEN: ${{ env.RESOLVED_TELEGRAM_BOT_TOKEN }}
+          PYTHONPATH: .
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -214,7 +176,8 @@ jobs:
       - name: Notificar Error en Telegram
         if: failure() && inputs.telegram_chat_id != ''
         env:
-          TELEGRAM_BOT_TOKEN: ${{ env.RESOLVED_TELEGRAM_BOT_TOKEN }}
+          PYTHONPATH: .
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}

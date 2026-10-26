@@ -996,7 +996,16 @@ class TelegramAdvisorBot:
             },
         }
 
-        models = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-flash-latest"]
+        models = [
+            "gemini-4-argon",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+            "gemini-2.5-pro",
+        ]
         for model in models:
             for key in api_keys:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
@@ -1756,31 +1765,18 @@ class TelegramAdvisorBot:
             return True
 
         # Disparar workflow en GitHub Actions vía API REST
-        import base64
         url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
         headers = {
             "Authorization": f"Bearer {gh_token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
-        bot_token_raw = (self.token or getattr(settings, "TELEGRAM_BOT_TOKEN", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
-        gemini_key_raw = (
-            os.getenv("PAID_GEMINI_API_KEY", "")
-            or getattr(settings, "PAID_GEMINI_API_KEY", "")
-            or getattr(settings, "GEMINI_API_KEY", "")
-            or os.getenv("GEMINI_API_KEY", "")
-        ).strip()
-        bot_token_b64 = base64.b64encode(bot_token_raw.encode("utf-8")).decode("ascii") if bot_token_raw else ""
-        gemini_key_b64 = base64.b64encode(gemini_key_raw.encode("utf-8")).decode("ascii") if gemini_key_raw else ""
-
         payload = {
             "ref": "main",
             "inputs": {
                 "task": clean_task,
                 "telegram_chat_id": str(chat_id),
-                "telegram_message_id": str(message_id) if message_id else "",
-                "bot_token_b64": bot_token_b64,
-                "gemini_key_b64": gemini_key_b64,
+                "telegram_message_id": str(message_id) if message_id else ""
             }
         }
 

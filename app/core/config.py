@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "hivex_realestate"
     DATABASE_URL: str = "postgresql://postgres.wxoctzvzmkavkmjwtnux:9gc%237vaQQ_U58FZ@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
-    # Telegram
-    TELEGRAM_BOT_TOKEN: str = "8889706886:AAHsstY0aMs7Dot3CfzpYexfuoSEiDQ9IUU"
+    # Telegram (NUNCA hardcodear el token en código fuente para evitar exposición en GitHub)
+    TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = "-1003904392737"
     PLATFORM_BASE_URL: str = "https://hivex-realestate-spain.vercel.app"
 
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         if not (self.TELEGRAM_BOT_TOKEN or "").strip():
-            self.TELEGRAM_BOT_TOKEN = "8889706886:AAHsstY0aMs7Dot3CfzpYexfuoSEiDQ9IUU"
+            self.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
         if not (self.TELEGRAM_CHAT_ID or "").strip():
             self.TELEGRAM_CHAT_ID = "-1003904392737"
         if not (self.DATABASE_URL or "").strip():
