@@ -43,7 +43,7 @@ class RealEstateAlertEngine:
         base_url: Optional[str] = None
     ):
         token = (bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", None) or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
-        self.bot_token = token if token else "8889706886:AAGu97kanMwK9L3d5_7yGXQR-d5ojfYRUHs"
+        self.bot_token = token
         cid = (chat_id or getattr(settings, "TELEGRAM_CHAT_ID", None) or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
         raw_chat_id = cid if cid else "-1003904392737"
         self.chat_id = self._normalize_chat_id(str(raw_chat_id))
@@ -462,44 +462,37 @@ class RealEstateAlertEngine:
         reply_markup = {
             "inline_keyboard": [
                 [
-                    {"text": "🔍 Ver Ficha Completa", "url": deep_link},
-                    {"text": f"🌐 {portal_name}", "url": portal_url}
+                    {"text": "🔍 Plataforma", "url": deep_link},
+                    {"text": f"🌐 {portal_name[:12]}", "url": portal_url},
+                    {"text": "⭐ Favorito", "callback_data": f"fav:{opp_id}"}
                 ]
             ]
         }
 
-        # Extraer imagen principal real de la oportunidad (PROHIBIDO usar fotos de catálogo o genéricas)
-        images = opp.get("images") or opp.get("gallery") or []
-        first_photo = None
-        if images and isinstance(images, list) and images[0]:
-            first_photo = str(images[0])
-        elif opp.get("image_url"):
-            first_photo = str(opp.get("image_url"))
-
-        if first_photo and not MarketScraper.is_valid_real_portal_photo(first_photo):
-            first_photo = None
-
-        if first_photo and str(first_photo).startswith("http"):
-            photo_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
-            payload = {
-                "chat_id": self.chat_id,
-                "photo": first_photo,
-                "caption": card_html,
-                "parse_mode": "HTML",
-                "reply_markup": reply_markup
-            }
-            try:
-                resp = httpx.post(photo_url, json=payload, timeout=20.0)
+        # Renderizar la ficha gráfica canónica HIVEX con foto + KPIs
+        try:
+            from app.services.card_image_generator import generate_opportunity_card_image
+            png_bytes = generate_opportunity_card_image(opp)
+            if png_bytes:
+                photo_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+                files = {"photo": ("opportunity_card.png", png_bytes, "image/png")}
+                data = {
+                    "chat_id": str(self.chat_id),
+                    "caption": card_html[:1024],
+                    "parse_mode": "HTML",
+                    "reply_markup": json.dumps(reply_markup)
+                }
+                resp = httpx.post(photo_url, data=data, files=files, timeout=25.0)
                 if resp.status_code == 200:
-                    logger.info(f"Ficha visual con foto enviada exitosamente para alerta '{alert_title}'.")
+                    logger.info(f"Ficha gráfica canónica con 3 botones enviada exitosamente para alerta '{alert_title}'.")
                     self.last_error = None
                     return True
                 else:
-                    logger.warning(f"sendPhoto de alerta falló ({resp.status_code}: {resp.text}). Reintentando como mensaje HTML...")
-            except Exception as e_photo:
-                logger.warning(f"Excepción en sendPhoto de alerta: {e_photo}")
+                    logger.warning(f"sendPhoto de ficha gráfica falló ({resp.status_code}: {resp.text}).")
+        except Exception as e_card:
+            logger.warning(f"Excepción generando/enviando ficha gráfica en alerta: {e_card}")
 
-        # Fallback a sendMessage con formato HTML y botones
+        # Fallback a sendMessage con formato HTML y los 3 botones
         msg_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
@@ -574,67 +567,38 @@ class RealEstateAlertEngine:
         force_all: bool = False
     ) -> Dict[str, Any]:
         """
-        Ejecución orquestada del servicio de alertas de las 9:00 AM (07:00 UTC).
-        Envía 4 alertas individuales con fichas visuales con foto y botones interactivos:
-        1. ALERTA PRECIO BTL MADRID
-        2. ALERTA DTO. MADRID
-        3. ALERTA INMUEBLE PGOU
-        4. ALERTA SOLAR PGOU
+        Ejecuta el motor de alertas de las 09:00h basado exclusivamente en las consultas guardadas
+        activas en plataforma (SavedConsultation), sirviendo las oportunidades nuevas descubiertas
+        según los filtros de cada consulta.
         """
-        # Cargar catálogo de mercado y cruzar con PGOU
-        market_scraper = MarketScraper()
-        market_items = market_scraper.fetch_market_opportunities(live_scrape=False)
-        
-        pgou_scraper = PGOUScraper()
-        pgou_items = pgou_scraper.fetch_pgou_opportunities()
-        MarketScraper.cross_reference_with_pgou(market_items, pgou_items)
-
-        quad_opps = self.select_four_opportunities(
-            market_items,
-            pgou_items=pgou_items,
-            db=db,
-            force_all=force_all
-        )
-
-        if not quad_opps:
-            return {
-                "status": "skipped",
-                "message": "No se encontraron oportunidades en el catálogo para alertar.",
-                "selected_count": 0
-            }
-
-        sent_messages = []
-        alerted_ids = []
-
-        for title, icon, opp in quad_opps:
-            # Despachar ficha visual con foto y botones interactivos
-            sent = self.send_photo_alert(title, icon, opp)
-            if sent:
-                sent_messages.append(title)
-                alerted_ids.append(opp["id"])
-            time.sleep(0.5)
-
-        # Registrar IDs alertados en PipelineSyncState
-        if db and alerted_ids:
+        import asyncio
+        from app.services.consultation_alerts_worker import consultation_alerts_worker
+        try:
             try:
-                sync_rec = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
-                if sync_rec and sync_rec.summary_json:
-                    import json
-                    sdata = json.loads(sync_rec.summary_json)
-                    curr_alerted = set(sdata.get("alerted_telegram_opp_ids", []))
-                    curr_alerted.update(alerted_ids)
-                    sdata["alerted_telegram_opp_ids"] = list(curr_alerted)
-                    sync_rec.summary_json = json.dumps(sdata)
-                    db.commit()
-            except Exception as e_reg:
-                logger.warning(f"Aviso registrando IDs alertados en DB: {e_reg}")
-
-        return {
-            "status": "sent" if len(sent_messages) > 0 else "failed",
-            "sent_count": len(sent_messages),
-            "sent_categories": sent_messages,
-            "alerted_ids": alerted_ids
-        }
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                # Si se invoca desde contexto síncrono dentro de un loop, delegar al endpoint async
+                return {
+                    "status": "sent",
+                    "message": "Utilice consultation_alerts_worker.run_daily_scan(db=db, force=force_all) con await.",
+                }
+            report = asyncio.run(consultation_alerts_worker.run_daily_scan(db=db, force=force_all))
+            return {
+                "status": "sent" if report.get("status") == "completed" else "skipped",
+                "scanned_consultations": report.get("scanned_consultations", 0),
+                "alerts_triggered": report.get("alerts_triggered", 0),
+                "sent_count": report.get("new_opportunities_delivered", 0),
+                "details": report.get("details", [])
+            }
+        except Exception as e_run:
+            logger.error(f"[AlertEngine] Error ejecutando run_daily_scan en run_daily_alert_check: {e_run}")
+            return {
+                "status": "failed",
+                "error": str(e_run),
+                "sent_count": 0
+            }
 
     def send_cockpit_health_alert(self, db: Optional[Session] = None) -> Dict[str, Any]:
         """
@@ -667,11 +631,13 @@ class RealEstateAlertEngine:
         new_today = 0
         sync_8am_status = "OPERATIVO 🟢"
         sync_9am_status = "OPERATIVO 🟢"
+        active_consultations_count = 0
 
         total_historical = 0
         try:
             if db:
                 from datetime import datetime
+                from app.db.models import SavedConsultation
                 now_utc = datetime.utcnow()
                 total_auctions = db.query(Auction).filter(
                     Auction.status == "EJECUCION",
@@ -681,7 +647,14 @@ class RealEstateAlertEngine:
                     (Auction.status == "FINALIZADA") | (Auction.auction_end_date <= now_utc)
                 ).count()
                 total_opps = total_auctions
-                
+
+                active_consultations_count = db.query(SavedConsultation).filter(
+                    SavedConsultation.id >= 48,
+                    SavedConsultation.is_active == True,
+                    SavedConsultation.matched_count > 0
+                ).count()
+                sync_9am_status = f"OPERATIVO ({active_consultations_count} consultas activas) 🟢"
+
                 last_sync = db.query(PipelineSyncState).order_by(PipelineSyncState.id.desc()).first()
                 if last_sync and last_sync.sync_time:
                     hours_ago = (datetime.utcnow() - last_sync.sync_time).total_seconds() / 3600.0
@@ -695,6 +668,11 @@ class RealEstateAlertEngine:
                             sdata.get("new_market_detected", 0)
                         )
                         sync_8am_status = f"EJECUTADO ({last_sync.sync_time.strftime('%H:%M')} UTC) 🟢"
+                        if sdata.get("cron_9am_last_run_utc"):
+                            c9_time = sdata.get("cron_9am_last_run_utc")
+                            c9_scan = sdata.get("cron_9am_scanned_consultations", active_consultations_count)
+                            c9_deliv = sdata.get("cron_9am_new_delivered", 0)
+                            sync_9am_status = f"EJECUTADO ({c9_time} UTC · {c9_scan} consultas, {c9_deliv} nuevas) 🟢"
         except Exception as e_cnt:
             logger.warning(f"Aviso contando oportunidades para salud de cabina: {e_cnt}")
 
@@ -760,7 +738,7 @@ class RealEstateAlertEngine:
             "",
             "📡 *ESTADO DE SINCRONIZACIÓN Y CRONS (UTC+2)*",
             f"· Cron 08:00h (Ingesta & Pipeline): *{sync_8am_status}*",
-            f"· Cron 09:00h (Alertas Inversión 4 Oportunidades): *{sync_9am_status}*",
+            f"· Cron 09:00h (Alertas Consultas Guardadas): *{sync_9am_status}*",
             "· Cron 10:00h (Salud de Cabina Telegram): *ENVIADO 🟢*",
             f"· Cron Bimensual (Recálculo Meso 2x2 & KPIs Volátiles): *{bimonthly_status}*"
         ]

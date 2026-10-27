@@ -172,6 +172,38 @@ MUNICIPALITY_MARKET_2X2: Dict[str, Dict[str, Dict[str, float]]] = {
         "URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0},
         "RÚSTICO": {"INMUEBLE": 500.0, "SOLAR": 25.0}
     },
+    "LAS ROZAS DE MADRID": {
+        "URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0},
+        "RÚSTICO": {"INMUEBLE": 500.0, "SOLAR": 25.0}
+    },
+    "VILLANUEVA DEL PARDILLO": {
+        "URBANO": {"INMUEBLE": 2950.0, "SOLAR": 950.0},
+        "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 20.0}
+    },
+    "VILLANUEVA DE LA CAÑADA": {
+        "URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0},
+        "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 22.0}
+    },
+    "VILLANUEVA DE LA CANADA": {
+        "URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0},
+        "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 22.0}
+    },
+    "MAJADAHONDA": {
+        "URBANO": {"INMUEBLE": 4100.0, "SOLAR": 1350.0},
+        "RÚSTICO": {"INMUEBLE": 550.0, "SOLAR": 25.0}
+    },
+    "BOADILLA DEL MONTE": {
+        "URBANO": {"INMUEBLE": 3900.0, "SOLAR": 1300.0},
+        "RÚSTICO": {"INMUEBLE": 520.0, "SOLAR": 24.0}
+    },
+    "POZUELO DE ALARCÓN": {
+        "URBANO": {"INMUEBLE": 4400.0, "SOLAR": 1500.0},
+        "RÚSTICO": {"INMUEBLE": 600.0, "SOLAR": 28.0}
+    },
+    "POZUELO DE ALARCON": {
+        "URBANO": {"INMUEBLE": 4400.0, "SOLAR": 1500.0},
+        "RÚSTICO": {"INMUEBLE": 600.0, "SOLAR": 28.0}
+    },
     "MÓSTOLES": {
         "URBANO": {"INMUEBLE": 1750.0, "SOLAR": 500.0},
         "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}
@@ -299,7 +331,15 @@ CP_DISTRICT_MARKET_2X2: Dict[str, Tuple[Dict[str, Dict[str, float]], str]] = {
     "28702": ({"URBANO": {"INMUEBLE": 3100.0, "SOLAR": 950.0}, "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 12.0}}, "San Sebastián de los Reyes - Dehesa"),
     "28703": ({"URBANO": {"INMUEBLE": 3300.0, "SOLAR": 1050.0}, "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 14.0}}, "San Sebastián de los Reyes - Rosa Luxemburgo"),
     "28160": ({"URBANO": {"INMUEBLE": 1500.0, "SOLAR": 450.0}, "RÚSTICO": {"INMUEBLE": 300.0, "SOLAR": 4.5}}, "Talamanca de Jarama"),
+    "28220": ({"URBANO": {"INMUEBLE": 4100.0, "SOLAR": 1350.0}, "RÚSTICO": {"INMUEBLE": 550.0, "SOLAR": 25.0}}, "Majadahonda"),
+    "28223": ({"URBANO": {"INMUEBLE": 4400.0, "SOLAR": 1500.0}, "RÚSTICO": {"INMUEBLE": 600.0, "SOLAR": 28.0}}, "Pozuelo de Alarcón"),
+    "28229": ({"URBANO": {"INMUEBLE": 2950.0, "SOLAR": 950.0}, "RÚSTICO": {"INMUEBLE": 450.0, "SOLAR": 20.0}}, "Villanueva del Pardillo - Las Vegas / Santa María"),
+    "28231": ({"URBANO": {"INMUEBLE": 3800.0, "SOLAR": 1250.0}, "RÚSTICO": {"INMUEBLE": 500.0, "SOLAR": 25.0}}, "Las Rozas de Madrid"),
+    "28232": ({"URBANO": {"INMUEBLE": 3800.0, "SOLAR": 1250.0}, "RÚSTICO": {"INMUEBLE": 500.0, "SOLAR": 25.0}}, "Las Rozas de Madrid - Montecillo / El Cantizal"),
+    "28250": ({"URBANO": {"INMUEBLE": 3300.0, "SOLAR": 1100.0}, "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 22.0}}, "Torrelodones"),
     "28411": ({"URBANO": {"INMUEBLE": 1950.0, "SOLAR": 600.0}, "RÚSTICO": {"INMUEBLE": 350.0, "SOLAR": 8.0}}, "Moralzarzal"),
+    "28660": ({"URBANO": {"INMUEBLE": 3900.0, "SOLAR": 1300.0}, "RÚSTICO": {"INMUEBLE": 520.0, "SOLAR": 24.0}}, "Boadilla del Monte"),
+    "28691": ({"URBANO": {"INMUEBLE": 3100.0, "SOLAR": 1000.0}, "RÚSTICO": {"INMUEBLE": 480.0, "SOLAR": 22.0}}, "Villanueva de la Cañada"),
     "03001": ({"URBANO": {"INMUEBLE": 2400.0, "SOLAR": 820.0}, "RÚSTICO": {"INMUEBLE": 340.0, "SOLAR": 15.0}}, "Alicante - Centro Tradicional"),
     "03002": ({"URBANO": {"INMUEBLE": 2100.0, "SOLAR": 720.0}, "RÚSTICO": {"INMUEBLE": 320.0, "SOLAR": 14.0}}, "Alicante - Casco Antiguo"),
     "03004": ({"URBANO": {"INMUEBLE": 2200.0, "SOLAR": 750.0}, "RÚSTICO": {"INMUEBLE": 330.0, "SOLAR": 14.0}}, "Alicante - Mercado"),
@@ -633,6 +673,32 @@ DISTRICT_NEIGHBORHOOD_TO_CP: Dict[str, str] = {
     "talamanca": "28160",
     "talamanca de jarama": "28160",
     "moralzarzal": "28411",
+    "villanueva del pardillo": "28229",
+    "las vegas - santa maría": "28229",
+    "las vegas - santa maria": "28229",
+    "las vegas-santa maría": "28229",
+    "las vegas-santa maria": "28229",
+    "urbanización las vegas": "28229",
+    "urbanizacion las vegas": "28229",
+    "zona de las vegas": "28229",
+    "las vegas": "28229",
+    "urbanización santa maría": "28229",
+    "urbanizacion santa maria": "28229",
+    "urbanización natura": "28229",
+    "urbanizacion natura": "28229",
+    "ibiza - san pedro": "28229",
+    "ibiza-san pedro": "28229",
+    "los llanos - valle pardo": "28229",
+    "los llanos-valle pardo": "28229",
+    "villanueva de la cañada": "28691",
+    "villanueva de la canada": "28691",
+    "majadahonda": "28220",
+    "boadilla del monte": "28660",
+    "pozuelo de alarcón": "28223",
+    "pozuelo de alarcon": "28223",
+    "las rozas de madrid": "28231",
+    "las rozas": "28231",
+    "torrelodones": "28250",
 
     # Barcelona
     "eixample": "08007",

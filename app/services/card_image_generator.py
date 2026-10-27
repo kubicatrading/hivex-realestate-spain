@@ -12,6 +12,7 @@ Renderiza una ficha visual gráfica idéntica a la preview de Google Maps de HIV
 
 import io
 import os
+import re
 import math
 import logging
 import urllib.request
@@ -138,14 +139,17 @@ def create_technical_banner(width: int, height: int, opp: Dict[str, Any]) -> Ima
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """Carga fuente TrueType del sistema con fallback seguro."""
+    """Carga fuente TrueType empaquetada en el proyecto o del sistema con fallback seguro."""
+    fonts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "fonts"))
     bold_candidates = [
+        os.path.join(fonts_dir, "Arial Bold.ttf"),
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "/System/Library/Fonts/HelveticaNeue.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
     ]
     regular_candidates = [
+        os.path.join(fonts_dir, "Arial.ttf"),
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -507,22 +511,130 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
     raw_images = opp.get("images") or []
     if isinstance(raw_images, str):
         raw_images = [raw_images]
-    valid_images = [
-        str(i) for i in raw_images
-        if not is_forbidden_image(i)
-    ]
 
-    # Descargar hasta 3 fotos reales del anuncio
-    loaded_imgs = []
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-    for img_url in valid_images[:3]:
+    from app.connectors.market_scraper import MarketScraper
+
+    def _portal_referer(u: str) -> str:
+        ul = (u or "").lower()
+        if "imghs.net" in ul or "pisos.com" in ul:
+            return "https://www.pisos.com/"
+        if "fotocasa.es" in ul:
+            return "https://www.fotocasa.es/"
+        if "habitaclia.com" in ul or "habimg.com" in ul:
+            return "https://www.habitaclia.com/"
+        if "milanuncios.com" in ul or "scmspain.com" in ul:
+            return "https://www.milanuncios.com/"
+        if "yaencontre.com" in ul:
+            return "https://www.yaencontre.com/"
+        if "idealista.com" in ul:
+            return "https://www.idealista.com/"
+        return "https://www.google.es/"
+
+    def _add_candidate_url(raw_u: str, target_list: List[str], seen_set: set) -> None:
+        u_str = MarketScraper.normalize_portal_photo_url(str(raw_u or "").strip())
+        if not u_str or is_forbidden_image(u_str):
+            return
+        if "idealista.com" in u_str.lower() and u_str.lower().endswith(".webp"):
+            u_str = u_str[:-5] + ".jpg"
+        key = MarketScraper.canonical_photo_key(u_str)
+        if key and key not in seen_set:
+            seen_set.add(key)
+            target_list.append(u_str)
+
+    valid_images: List[str] = []
+    seen_img_keys: set = set()
+    for i in raw_images:
+        _add_candidate_url(str(i), valid_images, seen_img_keys)
+
+    # Si el anuncio tiene menos de 3 fotos en caché pero dispone de portal_url, enriquecer galería al vuelo
+    # para garantizar el mosaico de 3 fotos en todos los portales (Idealista, Fotocasa, Pisos.com, Habitaclia, Milanuncios, YaEncontré)
+    portal_url = str(opp.get("portal_url") or "").strip()
+    if not portal_url and isinstance(opp.get("publications"), list) and opp["publications"]:
+        first_pub = opp["publications"][0]
+        if isinstance(first_pub, dict):
+            portal_url = str(first_pub.get("url") or "").strip()
+
+    if len(valid_images) < 3 and portal_url.startswith("http"):
         try:
-            req = urllib.request.Request(img_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                im = Image.open(io.BytesIO(resp.read())).convert("RGB")
-                loaded_imgs.append(im)
-        except Exception:
-            pass
+            from app.services.catalog_guardian import CatalogGuardian
+            guardian = CatalogGuardian()
+            p_low = portal_url.lower()
+            # 1) Intento directo HTTP gratuito para portales SSR / HTML abierto
+            if "idealista.com" not in p_low:
+                try:
+                    req_p = urllib.request.Request(
+                        portal_url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                            "Referer": _portal_referer(portal_url),
+                        }
+                    )
+                    with urllib.request.urlopen(req_p, timeout=4.0) as resp_p:
+                        html_content = resp_p.read().decode("utf-8", errors="ignore")
+                    if html_content:
+                        for ep in guardian.extract_photos_from_content(portal_url, html_content):
+                            _add_candidate_url(ep, valid_images, seen_img_keys)
+                except Exception:
+                    pass
+
+            # 2) Fallback Supadata (o caché local de Supadata) si aún tenemos < 3 fotos (incluye Idealista, Fotocasa, Milanuncios, YaEncontré, etc.)
+            if len(valid_images) < 3:
+                from app.connectors.supadata_client import SupadataClient
+                supa = SupadataClient()
+                res_s = supa.scrape_url(portal_url)
+                if res_s and res_s.get("content"):
+                    for ep in guardian.extract_photos_from_content(portal_url, res_s.get("content", "")):
+                        _add_candidate_url(ep, valid_images, seen_img_keys)
+
+            if len(valid_images) > len(raw_images):
+                opp["images"] = valid_images[:20]
+        except Exception as e_enrich:
+            logger.debug(f"Aviso enriqueciendo galería para mosaico ({portal_url}): {e_enrich}")
+
+    # Descargar hasta 3 fotos reales y visualmente distintas del anuncio
+    loaded_imgs = []
+    loaded_thumbs = []
+    ua_str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    for img_url in valid_images[:10]:
+        if len(loaded_imgs) >= 3:
+            break
+        candidate_urls = [img_url]
+        if "idealista.com" in img_url.lower() and img_url.lower().endswith(".jpg"):
+            candidate_urls.append(img_url[:-4] + ".webp")
+        # Fallback proxy CDN (wsrv.nl) para evitar bloqueos 403 de IPs de datacenter (AWS Lambda / Vercel) en CDNs de portales
+        encoded_img_url = urllib.parse.quote(img_url, safe="")
+        candidate_urls.append(f"https://wsrv.nl/?url={encoded_img_url}&output=jpg")
+        for try_url in candidate_urls:
+            try:
+                req = urllib.request.Request(
+                    try_url,
+                    headers={
+                        "User-Agent": ua_str,
+                        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                        "Referer": _portal_referer(img_url),
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=4.5) as resp:
+                    raw_bytes = resp.read()
+                    if len(raw_bytes) < 400:
+                        continue
+                    im = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+                    thumb = list(im.resize((16, 16), Image.Resampling.BILINEAR).tobytes())
+                    is_dup = False
+                    for prev_t in loaded_thumbs:
+                        mad = sum(abs(a - b) for a, b in zip(thumb, prev_t)) / len(thumb)
+                        if mad < 5.0:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        loaded_imgs.append(im)
+                        loaded_thumbs.append(thumb)
+                    break
+            except Exception:
+                continue
+
 
     # Determinar si es un inmueble de portal inmobiliario (MKT- / source_type == 'market')
     opp_id_str = str(opp.get("id") or "").strip().upper()
@@ -533,17 +645,18 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
 
     # REGLA DE ORO INMOBILIARIA:
     # Si es una oportunidad de portal inmobiliario y NO tiene fotos reales descargables,
-    # con total seguridad esa oportunidad YA NO ESTÁ VIGENTE/ACTIVA en el portal -> PURGAR y NO ENVIAR.
+    # cancelar el envío de la tarjeta. Solo purgar de BD si carece por completo de URLs de fotos válidas.
     if is_market_listing and not loaded_imgs:
         logger.warning(
-            f"[Regla Rigurosidad] Oportunidad de portal {opp_id_str} sin fotos reales válidas/descargables. "
-            f"Oportunidad retirada o inactiva en portal. Purgando del catálogo y cancelando envío."
+            f"[Regla Rigurosidad] Oportunidad de portal {opp_id_str} sin fotos reales descargables "
+            f"(valid_urls={len(valid_images)}). Cancelando envío de ficha."
         )
-        try:
-            from app.services.catalog_guardian import CatalogGuardian
-            CatalogGuardian().purge_opportunity(opp_id_str)
-        except Exception:
-            pass
+        if not valid_images:
+            try:
+                from app.services.catalog_guardian import CatalogGuardian
+                CatalogGuardian().purge_opportunity(opp_id_str)
+            except Exception:
+                pass
         return None
 
     # Exclusivamente para subastas BOE (SUB-*) que por naturaleza no tienen fotos de portal:

@@ -877,13 +877,14 @@ async def trigger_ingestion_pipeline(
 @app.api_route("/api/v1/alerts/daily-run", methods=["GET", "POST"])
 async def trigger_daily_alerts(
     request: Request,
-    force: bool = Query(False, description="Forzar envío de alertas aunque se hayan emitido previamente"),
+    force: bool = Query(False, description="Forzar evaluación de alertas aunque se hayan evaluado en las últimas 20h"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
     """
     Endpoint para ejecución programada (Vercel Cron 9:00 AM España / 07:00 UTC) o manual
-    del bot de alertas de Real Estate para Telegram (24h).
+    del motor de alertas diarias: evalúa todas las consultas guardadas activas en plataforma,
+    descubre nuevas oportunidades según los filtros de cada consulta y las sirve en Telegram.
     """
     if not is_authorized_cron_or_admin(request, authorization):
         raise HTTPException(
@@ -891,13 +892,13 @@ async def trigger_daily_alerts(
             detail="Autenticación requerida para disparar alertas de Telegram."
         )
 
-    from app.services.alert_engine import RealEstateAlertEngine
-    alert_engine = RealEstateAlertEngine()
-    result = alert_engine.run_daily_alert_check(db=db, force_all=force)
+    from app.services.consultation_alerts_worker import consultation_alerts_worker
+    report = await consultation_alerts_worker.run_daily_scan(db=db, force=force)
 
     return {
-        "status": "success" if result.get("status") in ["sent", "skipped"] else "error",
-        "alert_result": result
+        "status": "success" if report.get("status") in ["completed", "skipped_sqlite_fallback"] else "error",
+        "cron": "DAILY_SAVED_CONSULTATIONS_ALERTS_09H",
+        "alert_result": report
     }
 
 @app.api_route("/api/v1/health/cockpit-telegram", methods=["GET", "POST"])
@@ -1013,8 +1014,16 @@ def get_saved_consultations(
     """
     try:
         from app.engine.advisor_engine import advisor_engine, normalize_prompt_fingerprint
-        # REQUISITO 2: Filtrar exclusivamente aquellas consultas que implican entrega de oportunidades visuales
+        # Purgar permanentemente cualquier consulta histórica anterior a la #48 (Villanueva del Pardillo)
+        stale_old = db.query(SavedConsultation).filter(SavedConsultation.id < 48).all()
+        if stale_old:
+            for old_c in stale_old:
+                db.delete(old_c)
+            db.commit()
+
+        # REQUISITO 2: Filtrar exclusivamente aquellas consultas vigentes (>= 48) con entrega de oportunidades
         consultations = db.query(SavedConsultation).filter(
+            SavedConsultation.id >= 48,
             SavedConsultation.matched_opportunity_ids_json.isnot(None),
             SavedConsultation.matched_opportunity_ids_json != "[]",
             SavedConsultation.matched_count > 0
@@ -1032,9 +1041,17 @@ def get_saved_consultations(
             seen_keys.add(key)
             unique_consultations.append(c)
 
-        # Pre-cargar catálogo de oportunidades para indexar rápido por ID
+        # Pre-cargar catálogo de oportunidades para indexar rápido por ID y por alias_ids
+        from app.connectors.market_scraper import MarketScraper
+        from app.engine.advisor_engine import AdvisorEngine
         all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
-        opps_by_id = {str(o.get("id")).strip().upper(): o for o in all_opps}
+        opps_by_id = {}
+        for o in all_opps:
+            if o.get("id"):
+                opps_by_id[str(o.get("id")).strip().upper()] = o
+            for al in (o.get("alias_ids") or []):
+                if al:
+                    opps_by_id[str(al).strip().upper()] = o
 
         result = []
         for c in unique_consultations:
@@ -1047,10 +1064,15 @@ def get_saved_consultations(
 
             # Obtener las oportunidades completas para renderizar tarjetas en el frontend (todas las vinculadas)
             matched_cards = []
+            seen_canonical_ids = set()
             for mid in matched_ids:
                 clean_mid = str(mid).strip().upper()
                 if clean_mid in opps_by_id:
-                    matched_cards.append(opps_by_id[clean_mid])
+                    card_obj = opps_by_id[clean_mid]
+                    canon_id = str(card_obj.get("id") or clean_mid).strip().upper()
+                    if canon_id not in seen_canonical_ids:
+                        seen_canonical_ids.add(canon_id)
+                        matched_cards.append(card_obj)
 
             # Fallback en caso de que alguna ID no esté en el catálogo vivo pero sí en BD
             missing_ids = [str(mid).strip() for mid in matched_ids if str(mid).strip().upper() not in opps_by_id]
@@ -1059,9 +1081,15 @@ def get_saved_consultations(
                 from app.services.photos_backfill import PhotosBackfillWorker
                 try:
                     raw_sub_ids = [m.replace("SUB-", "") for m in missing_ids] + missing_ids
-                    db_opps = db.query(Opportunity).outerjoin(Auction).filter(
-                        (Opportunity.id.in_(missing_ids)) | (Auction.id_subasta.in_(raw_sub_ids))
-                    ).all()
+                    int_missing_ids = [int(m) for m in missing_ids if str(m).strip().isdigit()]
+                    if int_missing_ids:
+                        db_opps = db.query(Opportunity).outerjoin(Auction).filter(
+                            (Opportunity.id.in_(int_missing_ids)) | (Auction.id_subasta.in_(raw_sub_ids))
+                        ).all()
+                    else:
+                        db_opps = db.query(Opportunity).outerjoin(Auction).filter(
+                            Auction.id_subasta.in_(raw_sub_ids)
+                        ).all()
                     for o in db_opps:
                         auc = getattr(o, "auction", None)
                         oid_str = str(o.id or (f"SUB-{auc.id_subasta}" if auc else "")).strip()
@@ -1103,7 +1131,19 @@ def get_saved_consultations(
                         if card_dict.get("images"):
                             matched_cards.append(card_dict)
                 except Exception as e_miss:
+                    db.rollback()
                     logger.warning(f"Aviso recuperando oportunidades complementarias de BD: {e_miss}")
+
+            # Deduplicar oportunidades cross-portal dentro de la consulta y sincronizar BD si se redujo
+            matched_cards = MarketScraper.deduplicate_cross_portal_opportunities(matched_cards)
+            dedup_card_ids = [str(mc.get("id")).strip() for mc in matched_cards if mc.get("id")]
+            if dedup_card_ids and len(dedup_card_ids) < len(matched_ids):
+                try:
+                    c.matched_opportunity_ids_json = json.dumps(dedup_card_ids)
+                    c.matched_count = len(dedup_card_ids)
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
             criteria = {}
             if c.criteria_json:
@@ -1114,7 +1154,6 @@ def get_saved_consultations(
 
             title = c.title or "Búsqueda"
             if criteria:
-                from app.engine.advisor_engine import AdvisorEngine
                 specific_zone = criteria.get("zone_or_neighborhood")
                 needs_format = (
                     f"#{c.id}" not in title
@@ -1126,7 +1165,15 @@ def get_saved_consultations(
                         c.title = title
                         db.commit()
                     except Exception:
-                        pass
+                        db.rollback()
+
+            clean_summary = AdvisorEngine.clean_ai_summary_text(c.ai_summary, max_len=300) if c.ai_summary else c.ai_summary
+            if c.ai_summary and clean_summary != c.ai_summary and ("<" in c.ai_summary or "&" in c.ai_summary):
+                try:
+                    c.ai_summary = clean_summary
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
             result.append({
                 "id": c.id,
@@ -1135,8 +1182,8 @@ def get_saved_consultations(
                 "description": c.description,
                 "query_type": c.query_type,
                 "criteria": criteria,
-                "matched_count": c.matched_count,
-                "ai_summary": c.ai_summary,
+                "matched_count": len(matched_cards) if matched_cards else c.matched_count,
+                "ai_summary": clean_summary,
                 "is_alert": c.is_alert,
                 "alert_frequency": c.alert_frequency,
                 "is_active": c.is_active,
@@ -2050,9 +2097,11 @@ def get_opportunity_by_id(
         from app.connectors.market_scraper import MarketScraper
         ms = MarketScraper()
         catalog = ms._build_verified_market_catalog()
+        upper_candidates = {c.upper() for c in candidates}
         for raw in catalog:
             raw_id = str(raw.get("id", "")).strip().upper()
-            if any(raw_id == c.upper() for c in candidates):
+            raw_aliases = {str(a).strip().upper() for a in (raw.get("alias_ids") or []) if a}
+            if raw_id in upper_candidates or (raw_aliases & upper_candidates):
                 return ms._process_market_listing(dict(raw))
     except Exception as e_cat:
         errors.append(f"cat: {e_cat}")
@@ -2062,9 +2111,11 @@ def get_opportunity_by_id(
         from app.connectors.market_scraper import MarketScraper
         ms = MarketScraper()
         m_items = ms.fetch_market_opportunities(live_scrape=False)
+        upper_candidates = {c.upper() for c in candidates}
         for m in m_items:
             m_id = str(m.get("id", "")).strip().upper()
-            if any(m_id == c.upper() for c in candidates):
+            m_aliases = {str(a).strip().upper() for a in (m.get("alias_ids") or []) if a}
+            if m_id in upper_candidates or (m_aliases & upper_candidates):
                 return m
     except Exception as e_m:
         errors.append(f"market: {e_m}")

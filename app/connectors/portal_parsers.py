@@ -231,10 +231,15 @@ DISTRICT_COORDINATES: Dict[str, Dict[str, Any]] = {
     "pozuelo de alarcon": {"lat": 40.4354, "lon": -3.8138, "income": 78000, "m2_price": 4400.0, "growth": 0.9, "cp": "28223"},
     "las rozas de madrid": {"lat": 40.4925, "lon": -3.8744, "income": 62000, "m2_price": 3800.0, "growth": 1.4, "cp": "28231"},
     "alcobendas": {"lat": 40.5475, "lon": -3.6421, "income": 59000, "m2_price": 3900.0, "growth": 1.3, "cp": "28100"},
-    "villanueva del pardillo": {"lat": 40.4900, "lon": -3.9636, "income": 48500, "m2_price": 2800.0, "growth": 2.4, "cp": "28229"},
-    "las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2800.0, "growth": 2.5, "cp": "28229"},
-    "urbanizacion las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2800.0, "growth": 2.5, "cp": "28229"},
-    "urbanización las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2800.0, "growth": 2.5, "cp": "28229"},
+    "villanueva del pardillo": {"lat": 40.4900, "lon": -3.9636, "income": 48500, "m2_price": 2950.0, "growth": 2.4, "cp": "28229"},
+    "las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "las vegas - santa maría": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "las vegas - santa maria": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "urbanizacion las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "urbanización las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "zona de las vegas": {"lat": 40.4932, "lon": -3.9610, "income": 49500, "m2_price": 2950.0, "growth": 2.5, "cp": "28229"},
+    "ibiza - san pedro": {"lat": 40.4895, "lon": -3.9650, "income": 48500, "m2_price": 2950.0, "growth": 2.4, "cp": "28229"},
+    "los llanos - valle pardo": {"lat": 40.4875, "lon": -3.9620, "income": 48000, "m2_price": 2950.0, "growth": 2.4, "cp": "28229"},
     "villanueva de la cañada": {"lat": 40.4469, "lon": -4.0044, "income": 54000, "m2_price": 3100.0, "growth": 2.1, "cp": "28691"},
     "villanueva de la canada": {"lat": 40.4469, "lon": -4.0044, "income": 54000, "m2_price": 3100.0, "growth": 2.1, "cp": "28691"},
     "majadahonda": {"lat": 40.4735, "lon": -3.8718, "income": 63000, "m2_price": 4100.0, "growth": 1.5, "cp": "28220"},
@@ -461,10 +466,309 @@ class IdealistaMarkdownParser:
     """
 
     @classmethod
+    def _parse_html(cls, html_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        """
+        Extrae oportunidades directamente desde el HTML crudo de Idealista
+        (<article class="item..." data-element-id="...">).
+        """
+        listings: List[Dict[str, Any]] = []
+        if not html_content or "data-element-id=" not in html_content:
+            return listings
+
+        from app.connectors.market_scraper import MarketScraper
+        import html as html_lib
+
+        article_blocks = re.findall(
+            r'(<article[^>]+data-element-id="(\d+)"[^>]*>.*?</article>)',
+            html_content,
+            re.DOTALL | re.IGNORECASE
+        )
+        if not article_blocks:
+            return listings
+
+        # Extraer carruseles multimedia embebidos en el script de Idealista (listingMultimediaCarrousels)
+        carousels_by_id: Dict[str, List[str]] = {}
+        try:
+            ep_m = re.search(r"listingPictureEndpoint:\s*['\"](https?://[^'\"]+)['\"]", html_content)
+            pic_endpoint = ep_m.group(1) if ep_m else "https://img4.idealista.com/blur/"
+            if not pic_endpoint.endswith("/"):
+                pic_endpoint += "/"
+            for cm in re.finditer(r"listingMultimediaCarrousels:\s*(\{[^\n]+\})", html_content):
+                raw_json = cm.group(1).strip().rstrip(",")
+                cdata = json.loads(raw_json)
+                if isinstance(cdata, dict):
+                    for cid, cval in cdata.items():
+                        if not isinstance(cval, dict):
+                            continue
+                        c_urls: List[str] = []
+                        for mm in cval.get("multimedias", []):
+                            if isinstance(mm, dict) and mm.get("type") == "PICTURE":
+                                for pic_obj in mm.get("content", []):
+                                    if isinstance(pic_obj, dict) and pic_obj.get("src"):
+                                        c_urls.append(f"{pic_endpoint}{pic_obj['src'].lstrip('/')}")
+                        if c_urls:
+                            carousels_by_id[str(cid)] = c_urls
+        except Exception as e_car:
+            logger.debug(f"Aviso parseando listingMultimediaCarrousels en Idealista: {e_car}")
+
+        for block, item_id in article_blocks:
+            try:
+                link_m = re.search(
+                    r'<a[^>]*class="[^"]*item-link[^"]*"[^>]*>\s*([^<]+?)\s*</a>',
+                    block,
+                    re.IGNORECASE
+                )
+                href_m = re.search(r'href="(/inmueble/\d+/?)"', block, re.IGNORECASE)
+                if not link_m or not href_m:
+                    continue
+
+                rel_url = href_m.group(1).strip()
+                url = f"https://www.idealista.com{rel_url}" if rel_url.startswith("/") else rel_url
+                title = html_lib.unescape(link_m.group(1).strip())
+
+                price_m = re.search(r'<span[^>]*class="item-price[^"]*"[^>]*>\s*([\d\.]+)\s*<span', block, re.IGNORECASE)
+                if not price_m:
+                    continue
+                listing_price = float(price_m.group(1).replace(".", ""))
+                if listing_price <= 10000:
+                    continue
+
+                original_listing_price = listing_price
+                discount_percentage = 0.0
+                pdown_m = re.search(r'<span[^>]*class="pricedown_price"[^>]*>\s*([\d\.]+)\s*€', block, re.IGNORECASE)
+                if pdown_m:
+                    orig_val = float(pdown_m.group(1).replace(".", ""))
+                    if orig_val > listing_price:
+                        original_listing_price = orig_val
+                        discount_percentage = round(((original_listing_price - listing_price) / original_listing_price) * 100, 1)
+
+                price_drop_amount = max(0.0, original_listing_price - listing_price)
+                price_drop_percentage = discount_percentage
+                price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
+
+                details = [
+                    html_lib.unescape(re.sub(r'<[^>]+>', '', d).strip())
+                    for d in re.findall(r'<span[^>]*class="item-detail"[^>]*>(.*?)</span>', block, re.DOTALL | re.IGNORECASE)
+                ]
+                details_str = " ".join(details)
+
+                rooms = 2
+                rooms_m = re.search(r'(\d+)\s*hab', details_str, re.IGNORECASE)
+                if rooms_m:
+                    rooms = int(rooms_m.group(1))
+
+                surface_m2 = 80.0
+                surf_m = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', details_str, re.IGNORECASE)
+                if surf_m:
+                    surface_m2 = float(surf_m.group(1).replace(".", ""))
+
+                desc_m = re.search(r'<div[^>]*class="item-description[^"]*"[^>]*>\s*<p[^>]*>(.*?)</p>', block, re.DOTALL | re.IGNORECASE)
+                raw_desc = html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_m.group(1)).strip()) if desc_m else ""
+                raw_desc = re.sub(r'\s+', ' ', raw_desc).strip()
+
+                if BOESubastasScraper.is_nave(title=title, desc=raw_desc[:600], property_type="", surface_m2=surface_m2):
+                    continue
+
+                floor = "Exterior"
+                floor_m = re.search(r'(\d+[ªº]?\s*planta\s*(?:exterior|interior)?|bajo|ático|entreplanta)', details_str, re.IGNORECASE)
+                if floor_m:
+                    floor = floor_m.group(1).strip()
+
+                has_elevator = "sin ascensor" not in details_str.lower()
+
+                bathrooms = 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1
+                bath_m = re.search(r'(\d+)\s*(?:baño|baños|aseo)', raw_desc, re.IGNORECASE)
+                if bath_m:
+                    bathrooms = max(1, min(8, int(bath_m.group(1))))
+
+                agency = "Agencia Inmobiliaria"
+                ag_m = re.search(r'<picture[^>]*class="logo-branding"[^>]*>\s*<a[^>]*title="([^"]+)"', block, re.IGNORECASE)
+                if ag_m:
+                    agency = html_lib.unescape(ag_m.group(1).strip())
+
+                images = []
+                seen_img_keys = set()
+                img_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\'\)]+\.(?:jpg|jpeg|png|webp)', block, re.IGNORECASE)
+                if str(item_id) in carousels_by_id:
+                    img_matches.extend(carousels_by_id[str(item_id)])
+                for img_url in img_matches:
+                    if "/blur/95_45_mq/" in img_url or "/B.PRO/" in img_url or "logo" in img_url.lower():
+                        continue
+                    clean_img = (
+                        img_url.replace("/blur/189_120_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/300_225_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/480_360_mq/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/WEB_DETAIL_TOP-L-L/", "/blur/WEB_DETAIL-XL-L/")
+                        .replace("/blur/591_420_mq/", "/blur/WEB_DETAIL-XL-L/")
+                    )
+                    if clean_img.lower().endswith(".webp"):
+                        clean_img = clean_img[:-5] + ".jpg"
+                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
+                        continue
+                    m_key = re.search(r'id\.pro\.[a-z]+\.image\.master/[0-9a-f/]+', clean_img, re.I)
+                    img_key = m_key.group(0).lower() if m_key else re.sub(r'\.(?:webp|jpg|jpeg|png)$', '', clean_img.split('?')[0], flags=re.I).lower()
+                    if img_key not in seen_img_keys:
+                        seen_img_keys.add(img_key)
+                        images.append(clean_img)
+                    if len(images) >= 20:
+                        break
+
+                if not images:
+                    continue
+
+                location_data = cls._resolve_location_and_kpis(title, default_province)
+                clean_title = location_data.get("title") or title
+                clean_address = location_data.get("address") or clean_title
+
+                combined_vegas_check = f"{clean_title} {raw_desc}".lower()
+                if "las vegas - santa mar" in combined_vegas_check or "urbanización las vegas" in combined_vegas_check or "urbanizacion las vegas" in combined_vegas_check:
+                    if "urbanización las vegas" not in clean_address.lower():
+                        clean_address = f"{clean_address} (Urbanización Las Vegas)"
+                    location_data["locality"] = "Villanueva del Pardillo"
+                    location_data["postal_code"] = "28229"
+
+                tl_check = clean_title.lower()
+                is_land_title = any(w in tl_check for w in ["terreno", "solar", "parcela", "suelo"]) and not any(w in tl_check for w in ["chalet", "casa", "piso", "adosado", "pareado", "dúplex", "duplex", "ático", "atico", "vivienda", "apartamento", "estudio", "loft"])
+                if is_land_title:
+                    prop_type = "Solar"
+                    rooms = 0
+                    bathrooms = 0
+                elif any(w in tl_check for w in ["chalet", "casa", "adosado", "pareado", "finca"]):
+                    prop_type = "CHALET"
+                else:
+                    prop_type = "PISO"
+                description = raw_desc if len(raw_desc) >= 40 else extract_clean_description(
+                    post_text=raw_desc,
+                    title=clean_title,
+                    property_type=prop_type,
+                    surface_m2=surface_m2,
+                    rooms=rooms,
+                    floor=floor,
+                    has_elevator=has_elevator,
+                    locality=location_data.get("locality", default_province),
+                    province=location_data.get("province", default_province),
+                    agency=agency
+                )
+
+                opportunity = {
+                    "id": f"MKT-IDEALISTA-{item_id}",
+                    "title": clean_title,
+                    "address": clean_address,
+                    "locality": location_data.get("locality", default_province),
+                    "province": location_data.get("province", default_province),
+                    "postal_code": location_data.get("postal_code", "28001"),
+                    "lat": location_data.get("lat"),
+                    "lon": location_data.get("lon"),
+                    "property_type": prop_type,
+                    "strategy": "LAND_DEVELOPMENT" if is_land_title else ("HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD"),
+                    "is_solar": is_land_title,
+                    "surface_m2": surface_m2,
+                    "rooms": rooms,
+                    "bathrooms": bathrooms,
+                    "floor": floor,
+                    "has_elevator": has_elevator,
+                    "energy_certificate": "D",
+                    "original_listing_price": original_listing_price,
+                    "listing_price": listing_price,
+                    "price_drop_percentage": price_drop_percentage,
+                    "price_drop_amount": price_drop_amount,
+                    "price_drop_date": price_drop_date,
+                    "discount_percentage": discount_percentage,
+                    "first_published_date": "2026-03-01",
+                    "publications": [
+                        {
+                            "portal": "Idealista",
+                            "price": listing_price,
+                            "url": url,
+                            "agency": agency,
+                            "published_date": "2026-03-01"
+                        }
+                    ],
+                    "census_tract_data": {
+                        "district": location_data.get("district_label", default_province),
+                        "avg_household_income": location_data.get("avg_household_income", 42000),
+                        "avg_person_income": round(location_data.get("avg_household_income", 42000) / 2.2),
+                        "area_m2_price": location_data.get("area_m2_price", 3800.0),
+                        "population_growth_rate": location_data.get("population_growth_rate", 2.0)
+                    },
+                    "images": images,
+                    "description": description
+                }
+
+                is_solar = (opportunity.get("strategy") == "LAND_DEVELOPMENT" or "solar" in prop_type.lower() or "terreno" in prop_type.lower())
+                if is_solar:
+                    monthly_rent = 0.0
+                    rental_yield = 0.0
+                    yield_score = 0.0
+                    yield_color = "rojo"
+                    btl_score = None
+                else:
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=opportunity["postal_code"],
+                        province=opportunity["province"],
+                        floor=floor,
+                        has_elevator=has_elevator
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=listing_price,
+                        monthly_rent=monthly_rent
+                    )
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    btl_score = yield_score
+
+                area_m2_price = float(location_data.get("area_m2_price", 3800.0))
+                est_market_val = surface_m2 * area_m2_price
+                discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
+
+                overall_score = KPICalculator.calculate_overall_opportunity_score(
+                    discount_percentage=discount_vs_market / 100.0,
+                    poi_score=85.0,
+                    income_amount=location_data.get("avg_household_income", 42000),
+                    population_growth=location_data.get("population_growth_rate", 2.0),
+                    rental_yield=rental_yield,
+                    is_solar=is_solar
+                )
+
+                opportunity["portal_id"] = str(item_id)
+                opportunity["portal_url"] = url
+                opportunity["primary_portal"] = "Idealista"
+                opportunity["discount_percentage"] = discount_percentage if discount_percentage > 0 else discount_vs_market
+                opportunity["estimated_monthly_rent"] = monthly_rent if not is_solar else None
+                opportunity["rental_yield"] = rental_yield if not is_solar else None
+                opportunity["yield_score"] = yield_score if not is_solar else 0.0
+                opportunity["yield_color"] = yield_color if not is_solar else None
+                opportunity["btl_score"] = btl_score
+                opportunity["btl_color"] = yield_color if not is_solar else None
+                opportunity["discount_vs_market"] = discount_vs_market
+                opportunity["overall_score"] = overall_score
+                opportunity["final_score"] = overall_score
+
+                listings.append(opportunity)
+            except Exception as e_html:
+                logger.warning(f"Error parseando bloque HTML de Idealista: {e_html}")
+
+        listings.sort(
+            key=lambda x: (
+                1 if x.get("is_new") else 0,
+                max(x.get("overall_score") or x.get("discount_score") or 0.0, x.get("btl_score") or 0.0),
+                x.get("discount_vs_market") or x.get("discount_percentage") or 0.0
+            ),
+            reverse=True
+        )
+        logger.info(f"[Idealista HTML Parser] Extraídos {len(listings)} inmuebles desde HTML.")
+        return listings
+
+    @classmethod
     def parse_listings(cls, markdown_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
         listings: List[Dict[str, Any]] = []
         if not markdown_content:
             return listings
+
+        if "<article" in markdown_content and "data-element-id=" in markdown_content:
+            html_listings = cls._parse_html(markdown_content, default_province=default_province)
+            if html_listings:
+                return html_listings
 
         # En Idealista cada inmueble se identifica por un enlace de formato:
         # [Título](https://www.idealista.com/inmueble/112270818/ "...")
@@ -509,6 +813,7 @@ class IdealistaMarkdownParser:
                 # NUNCA usar post_text[:2500] porque contamina con la foto de portada del siguiente anuncio del listado
                 from app.connectors.market_scraper import MarketScraper
                 images = []
+                seen_img_keys = set()
                 img_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+', prev_text)
                 for img_url in img_matches:
                     if img_url.endswith('.gif'):
@@ -520,9 +825,14 @@ class IdealistaMarkdownParser:
                         .replace("/blur/WEB_DETAIL_TOP-L-L/", "/blur/WEB_DETAIL-XL-L/")
                         .replace("/blur/591_420_mq/", "/blur/WEB_DETAIL-XL-L/")
                     )
+                    if clean_img.lower().endswith(".webp"):
+                        clean_img = clean_img[:-5] + ".jpg"
                     if not MarketScraper.is_valid_real_portal_photo(clean_img):
                         continue
-                    if clean_img not in images:
+                    m_key = re.search(r'id\.pro\.[a-z]+\.image\.master/[0-9a-f/]+', clean_img, re.I)
+                    img_key = m_key.group(0).lower() if m_key else re.sub(r'\.(?:webp|jpg|jpeg|png)$', '', clean_img.split('?')[0], flags=re.I).lower()
+                    if img_key not in seen_img_keys:
+                        seen_img_keys.add(img_key)
                         images.append(clean_img)
                     if len(images) >= 20:
                         break
@@ -603,11 +913,25 @@ class IdealistaMarkdownParser:
                 clean_title = location_data.get("title") or title
                 clean_address = location_data.get("address") or clean_title
 
+                tl_check = clean_title.lower()
+                is_land_title = any(w in tl_check for w in ["terreno", "solar", "parcela", "suelo"]) and not any(w in tl_check for w in ["chalet", "casa", "piso", "adosado", "pareado", "dúplex", "duplex", "ático", "atico", "vivienda", "apartamento", "estudio", "loft"])
+                is_local_title = any(w in tl_check for w in ["local", "comercial", "oficina"]) and not is_land_title
+                if is_land_title:
+                    prop_type_md = "Solar"
+                    rooms = 0
+                    bathrooms = 0
+                elif is_local_title:
+                    prop_type_md = "Local"
+                elif "chalet" in tl_check or "casa" in tl_check or "adosado" in tl_check or "pareado" in tl_check:
+                    prop_type_md = "CHALET"
+                else:
+                    prop_type_md = "PISO"
+
                 # 6. Descripción limpia y veraz (sin precios ni artefactos UI)
                 description = extract_clean_description(
                     post_text=post_text,
                     title=clean_title,
-                    property_type="PISO" if "chalet" not in clean_title.lower() else "CHALET",
+                    property_type=prop_type_md,
                     surface_m2=surface_m2,
                     rooms=rooms,
                     floor=floor,
@@ -626,8 +950,9 @@ class IdealistaMarkdownParser:
                     "postal_code": location_data.get("postal_code", "28001"),
                     "lat": location_data.get("lat"),
                     "lon": location_data.get("lon"),
-                    "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
-                    "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                    "property_type": prop_type_md,
+                    "strategy": "LAND_DEVELOPMENT" if is_land_title else ("HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD"),
+                    "is_solar": is_land_title,
                     "surface_m2": surface_m2,
                     "rooms": rooms,
                     "bathrooms": bathrooms,
@@ -842,6 +1167,26 @@ class IdealistaMarkdownParser:
         if cp_meta:
             _, district_label = cp_meta
 
+        CP_TO_LOCALITY = {
+            "28229": "Villanueva del Pardillo",
+            "28220": "Majadahonda",
+            "28223": "Pozuelo de Alarcón",
+            "28224": "Pozuelo de Alarcón",
+            "28231": "Las Rozas de Madrid",
+            "28232": "Las Rozas de Madrid",
+            "28250": "Torrelodones",
+            "28660": "Boadilla del Monte",
+            "28691": "Villanueva de la Cañada",
+            "28760": "Tres Cantos",
+            "28701": "San Sebastián de los Reyes",
+            "28100": "Alcobendas",
+            "28770": "Colmenar Viejo",
+            "28670": "Villaviciosa de Odón",
+        }
+        if postal_code and postal_code in CP_TO_LOCALITY and not detected_loc_key:
+            locality = CP_TO_LOCALITY[postal_code]
+            province = "Madrid"
+
         if matched_neighborhood and matched_neighborhood in DISTRICT_COORDINATES:
             coord_data = DISTRICT_COORDINATES[matched_neighborhood]
             avg_income = coord_data.get("income", 38000)
@@ -997,12 +1342,11 @@ class HabitacliaMarkdownParser:
                     has_list = features_dict.get('has', []) or []
                     has_elevator = "ELEVATOR" in has_list
 
-                    images = [im.get('url') for im in summary.get('multimedia', {}).get('images', []) if im.get('url')]
-                    clean_images = []
-                    for img in images:
-                        clean_url_img = img.split("?")[0] if "static.fotocasa.es" in img else img
-                        if clean_url_img not in clean_images:
-                            clean_images.append(clean_url_img)
+                    from app.connectors.market_scraper import MarketScraper
+                    raw_images = [im.get('url') for im in summary.get('multimedia', {}).get('images', []) if im.get('url')]
+                    clean_images = MarketScraper.ensure_twenty_images(raw_images)
+                    if not clean_images:
+                        continue
 
                     loc = summary.get('location', {}) or {}
                     district = loc.get('district') or default_province
@@ -1162,21 +1506,45 @@ class HabitacliaMarkdownParser:
             re.IGNORECASE
         )
 
-        matches = list(link_pattern.finditer(markdown_content))
-        for i, match in enumerate(matches):
+        raw_matches = list(link_pattern.finditer(markdown_content))
+        # Agrupar enlaces por item_id para que múltiples enlaces de la misma tarjeta no trunquen la galería de fotos
+        grouped_cards: List[Dict[str, Any]] = []
+        id_to_group: Dict[str, Dict[str, Any]] = {}
+        for i, m in enumerate(raw_matches):
+            item_id = m.group("id") or str(100000 + i)
+            if item_id not in id_to_group:
+                grp = {"id": item_id, "matches": [m]}
+                id_to_group[item_id] = grp
+                grouped_cards.append(grp)
+            else:
+                id_to_group[item_id]["matches"].append(m)
+
+        for idx, grp in enumerate(grouped_cards):
             try:
-                item_id = match.group("id") or str(100000 + i)
-                title = match.group("title").strip()
-                url = match.group("url")
+                item_id = grp["id"]
+                card_matches = grp["matches"]
+                first_m = card_matches[0]
+                last_m = card_matches[-1]
+
+                # Elegir el mejor título entre los enlaces del mismo inmueble
+                best_m = last_m
+                for cm in card_matches:
+                    cand_t = re.sub(r'[*_~`]', '', cm.group("title")).strip()
+                    if len(cand_t) >= 8 and not re.match(r'^\d+/\d+$', cand_t):
+                        best_m = cm
+                        break
+
+                title = re.sub(r'[*_~`]', '', best_m.group("title")).strip()
+                url = best_m.group("url")
 
                 if len(title) < 5 or re.match(r'^\d+/\d+$', title):
                     continue
 
-                # Contexto previo y posterior (amplio para abarcar carrusel de fotos previo)
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 8000)
-                prev_text = markdown_content[start_prev:match.start()]
-                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 2000)
-                post_text = markdown_content[match.end():end_post]
+                # Contexto previo (abarca desde el final de la tarjeta previa hasta el último enlace de esta tarjeta)
+                start_prev = grouped_cards[idx - 1]["matches"][-1].end() if idx > 0 else max(0, first_m.start() - 8000)
+                prev_text = markdown_content[start_prev:last_m.end()]
+                end_post = grouped_cards[idx + 1]["matches"][0].start() if idx + 1 < len(grouped_cards) else min(len(markdown_content), last_m.end() + 2000)
+                post_text = markdown_content[best_m.end():end_post]
 
                 # Descartar naves
                 if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
@@ -1200,21 +1568,15 @@ class HabitacliaMarkdownParser:
                 rooms_match = re.search(r'(\d+)\s*hab', post_text) or re.search(r'(\d+)\s*hab', prev_text)
                 rooms = int(rooms_match.group(1)) if rooms_match else 3
 
-                # Extraer hasta 20 imágenes reales del anuncio (sin contaminar con el siguiente anuncio)
+                # Extraer hasta 20 imágenes reales del anuncio (normalizadas y deduplicadas)
                 from app.connectors.market_scraper import MarketScraper
-                images = []
                 raw_img_matches = (
-                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text)
+                    re.findall(r'https?://(?:[a-z0-9\-]+\.)?static\.fotocasa\.es/images/ads/[a-f0-9\-]{20,}', prev_text, re.I)
+                    + re.findall(r'(?:https?:)?//images\.habimg\.com/imgh/[^\s\"\'\)<>]+?\.(?:jpg|jpeg|webp)', prev_text, re.I)
+                    + re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\'<>]+?\.(?:jpg|jpeg|webp)', prev_text, re.I)
                     + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text)
                 )
-                for img_url in raw_img_matches:
-                    clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
-                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
-                        continue
-                    if clean_img not in images:
-                        images.append(clean_img)
-                    if len(images) >= 20:
-                        break
+                images = MarketScraper.ensure_twenty_images(raw_img_matches)
 
                 if not images:
                     continue
@@ -1230,9 +1592,9 @@ class HabitacliaMarkdownParser:
                     "lon": loc_data.get("lon"),
                     "property_type": "PISO",
                     "strategy": "HOUSE_FLIPPING",
-                    "surface_m2": 85.0,
-                    "rooms": 3,
-                    "bathrooms": 1,
+                    "surface_m2": surface_m2,
+                    "rooms": rooms,
+                    "bathrooms": 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1,
                     "floor": "3º",
                     "has_elevator": True,
                     "energy_certificate": "E",
@@ -1374,22 +1736,62 @@ class FotocasaMarkdownParser:
                     neighborhood = addr.get('neighborhood') or addr.get('district') or default_province
                     municipality = addr.get('municipality') or default_province
                     province = addr.get('province') or default_province
-                    title = f"{it.get('buildingType', 'Piso')} en venta en {neighborhood}, {municipality}"
+                    raw_desc = str(it.get("description") or "")
+                    if "las vegas" in raw_desc.lower() and "las vegas" not in str(neighborhood).lower():
+                        neighborhood = f"Urbanización Las Vegas ({neighborhood})" if neighborhood and neighborhood != municipality else "Urbanización Las Vegas"
+
+                    b_subtype = str(it.get('buildingSubtype') or it.get('buildingType') or 'Flat')
+                    b_type_es_map = {
+                        "IndependantHouse": "Chalet independiente",
+                        "TerracedHouse": "Chalet adosado",
+                        "SemidetachedHouse": "Chalet pareado",
+                        "House": "Chalet",
+                        "CountryHouse": "Finca rústica",
+                        "Land": "Terreno",
+                        "Plot": "Terreno",
+                        "UrbanLand": "Terreno urbano",
+                        "BuildingLand": "Solar edificable",
+                        "DevelopableLand": "Terreno urbanizable",
+                        "RusticLand": "Terreno rústico",
+                        "Duplex": "Dúplex",
+                        "Attic": "Ático",
+                        "Penthouse": "Ático",
+                        "GroundFloor": "Bajo con jardín",
+                        "Flat": "Piso",
+                        "Apartment": "Apartamento",
+                        "Studio": "Estudio",
+                        "Loft": "Loft",
+                        "CommercialStore": "Local comercial",
+                        "Commercial": "Local comercial",
+                        "Premises": "Local comercial",
+                        "Office": "Local / Oficina",
+                    }
+                    b_type_es = b_type_es_map.get(b_subtype, "Terreno" if ("land" in b_subtype.lower() or "plot" in b_subtype.lower()) else ("Local comercial" if any(k in b_subtype.lower() for k in ["commercial", "store", "premise", "local", "office"]) else ("Chalet" if "house" in b_subtype.lower() else "Piso")))
+                    if any(w in url.lower() for w in ["/terreno/", "/solar/", "/parcela/"]) and "terreno" not in b_type_es.lower() and "solar" not in b_type_es.lower():
+                        b_type_es = "Terreno"
+                    elif any(w in url.lower() for w in ["/local/", "/locales/"]) and "local" not in b_type_es.lower():
+                        b_type_es = "Local comercial"
+                    title = f"{b_type_es} en venta en {neighborhood}, {municipality}"
+                    is_land_foto = any(w in b_type_es.lower() for w in ["terreno", "solar", "parcela", "suelo"]) or any(w in url.lower() for w in ["/terreno/", "/solar/", "/parcela/"])
+                    is_local_foto = any(w in b_type_es.lower() for w in ["local", "comercial", "oficina"]) or any(w in url.lower() for w in ["/local/", "/locales/"])
 
                     features = {f.get('key'): f.get('value') for f in it.get('features', []) if isinstance(f, dict)}
                     surface_m2 = float(features.get('surface', 80.0))
-                    rooms = int(features.get('rooms', 2))
-                    bathrooms = int(features.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1))
+                    rooms = 0 if is_land_foto else int(features.get('rooms', 2))
+                    bathrooms = 0 if is_land_foto else int(features.get('bathrooms') or (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1))
                     floor = f"{features.get('floor')}ª planta" if features.get('floor') else "Exterior"
                     has_elevator = features.get('elevator', 0) > 0
 
+                    from app.connectors.market_scraper import MarketScraper
                     multimedias = it.get('multimedia', []) or []
-                    clean_images = []
-                    for m_item in multimedias:
-                        if isinstance(m_item, dict) and m_item.get('type') == 'image' and m_item.get('src'):
-                            clean_img = m_item.get('src').split("?")[0]
-                            if clean_img not in clean_images:
-                                clean_images.append(clean_img)
+                    raw_m_imgs = [
+                        m_item.get('src') or m_item.get('url')
+                        for m_item in multimedias
+                        if isinstance(m_item, dict) and (m_item.get('type') in (None, 'image') or 'images/ads/' in str(m_item.get('src') or '')) and (m_item.get('src') or m_item.get('url'))
+                    ]
+                    clean_images = MarketScraper.ensure_twenty_images(raw_m_imgs)
+                    if not clean_images:
+                        continue
 
                     coords = it.get('coordinates', {}) or {}
                     lat = coords.get('latitude')
@@ -1404,14 +1806,15 @@ class FotocasaMarkdownParser:
                     opportunity = {
                         "id": f"MKT-FOTOCASA-{item_id}",
                         "title": title,
-                        "address": loc_data.get("address") or f"{title}, {municipality}",
+                        "address": f"{neighborhood}, {municipality}" if neighborhood and neighborhood != municipality else (loc_data.get("address") or f"{title}, {municipality}"),
                         "locality": municipality,
                         "province": province,
                         "postal_code": addr.get("zipCode") or loc_data.get("postal_code", "28001"),
                         "lat": lat,
                         "lon": lon,
-                        "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
-                        "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                        "property_type": "Solar" if is_land_foto else ("Local" if is_local_foto else ("CHALET" if ("chalet" in b_type_es.lower() or "finca" in b_type_es.lower()) else "PISO")),
+                        "strategy": "LAND_DEVELOPMENT" if is_land_foto else ("HOUSE_FLIPPING" if (is_local_foto or surface_m2 < 140) else "BUY_AND_HOLD"),
+                        "is_solar": is_land_foto,
                         "surface_m2": surface_m2,
                         "rooms": rooms,
                         "bathrooms": bathrooms,
@@ -1460,7 +1863,7 @@ class FotocasaMarkdownParser:
                     btl_score = yield_score
 
                     area_m2_price = float(loc_data.get("area_m2_price", 3400.0))
-                    est_market_val = surface_m2 * area_m2_price
+                    est_market_val = surface_m2 * (area_m2_price * 0.35 if is_land_foto else area_m2_price)
                     discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1) if est_market_val > 0 else 0.0
 
                     overall_score = KPICalculator.calculate_overall_opportunity_score(
@@ -1468,20 +1871,20 @@ class FotocasaMarkdownParser:
                         poi_score=85.0,
                         income_amount=loc_data.get("avg_household_income", 40000),
                         population_growth=loc_data.get("population_growth_rate", 1.5),
-                        rental_yield=rental_yield,
-                        is_solar=False
+                        rental_yield=0.0 if is_land_foto else rental_yield,
+                        is_solar=is_land_foto
                     )
 
                     opportunity["portal_id"] = str(item_id)
                     opportunity["portal_url"] = url
                     opportunity["primary_portal"] = "Fotocasa"
                     opportunity["discount_percentage"] = discount_vs_market
-                    opportunity["estimated_monthly_rent"] = monthly_rent
-                    opportunity["rental_yield"] = rental_yield
-                    opportunity["yield_score"] = yield_score
-                    opportunity["yield_color"] = yield_color
+                    opportunity["estimated_monthly_rent"] = None if is_land_foto else monthly_rent
+                    opportunity["rental_yield"] = None if is_land_foto else rental_yield
+                    opportunity["yield_score"] = 0.0 if is_land_foto else yield_score
+                    opportunity["yield_color"] = None if is_land_foto else yield_color
                     opportunity["btl_score"] = btl_score
-                    opportunity["btl_color"] = yield_color
+                    opportunity["btl_color"] = None if is_land_foto else yield_color
                     opportunity["discount_vs_market"] = discount_vs_market
                     opportunity["overall_score"] = overall_score
                     opportunity["final_score"] = overall_score
@@ -1505,36 +1908,64 @@ class FotocasaMarkdownParser:
                 logger.info(f"[Fotocasa HTML Parser] Extraídos {len(html_listings)} inmuebles directamente de la página.")
                 return html_listings
 
-        # Fotocasa: [Título](https://www.fotocasa.es/es/comprar/vivienda/...)
+        # Fotocasa: [Título](https://www.fotocasa.es/es/comprar/(vivienda|terreno|inmueble)/...)
         link_pattern = re.compile(
-            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?fotocasa\.es/es/comprar/vivienda/[^\)]*(?:/(?P<id>\d{6,})|-(?P<alt_id>\d{6,}))[^\)]*)\)',
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?fotocasa\.es/es/comprar/(?:vivienda|terreno|inmueble)/[^\)]*(?:/(?P<id>\d{6,})|-(?P<alt_id>\d{6,}))[^\)]*)\)',
             re.IGNORECASE
         )
 
-        matches = list(link_pattern.finditer(markdown_content))
-        if not matches:
+        raw_matches = list(link_pattern.finditer(markdown_content))
+        if not raw_matches:
             fallback_pattern = re.compile(
                 r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?fotocasa\.es/es/comprar/[^\)]+)\)',
                 re.IGNORECASE
             )
-            matches = list(fallback_pattern.finditer(markdown_content))
+            raw_matches = list(fallback_pattern.finditer(markdown_content))
 
-        for i, match in enumerate(matches):
+        # Agrupar todos los enlaces por item_id para evitar que los enlaces intermedios ([Líder de zona], [1/33], [Tour virtual])
+        # partan el bloque del anuncio y dejen fuera las 30+ fotos del carrusel situadas entre el primer y último enlace de la tarjeta.
+        grouped_cards: List[Dict[str, Any]] = []
+        id_to_group: Dict[str, Dict[str, Any]] = {}
+        for i, m in enumerate(raw_matches):
+            item_id = m.groupdict().get("id") or m.groupdict().get("alt_id") or str(200000 + i)
+            if item_id not in id_to_group:
+                grp = {"id": item_id, "matches": [m]}
+                id_to_group[item_id] = grp
+                grouped_cards.append(grp)
+            else:
+                id_to_group[item_id]["matches"].append(m)
+
+        for idx, grp in enumerate(grouped_cards):
             try:
-                item_id = match.groupdict().get("id") or match.groupdict().get("alt_id") or str(200000 + i)
-                title = match.group("title").strip()
-                url = match.group("url")
+                item_id = grp["id"]
+                card_matches = grp["matches"]
+                first_m = card_matches[0]
+                last_m = card_matches[-1]
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
-                prev_text = markdown_content[start_prev:match.start()]
-                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
-                post_text = markdown_content[match.end():end_post]
+                # Seleccionar el enlace cuyo texto sea el título real del inmueble (no "1/33", "Tour virtual", "Líder de zona")
+                best_m = last_m
+                for cm in reversed(card_matches):
+                    cand_t = re.sub(r'[*_~`]', '', cm.group("title")).strip()
+                    if (
+                        len(cand_t) >= 6
+                        and not re.match(r'^\d+/\d+$', cand_t)
+                        and not any(bad in cand_t.lower() for bad in ["video del inmueble", "tour virtual", "visita virtual", "líder de zona"])
+                    ):
+                        best_m = cm
+                        break
 
-                title = re.sub(r'[*_~`]', '', title).strip()
+                title = re.sub(r'[*_~`]', '', best_m.group("title")).strip()
+                url = best_m.group("url").split("?")[0]
+
+                start_prev = grouped_cards[idx - 1]["matches"][-1].end() if idx > 0 else max(0, first_m.start() - 3500)
+                prev_text = markdown_content[start_prev:last_m.end()]
+                end_post = grouped_cards[idx + 1]["matches"][0].start() if idx + 1 < len(grouped_cards) else min(len(markdown_content), last_m.end() + 1500)
+                post_text = markdown_content[best_m.end():end_post]
+
                 if len(title) < 5 or re.match(r'^\d+/\d+$', title) or any(bad in title.lower() for bad in ["video del inmueble", "tour virtual", "visita virtual", "líder de zona"]):
                     # Fallback de título en alt de foto o encabezado
-                    alt_title_m = re.search(r'!\[(?:Foto\s*\d+\s*de\s*)?([^\]]+)\]', prev_text[-500:] + "\n" + post_text[:500])
-                    h1_title_m = re.search(r'#\s*([^\n\r]+)', post_text[:500] + "\n" + prev_text[-500:])
+                    alt_title_m = re.search(r'!\[(?:Foto\s*\d+\s*de\s*)?([^\]]+)\]', prev_text[-800:] + "\n" + post_text[:500])
+                    h1_title_m = re.search(r'#\s*([^\n\r]+)', post_text[:500] + "\n" + prev_text[-800:])
                     if alt_title_m and len(alt_title_m.group(1).strip()) > 5:
                         title = alt_title_m.group(1).strip()
                     elif h1_title_m and len(h1_title_m.group(1).strip()) > 5:
@@ -1546,7 +1977,7 @@ class FotocasaMarkdownParser:
                     continue
 
                 # Precios: buscar tanto en prev_text (donde suele salir en la tarjeta de fotocasa) como en post_text
-                search_zone = prev_text[-400:] + "\n" + post_text[:500]
+                search_zone = prev_text[-600:] + "\n" + post_text[:500]
                 price_matches = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€(?!\s*/\s*m[²2]|\s*/\s*mes)', search_zone)
                 if not price_matches:
                     continue
@@ -1562,9 +1993,12 @@ class FotocasaMarkdownParser:
                 price_drop_date = "2026-03-01" if price_drop_amount > 0 else None
 
                 # Superficie, habitaciones, planta, ascensor
-                rooms = 2
+                tl_foto = title.lower()
+                is_land_md = (any(w in tl_foto for w in ["terreno", "solar", "parcela", "suelo"]) or "/terreno/" in url.lower()) and not any(w in tl_foto for w in ["chalet", "casa", "piso", "adosado", "pareado", "dúplex", "duplex", "ático", "atico"])
+                is_local_md = (any(w in tl_foto for w in ["local", "comercial", "oficina"]) or "/local/" in url.lower()) and not is_land_md
+                rooms = 0 if is_land_md else 2
                 rooms_match = re.search(r'(\d+)\s*(?:habs?|hab\b|habitaciones)', post_text[:400], re.IGNORECASE)
-                if rooms_match:
+                if rooms_match and not is_land_md:
                     rooms = int(rooms_match.group(1))
 
                 surface_m2 = 80.0
@@ -1579,21 +2013,13 @@ class FotocasaMarkdownParser:
 
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
-                # Imágenes: capturar hasta 20 fotos reales del inmueble (sin contaminar con el siguiente anuncio)
+                # Imágenes: capturar hasta 20 fotos reales del inmueble desde todo el bloque de la tarjeta (prev_text)
                 from app.connectors.market_scraper import MarketScraper
-                images = []
                 raw_img_matches = (
-                    re.findall(r'https?://static\.fotocasa\.es/images/ads/[^\s\"\)\']+', prev_text)
+                    re.findall(r'https?://(?:[a-z0-9\-]+\.)?static\.fotocasa\.es/images/ads/[a-f0-9\-]{20,}', prev_text, re.I)
                     + re.findall(r'!\[[^\]]*\]\((https?://[^\)]+)\)', prev_text)
                 )
-                for img_url in raw_img_matches:
-                    clean_img = img_url.split("?")[0] if "static.fotocasa.es" in img_url else img_url
-                    if not MarketScraper.is_valid_real_portal_photo(clean_img):
-                        continue
-                    if clean_img not in images:
-                        images.append(clean_img)
-                    if len(images) >= 20:
-                        break
+                images = MarketScraper.ensure_twenty_images(raw_img_matches)
 
                 if not images:
                     continue
@@ -1610,11 +2036,12 @@ class FotocasaMarkdownParser:
                     "postal_code": loc_data.get("postal_code", "28001"),
                     "lat": loc_data.get("lat"),
                     "lon": loc_data.get("lon"),
-                    "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
-                    "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                    "property_type": "Solar" if is_land_md else ("Local" if is_local_md else ("PISO" if "chalet" not in title.lower() else "CHALET")),
+                    "strategy": "LAND_DEVELOPMENT" if is_land_md else ("HOUSE_FLIPPING" if (is_local_md or surface_m2 < 140) else "BUY_AND_HOLD"),
+                    "is_solar": is_land_md,
                     "surface_m2": surface_m2,
                     "rooms": rooms,
-                    "bathrooms": 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1,
+                    "bathrooms": 0 if is_land_md else (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1),
                     "floor": floor,
                     "has_elevator": has_elevator,
                     "energy_certificate": "E",
@@ -1715,8 +2142,123 @@ class FotocasaMarkdownParser:
 class PisosComMarkdownParser:
     """
     Parser especializado para extraer oportunidades estructuradas
-    del Markdown generado por Supadata al consultar Pisos.com.
+    del Markdown generado por Supadata o del HTML directo de Pisos.com.
     """
+
+    @classmethod
+    def _parse_html(cls, html_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
+        listings: List[Dict[str, Any]] = []
+        try:
+            from app.connectors.market_scraper import MarketScraper
+            blocks = re.split(r'<div[^>]+class="[^"]*ad-preview[^"]*"', html_content)
+            for block in blocks[1:]:
+                try:
+                    href_m = re.search(r'href="(/comprar/[^"]+)"[^>]*class="ad-preview__title"[^>]*>([^<]+)</a>', block)
+                    if not href_m:
+                        href_m = re.search(r'class="ad-preview__title"[^>]*href="(/comprar/[^"]+)"[^>]*>([^<]+)</a>', block)
+                    if not href_m:
+                        href_m = re.search(r'href="(/comprar/[^"]+)"[^>]*>\s*([^<]{6,120})\s*</a>', block)
+                    if not href_m:
+                        continue
+                    rel_url = href_m.group(1).strip()
+                    title = re.sub(r"\s+", " ", href_m.group(2)).strip()
+                    url = f"https://www.pisos.com{rel_url}"
+                    id_m = re.search(r'-(\d{5,})(?:_\d+)?/?', rel_url)
+                    item_id = id_m.group(1) if id_m else str(abs(hash(rel_url)) % 100000000)
+
+                    sub_m = re.search(r'class="[^"]*ad-preview__subtitle[^"]*"[^>]*>([^<]+)</p>', block)
+                    if sub_m:
+                        sub_txt = re.sub(r"\s+", " ", sub_m.group(1)).strip()
+                        if sub_txt and sub_txt.lower() not in title.lower():
+                            title = f"{title} en {sub_txt}"
+
+                    price_m = re.findall(r'(\d{1,3}(?:\.\d{3})+)\s*€', block)
+                    clean_prices = [float(p.replace(".", "")) for p in price_m if float(p.replace(".", "")) > 15000]
+                    if not clean_prices:
+                        continue
+                    listing_price = clean_prices[0]
+
+                    sqm_m = re.search(r'(\d+(?:\.\d+)?)\s*m[²2]', block)
+                    surface_m2 = float(sqm_m.group(1).replace(".", "")) if sqm_m else 80.0
+
+                    rooms_m = re.search(r'(\d+)\s*(?:habs?|hab\b|habitaciones)', block, re.I)
+                    rooms = int(rooms_m.group(1)) if rooms_m else 1
+
+                    raw_imgs = re.findall(r'https?://(?:fotos|statics)\.imghs\.net/[^\s"\'<>]+', block)
+                    images = MarketScraper.ensure_twenty_images(raw_imgs)
+                    if not images:
+                        continue
+
+                    loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} {rel_url.replace('_', ' ')}", default_province)
+                    tl_pisos = f"{title} {rel_url}".lower()
+                    is_land_pisos = any(w in tl_pisos for w in ["terreno", "solar", "parcela", "suelo"]) and not any(w in title.lower() for w in ["chalet", "casa", "piso", "local"])
+                    is_local_pisos = any(w in tl_pisos for w in ["local", "locales", "comercial", "oficina"]) and not is_land_pisos
+                    prop_type = "Solar" if is_land_pisos else ("Local" if is_local_pisos else ("CHALET" if any(w in title.lower() for w in ["chalet", "casa", "adosado", "pareado", "finca"]) else "PISO"))
+
+                    area_m2_price = float(loc_data.get("area_m2_price", 3800.0))
+                    est_market_val = max(listing_price * 1.22, surface_m2 * area_m2_price)
+                    discount_vs_market = round(max(0.0, ((est_market_val - listing_price) / est_market_val) * 100), 1)
+                    monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=surface_m2,
+                        postal_code=loc_data.get("postal_code", "28001"),
+                        province=loc_data.get("province", default_province),
+                        floor="Bajo" if is_local_pisos else "Exterior",
+                        has_elevator=True,
+                    )
+                    rental_yield = RentalReferenceEngine.calculate_rental_yield(listing_price=listing_price, monthly_rent=monthly_rent)
+                    yield_score, yield_color = RentalReferenceEngine.evaluate_yield(rental_yield)
+                    overall_score = KPICalculator.calculate_overall_opportunity_score(
+                        discount_percentage=discount_vs_market / 100.0,
+                        poi_score=84.0,
+                        income_amount=loc_data.get("avg_household_income", 42000),
+                        population_growth=loc_data.get("population_growth_rate", 1.8),
+                        rental_yield=rental_yield,
+                        is_solar=is_land_pisos,
+                    )
+
+                    listings.append({
+                        "id": f"MKT-PISOSCOM-{item_id}",
+                        "portal_id": str(item_id),
+                        "portal_url": url,
+                        "url": url,
+                        "primary_portal": "Pisos.com",
+                        "title": title,
+                        "address": loc_data.get("address") or title,
+                        "locality": loc_data.get("locality", default_province),
+                        "province": loc_data.get("province", default_province),
+                        "postal_code": loc_data.get("postal_code", "28001"),
+                        "lat": loc_data.get("lat"),
+                        "lon": loc_data.get("lon"),
+                        "property_type": prop_type,
+                        "strategy": "LAND_DEVELOPMENT" if is_land_pisos else ("HOUSE_FLIPPING" if (is_local_pisos or surface_m2 < 140) else "BUY_AND_HOLD"),
+                        "is_solar": is_land_pisos,
+                        "surface_m2": surface_m2,
+                        "built_area": surface_m2,
+                        "rooms": 0 if is_land_pisos else rooms,
+                        "bathrooms": 0 if is_land_pisos else 1,
+                        "floor": "Bajo" if is_local_pisos else "Exterior",
+                        "has_elevator": True,
+                        "original_listing_price": listing_price,
+                        "listing_price": listing_price,
+                        "estimated_reference_value": round(est_market_val, -2),
+                        "discount_percentage": discount_vs_market,
+                        "discount_vs_market": discount_vs_market,
+                        "estimated_monthly_rent": monthly_rent,
+                        "rental_yield": rental_yield,
+                        "yield_score": yield_score,
+                        "yield_color": yield_color,
+                        "btl_score": yield_score,
+                        "btl_color": yield_color,
+                        "overall_score": overall_score,
+                        "final_score": overall_score,
+                        "images": images,
+                        "description": f"{title}. Inmueble verificado en Pisos.com.",
+                    })
+                except Exception:
+                    continue
+        except Exception as e_html:
+            logger.warning(f"Error en PisosComMarkdownParser._parse_html: {e_html}")
+        return listings
 
     @classmethod
     def parse_listings(cls, markdown_content: str, default_province: str = "Madrid") -> List[Dict[str, Any]]:
@@ -1724,32 +2266,66 @@ class PisosComMarkdownParser:
         if not markdown_content:
             return listings
 
+        if "<div" in markdown_content and "ad-preview" in markdown_content:
+            html_listings = cls._parse_html(markdown_content, default_province)
+            if html_listings:
+                logger.info(f"[Pisos.com HTML Parser] Extraídos {len(html_listings)} inmuebles directamente del HTML.")
+                return html_listings
+
+        markdown_content = markdown_content.replace("%5F", "_").replace("%5f", "_")
+
         link_pattern = re.compile(
-            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/(?:comprar|venta)/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
+            r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/(?:comprar|venta)/[^\)]*-(?P<id>\d{5,})(?:_\d+)?/?[^\)]*)\)',
             re.IGNORECASE
         )
 
-        matches = list(link_pattern.finditer(markdown_content))
-        if not matches:
+        raw_matches = list(link_pattern.finditer(markdown_content))
+        if not raw_matches:
             fallback_pattern = re.compile(
                 r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?pisos\.com/(?:comprar|venta)/[^\)]+)\)',
                 re.IGNORECASE
             )
-            matches = list(fallback_pattern.finditer(markdown_content))
+            raw_matches = list(fallback_pattern.finditer(markdown_content))
 
-        for i, match in enumerate(matches):
+        grouped_cards: List[Dict[str, Any]] = []
+        id_to_group: Dict[str, Dict[str, Any]] = {}
+        for i, m in enumerate(raw_matches):
+            u = m.group("url")
+            id_m = re.search(r'-(\d{6,})(?:_\d+)?/?', u)
+            item_id = (m.groupdict().get("id") if m.groupdict().get("id") else None) or (id_m.group(1) if id_m else str(300000 + i))
+            if item_id not in id_to_group:
+                grp = {"id": item_id, "matches": [m]}
+                id_to_group[item_id] = grp
+                grouped_cards.append(grp)
+            else:
+                id_to_group[item_id]["matches"].append(m)
+
+        for idx, grp in enumerate(grouped_cards):
             try:
-                item_id = match.groupdict().get("id") or str(300000 + i)
-                title = match.group("title").strip()
-                url = match.group("url")
+                item_id = grp["id"]
+                card_matches = grp["matches"]
+                first_m = card_matches[0]
+                last_m = card_matches[-1]
+                best_m = max(card_matches, key=lambda cm: len(re.sub(r'[*_~`]', '', cm.group("title")).strip()))
+                url = best_m.group("url")
+                title = re.sub(r'[*_~`]', '', best_m.group("title")).strip()
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1200)
-                prev_text = markdown_content[start_prev:match.start()]
-                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_content), match.end() + 1500)
-                post_text = markdown_content[match.end():end_post]
+                start_prev = grouped_cards[idx - 1]["matches"][-1].end() if idx > 0 else max(0, first_m.start() - 2500)
+                prev_text = markdown_content[start_prev:last_m.end()]
+                end_post = grouped_cards[idx + 1]["matches"][0].start() if idx + 1 < len(grouped_cards) else min(len(markdown_content), last_m.end() + 1500)
+                post_text = markdown_content[best_m.end():end_post]
 
                 if BOESubastasScraper.is_nave(title=title, desc=post_text[:600], property_type=""):
                     continue
+
+                # Extraer línea de subzona en Pisos.com (ej. "Zona de las Vegas (Villanueva del Pardillo)")
+                subzone_m = re.search(r'\n\s*([^\n\[\]\(\)\d€]+?\([A-Za-zÁÉÍÓÚáéíóúÑñ\s\-]+\))', post_text[:250])
+                if subzone_m:
+                    subzone_str = subzone_m.group(1).strip()
+                    if subzone_str.lower() not in title.lower():
+                        title = f"{title} en {subzone_str}"
+                elif "zona_de_las_vegas" in url.lower() and "las vegas" not in title.lower():
+                    title = f"{title} en Urbanización Las Vegas, Villanueva del Pardillo"
 
                 # Buscar precios en el bloque anterior (donde suele colocarse en pisos.com) y posterior
                 search_zone = prev_text[-400:] + "\n" + post_text[:500]
@@ -1785,20 +2361,22 @@ class PisosComMarkdownParser:
                 has_elevator = "sin ascensor" not in post_text[:400].lower()
 
                 from app.connectors.market_scraper import MarketScraper
-                images = []
                 all_candidate_imgs = re.findall(r'https?://(?:fotos|statics)\.imghs\.net/[^\s\"\)\']+\.(?:jpg|jpeg|png|webp)', prev_text)
-                for img_url in all_candidate_imgs:
-                    if not MarketScraper.is_valid_real_portal_photo(img_url):
-                        continue
-                    if img_url not in images:
-                        images.append(img_url)
-                    if len(images) >= 20:
-                        break
+                images = MarketScraper.ensure_twenty_images(all_candidate_imgs)
 
                 if not images:
                     continue
 
-                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(title, default_province)
+                loc_data = IdealistaMarkdownParser._resolve_location_and_kpis(f"{title} {url.replace('_', ' ')}", default_province)
+                if "las vegas" in title.lower() or "zona_de_las_vegas" in url.lower():
+                    loc_data["locality"] = "Villanueva del Pardillo"
+                    loc_data["postal_code"] = "28229"
+
+                tl_pisos = f"{title} {url}".lower()
+                is_land_pisos = any(w in tl_pisos for w in ["terreno", "solar", "parcela", "suelo"]) and not any(w in title.lower() for w in ["chalet", "casa", "piso", "adosado", "pareado", "dúplex", "duplex", "ático", "atico"])
+                is_local_pisos = any(w in tl_pisos for w in ["local", "locales", "comercial", "oficina"]) and not is_land_pisos
+                if is_land_pisos:
+                    rooms = 0
 
                 opportunity = {
                     "id": f"MKT-PISOSCOM-{item_id}",
@@ -1809,11 +2387,12 @@ class PisosComMarkdownParser:
                     "postal_code": loc_data.get("postal_code", "28001"),
                     "lat": loc_data.get("lat"),
                     "lon": loc_data.get("lon"),
-                    "property_type": "PISO" if "chalet" not in title.lower() else "CHALET",
-                    "strategy": "HOUSE_FLIPPING" if surface_m2 < 140 else "BUY_AND_HOLD",
+                    "property_type": "Solar" if is_land_pisos else ("Local" if is_local_pisos else ("CHALET" if any(w in title.lower() for w in ["chalet", "casa", "adosado", "pareado", "finca"]) else "PISO")),
+                    "strategy": "LAND_DEVELOPMENT" if is_land_pisos else ("HOUSE_FLIPPING" if (is_local_pisos or surface_m2 < 140) else "BUY_AND_HOLD"),
+                    "is_solar": is_land_pisos,
                     "surface_m2": surface_m2,
                     "rooms": rooms,
-                    "bathrooms": 2 if (surface_m2 >= 105.0 or rooms >= 4) else 1,
+                    "bathrooms": 0 if is_land_pisos else (2 if (surface_m2 >= 105.0 or rooms >= 4) else 1),
                     "floor": floor,
                     "has_elevator": has_elevator,
                     "energy_certificate": "E",
@@ -1987,16 +2566,13 @@ class MilanunciosMarkdownParser:
 
                     # Imágenes reales (regla estricta: 0 fotos = anuncio no vigente -> descartar)
                     from app.connectors.market_scraper import MarketScraper
-                    images = []
+                    raw_imgs_ad = []
                     for img in ad.get("images", []) or ad.get("multimedia", []):
                         if isinstance(img, dict) and (img.get("url") or img.get("src")):
-                            clean_u = (img.get("url") or img.get("src")).split("?")[0]
-                            if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
-                                images.append(clean_u)
+                            raw_imgs_ad.append(img.get("url") or img.get("src"))
                         elif isinstance(img, str) and img.startswith("http"):
-                            clean_u = img.split("?")[0]
-                            if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
-                                images.append(clean_u)
+                            raw_imgs_ad.append(img)
+                    images = MarketScraper.ensure_twenty_images(raw_imgs_ad)
 
                     if not images:
                         continue
@@ -2078,16 +2654,31 @@ class MilanunciosMarkdownParser:
             r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?milanuncios\.com/[^\)]*-(?:r|ad)?(?P<id>\d{5,})[^\)]*)\)',
             re.IGNORECASE
         )
-        matches = list(link_pattern.finditer(markdown_or_html))
-        for i, match in enumerate(matches):
-            try:
-                item_id = match.group("id")
-                title = match.group("title").strip()
-                url = match.group("url")
+        raw_matches = list(link_pattern.finditer(markdown_or_html))
+        grouped_cards: List[Dict[str, Any]] = []
+        id_to_group: Dict[str, Dict[str, Any]] = {}
+        for i, m in enumerate(raw_matches):
+            item_id = m.group("id")
+            if item_id not in id_to_group:
+                grp = {"id": item_id, "matches": [m]}
+                id_to_group[item_id] = grp
+                grouped_cards.append(grp)
+            else:
+                id_to_group[item_id]["matches"].append(m)
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1500)
-                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
-                prev_text = markdown_or_html[start_prev:match.start()]
+        for idx, grp in enumerate(grouped_cards):
+            try:
+                item_id = grp["id"]
+                card_matches = grp["matches"]
+                first_m = card_matches[0]
+                last_m = card_matches[-1]
+                best_m = max(card_matches, key=lambda cm: len(re.sub(r'[*_~`]', '', cm.group("title")).strip()))
+                title = re.sub(r'[*_~`]', '', best_m.group("title")).strip()
+                url = best_m.group("url")
+
+                start_prev = grouped_cards[idx - 1]["matches"][-1].end() if idx > 0 else max(0, first_m.start() - 2500)
+                end_post = grouped_cards[idx + 1]["matches"][0].start() if idx + 1 < len(grouped_cards) else min(len(markdown_or_html), last_m.end() + 1000)
+                prev_text = markdown_or_html[start_prev:last_m.end()]
                 context_text = markdown_or_html[start_prev:end_post]
 
                 price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
@@ -2099,18 +2690,14 @@ class MilanunciosMarkdownParser:
 
                 # Extraer imágenes exclusivamente de prev_text para evitar contaminación entre anuncios
                 raw_imgs = re.findall(
-                    r'(?:https?:)?//(?:[a-z0-9\-]+\.)?(?:milanuncios\.com|fotocasa\.es|scmspain\.com)/[^\s\"\'\)\>]+?\.(?:jpg|jpeg|webp)',
+                    r'(?:https?:)?//(?:[a-z0-9\-]+\.)?(?:milanuncios\.com|static\.fotocasa\.es/images/ads|fotocasa\.es|scmspain\.com)/[^\s\"\'\)\>]+?(?:\.(?:jpg|jpeg|webp)|[a-f0-9\-]{32,})',
                     prev_text,
                     re.IGNORECASE
                 )
                 if not raw_imgs:
                     raw_imgs = re.findall(r'!\[[^\]]*\]\((https?://[^\s\)\"\']+?\.(?:jpg|jpeg|webp)[^\s\)\"\']*)\)', prev_text, re.IGNORECASE)
 
-                images: List[str] = []
-                for u in raw_imgs:
-                    clean_u = ("https:" + u if u.startswith("//") else u).split("?")[0]
-                    if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
-                        images.append(clean_u)
+                images = MarketScraper.ensure_twenty_images([("https:" + u if u.startswith("//") else u) for u in raw_imgs])
 
                 # Regla estricta: si no existen fotos de una oportunidad, no está vigente/activa
                 if not images:
@@ -2176,23 +2763,38 @@ class YaEncontreMarkdownParser:
             r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?yaencontre\.com/venta/[^\)]*-(?P<id>\d{5,})[^\)]*)\)',
             re.IGNORECASE
         )
-        matches = list(link_pattern.finditer(markdown_or_html))
-        if not matches:
+        raw_matches = list(link_pattern.finditer(markdown_or_html))
+        if not raw_matches:
             fallback = re.compile(
                 r'\[(?P<title>[^\]]+)\]\((?P<url>https?://(?:www\.)?yaencontre\.com/[^\)]+inmueble-(?P<id>\d+)[^\)]*)\)',
                 re.IGNORECASE
             )
-            matches = list(fallback.finditer(markdown_or_html))
+            raw_matches = list(fallback.finditer(markdown_or_html))
 
-        for i, match in enumerate(matches):
+        grouped_cards: List[Dict[str, Any]] = []
+        id_to_group: Dict[str, Dict[str, Any]] = {}
+        for i, m in enumerate(raw_matches):
+            item_id = m.group("id")
+            if item_id not in id_to_group:
+                grp = {"id": item_id, "matches": [m]}
+                id_to_group[item_id] = grp
+                grouped_cards.append(grp)
+            else:
+                id_to_group[item_id]["matches"].append(m)
+
+        for idx, grp in enumerate(grouped_cards):
             try:
-                item_id = match.group("id")
-                title = match.group("title").strip()
-                url = match.group("url")
+                item_id = grp["id"]
+                card_matches = grp["matches"]
+                first_m = card_matches[0]
+                last_m = card_matches[-1]
+                best_m = max(card_matches, key=lambda cm: len(re.sub(r'[*_~`]', '', cm.group("title")).strip()))
+                title = re.sub(r'[*_~`]', '', best_m.group("title")).strip()
+                url = best_m.group("url")
 
-                start_prev = matches[i - 1].end() if i > 0 else max(0, match.start() - 1500)
-                end_post = matches[i + 1].start() if i + 1 < len(matches) else min(len(markdown_or_html), match.end() + 1000)
-                prev_text = markdown_or_html[start_prev:match.start()]
+                start_prev = grouped_cards[idx - 1]["matches"][-1].end() if idx > 0 else max(0, first_m.start() - 2500)
+                end_post = grouped_cards[idx + 1]["matches"][0].start() if idx + 1 < len(grouped_cards) else min(len(markdown_or_html), last_m.end() + 1000)
+                prev_text = markdown_or_html[start_prev:last_m.end()]
                 context_text = markdown_or_html[start_prev:end_post]
 
                 price_m = re.search(r'(\d{1,3}(?:\.\d{3})+)\s*€', context_text)
@@ -2211,11 +2813,7 @@ class YaEncontreMarkdownParser:
                 if not raw_imgs:
                     raw_imgs = re.findall(r'!\[[^\]]*\]\((https?://[^\s\)\"\']+?\.(?:jpg|jpeg|webp)[^\s\)\"\']*)\)', prev_text, re.IGNORECASE)
 
-                images: List[str] = []
-                for u in raw_imgs:
-                    clean_u = ("https:" + u if u.startswith("//") else u).split("?")[0]
-                    if MarketScraper.is_valid_real_portal_photo(clean_u) and clean_u not in images:
-                        images.append(clean_u)
+                images = MarketScraper.ensure_twenty_images([("https:" + u if u.startswith("//") else u) for u in raw_imgs])
 
                 # Regla estricta: si no existen fotos de una oportunidad, no está vigente/activa
                 if not images:

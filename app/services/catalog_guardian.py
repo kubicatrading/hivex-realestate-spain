@@ -33,98 +33,102 @@ class CatalogGuardian:
         """
         Extrae exclusivamente fotografías reales del inmueble en el portal indicado.
         Totalmente independiente del idioma en que esté renderizada la página.
+        Soporta tanto Markdown como HTML y payloads JSON embebidos (con barras escapadas \\/).
         """
         if not portal_url or not content:
             return []
 
+        from app.connectors.market_scraper import MarketScraper
+
+        # Desescapar barras JSON (ej. window.__INITIAL_PROPS__ = JSON.parse("...https:\/\/static.fotocasa.es\/..."))
+        norm_content = content.replace(r"\/", "/")
         url_lower = portal_url.lower()
-        extracted: List[str] = []
+        raw_candidates: List[str] = []
 
         if "idealista.com" in url_lower:
             # En Idealista las fotos reales de anuncio se sirven desde imgX.idealista.com
-            # Descartamos avatares, logos comunes, mapas y assets de interfaz
-            raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+\.jpg', content)
+            raw_imgs = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\'<>\\]+\.(?:jpg|jpeg|webp)', norm_content, re.I)
             for img in raw_imgs:
-                if any(x in img.lower() for x in ["loading", "avatar", "common", "user", "static/common", "logo"]):
+                if any(x in img.lower() for x in ["loading", "avatar", "common", "user", "static/common", "logo", "/b.pro/", "/blur/95_45_mq/"]):
                     continue
-                cleaned = re.sub(r'/blur/[^/]+/', '/blur/WEB_DETAIL-XL-L/', img)
-                if cleaned not in extracted:
-                    extracted.append(cleaned)
+                raw_candidates.append(img)
 
         elif "fotocasa.es" in url_lower:
-            # En Fotocasa las fotos de inmueble son /images/ads/UUID
-            raw_imgs = re.findall(r'https?://static\.fotocasa\.es/images/ads/[a-f0-9\-]+', content)
-            for img in raw_imgs:
-                clean_url = img.split("?")[0]
-                if clean_url not in extracted:
-                    extracted.append(clean_url)
+            # En Fotocasa las fotos de inmueble son /images/ads/UUID (excluir /images/client/ que son logos de agencia)
+            raw_imgs = re.findall(r'https?://(?:[a-z0-9\-]+\.)?static\.fotocasa\.es/images/ads/[a-f0-9\-]{20,}', norm_content, re.I)
+            raw_candidates.extend(raw_imgs)
 
         elif "pisos.com" in url_lower:
-            # En Pisos.com las fotos de inmuebles son fotos.imghs.net
-            raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\']+\.jpg', content)
-            unique_pisos: dict = {}
+            # En Pisos.com las fotos de inmuebles son fotos.imghs.net (excluir map.imghs.net y prof-wp)
+            raw_imgs = re.findall(r'https?://fotos\.imghs\.net/[^\s\"\)\'<>\\]+\.(?:jpg|jpeg|webp)', norm_content, re.I)
             for img in raw_imgs:
                 if any(x in img.lower() for x in ["logo", "icon", "placeholder", "watermark", "avatar", "prof-wp"]):
                     continue
-                high_res = re.sub(r'/(?:fchm|apps|appswm|xl|fch)-wp/', '/fch-wp/', img)
-                filename = high_res.split('/')[-1]
-                if filename not in unique_pisos:
-                    unique_pisos[filename] = high_res
-            extracted = list(unique_pisos.values())
+                raw_candidates.append(img)
 
         elif "habitaclia.com" in url_lower:
-            # En Habitaclia las fotos pertenecen a la red Adevinta (Fotocasa CDN) o images.habimg.com
-            # 1. Extraer UUIDs de la galería oficial (foto.htm?p=...imagen=UUID.jpg o static.fotocasa.es)
-            gallery_uuids = re.findall(r'imagen=([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jpg', content, re.I)
+            # En Habitaclia las fotos pertenecen a la red Adevinta (static.fotocasa.es/images/ads/UUID) o images.habimg.com
+            # 1. Extraer URLs directas de static.fotocasa.es/images/ads/UUID (presentes en __INITIAL_PROPS__ y Markdown)
+            fc_direct = re.findall(r'https?://(?:[a-z0-9\-]+\.)?static\.fotocasa\.es/images/ads/[a-f0-9\-]{20,}', norm_content, re.I)
+            raw_candidates.extend(fc_direct)
+
+            # 2. Extraer UUIDs de la galería oficial (foto.htm?p=...imagen=UUID.jpg)
+            gallery_uuids = re.findall(r'imagen=([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jpg', norm_content, re.I)
             for uid in gallery_uuids:
-                fc_url = f"https://static.fotocasa.es/images/ads/{uid}"
-                if fc_url not in extracted:
-                    extracted.append(fc_url)
+                raw_candidates.append(f"https://static.fotocasa.es/images/ads/{uid}")
 
-            # 2. Si no hubo UUIDs de galería, buscar imágenes habimg
-            if not extracted:
-                habimg = re.findall(r'(?:https?:)?//images\.habimg\.com/imgh/[^\s\"\'\)<>]+[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}[A-Z]*\.(?:jpg|jpeg|webp)', content, re.I)
-                for h in habimg:
-                    if not h.startswith("http"):
-                        h = "https:" + h
-                    h_clean = re.sub(r'[A-Z]?\.(jpg|jpeg|webp)$', r'XL.\1', h)
-                    if h_clean not in extracted:
-                        extracted.append(h_clean)
+            # 3. Buscar imágenes habimg (normalizando sufijo P/M/G/V -> XL)
+            habimg = re.findall(
+                r'(?:https?:)?//images\.habimg\.com/imgh/[^\s\"\'\)<>\\]*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}[A-Z]*\.(?:jpg|jpeg|webp)',
+                norm_content,
+                re.I,
+            )
+            for h in habimg:
+                raw_candidates.append(("https:" + h) if h.startswith("//") else h)
 
-            # 3. Fallback a CDNs tradicionales de Habitaclia
-            raw_imgs = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\']+\.jpg', content)
-            for img in raw_imgs:
+            # 4. Fallback a CDNs tradicionales de Habitaclia
+            hab_trad = re.findall(r'https?://(?:static|fotos)\.habitaclia\.com/[^\s\"\)\'<>\\]+\.(?:jpg|jpeg|webp)', norm_content, re.I)
+            for img in hab_trad:
                 if any(x in img.lower() for x in ["logo", "icon", "loading", "avatar", "watermark"]):
                     continue
-                if img not in extracted:
-                    extracted.append(img)
+                raw_candidates.append(img)
 
-        elif "milanuncios.com" in url_lower or "milanuncios" in content[:2000].lower():
+        elif "milanuncios.com" in url_lower or "milanuncios" in norm_content[:2000].lower():
             raw_imgs = re.findall(
-                r'https?://(?:img\.milanuncios\.com|images\.milanuncios\.com|statics\.milanuncios\.com/imagenes)[^\s\"\'\)\]>]+?\.(?:jpg|jpeg|webp|png)(?:\?[^\s\"\'\)\]>]*)?',
-                content,
+                r'(?:https?:)?//(?:[a-z0-9\-]+\.)?(?:milanuncios\.com|static\.fotocasa\.es/images/ads|scmspain\.com)/[^\s\"\'\)\]>\\]+?(?:\.(?:jpg|jpeg|webp|png)|[a-f0-9\-]{32,})(?:\?[^\s\"\'\)\]>\\]*)?',
+                norm_content,
                 re.I,
             )
             for img in raw_imgs:
-                if any(x in img.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite"]):
+                full_u = ("https:" + img) if img.startswith("//") else img
+                if any(x in full_u.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite", "/images/client/"]):
                     continue
-                if img not in extracted:
-                    extracted.append(img)
+                raw_candidates.append(full_u)
 
-        elif "yaencontre.com" in url_lower or "yaencontre" in content[:2000].lower():
+        elif "yaencontre.com" in url_lower or "yaencontre" in norm_content[:2000].lower():
             raw_imgs = re.findall(
-                r'https?://[^\s\"\'\)\]>]*yaencontre\.com[^\s\"\'\)\]>]+?\.(?:jpg|jpeg|webp|png)(?:\?[^\s\"\'\)\]>]*)?',
-                content,
+                r'(?:https?:)?//[^\s\"\'\)\]>\\]*yaencontre\.com[^\s\"\'\)\]>\\]+?\.(?:jpg|jpeg|webp|png)(?:\?[^\s\"\'\)\]>\\]*)?',
+                norm_content,
                 re.I,
             )
             for img in raw_imgs:
-                if any(x in img.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite"]):
+                full_u = ("https:" + img) if img.startswith("//") else img
+                if any(x in full_u.lower() for x in ["logo", "icon", "avatar", "banner", "placeholder", "default", "sprite"]):
                     continue
-                if img not in extracted:
-                    extracted.append(img)
+                raw_candidates.append(full_u)
 
-        from app.connectors.market_scraper import MarketScraper
-        return [u for u in extracted if MarketScraper.is_valid_real_portal_photo(u)]
+        extracted: List[str] = []
+        seen_keys = set()
+        for raw_u in raw_candidates:
+            norm_u = MarketScraper.normalize_portal_photo_url(raw_u)
+            if not MarketScraper.is_valid_real_portal_photo(norm_u):
+                continue
+            key = MarketScraper.canonical_photo_key(norm_u)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                extracted.append(norm_u)
+
+        return extracted
 
     def verify_listing_active_status(
         self,

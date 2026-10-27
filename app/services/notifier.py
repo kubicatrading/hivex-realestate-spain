@@ -19,11 +19,15 @@ class TelegramNotifier:
         self.chat_id = chat_id or settings.TELEGRAM_CHAT_ID
         self.platform_url = settings.PLATFORM_BASE_URL.rstrip("/")
 
-    def send_opportunity_alert(self, opp: Opportunity) -> bool:
+    def send_opportunity_alert(self, opp: Opportunity, force: bool = False) -> bool:
         """
-        Envía una ficha visual con foto y botones de acción a Telegram con los detalles de la oportunidad.
-        Si la foto no carga, realiza fallback automático a mensaje HTML.
+        Desactivado el envío automático de alertas individuales no solicitadas desde el pipeline de subastas.
+        Solo las alertas de consultas activas de usuarios se envían al grupo de Telegram.
         """
+        if not force:
+            logger.info("[TelegramNotifier] Alerta individual automática omitida (solo se notifican alertas de consultas de usuarios).")
+            return False
+
         auction = opp.auction
         discount_pct_display = round(opp.discount_percentage * 100, 1)
         gross_profit = opp.estimated_reference_value - opp.listing_price
@@ -68,8 +72,9 @@ class TelegramNotifier:
         reply_markup = {
             "inline_keyboard": [
                 [
-                    {"text": "🔍 Ver Ficha Completa", "url": web_link},
-                    {"text": "🌐 Portal Origen", "url": boe_url}
+                    {"text": "🔍 Plataforma", "url": web_link},
+                    {"text": "🌐 Portal Origen", "url": boe_url},
+                    {"text": "⭐ Favorito", "callback_data": f"fav:SUB-{auction.id_subasta}"}
                 ]
             ]
         }

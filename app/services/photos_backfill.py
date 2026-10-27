@@ -157,137 +157,71 @@ class PhotosBackfillWorker:
     # EXTRACTORES ESPECIALIZADOS POR PORTAL
     # =========================================================================
 
+    def fetch_generic_portal_gallery(self, portal_url: str, allow_supadata: bool = False) -> List[str]:
+        """
+        Extrae la galería completa de cualquier portal inmobiliario soportado
+        (Pisos.com, Habitaclia, Fotocasa, Milanuncios, YaEncontré, Idealista)
+        usando petición HTTP directa y, si procede o es necesario, Supadata/caché.
+        """
+        if not portal_url:
+            return []
+
+        from app.services.catalog_guardian import CatalogGuardian
+        from app.connectors.market_scraper import MarketScraper
+
+        clean_url = urllib.parse.unquote(portal_url.strip())
+        guardian = CatalogGuardian()
+        found_imgs: List[str] = []
+
+        if "idealista.com" not in clean_url.lower():
+            req = urllib.request.Request(
+                clean_url,
+                headers={
+                    "User-Agent": self.user_agent,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                }
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=9) as resp:
+                    if resp.status == 200:
+                        html = resp.read().decode("utf-8", errors="ignore")
+                        found_imgs = guardian.extract_photos_from_content(clean_url, html)
+            except Exception as e:
+                logger.debug(f"[PhotosBackfill] Direct fetch error for {clean_url}: {e}")
+
+        if len(found_imgs) < 3 and (allow_supadata or "idealista.com" not in clean_url.lower()):
+            try:
+                from app.connectors.supadata_client import SupadataClient
+                client = SupadataClient()
+                scrape_res = client.scrape_url(clean_url)
+                if scrape_res and scrape_res.get("content"):
+                    supa_imgs = guardian.extract_photos_from_content(clean_url, scrape_res.get("content", ""))
+                    found_imgs = MarketScraper.ensure_twenty_images(found_imgs + supa_imgs)
+            except Exception as e:
+                logger.debug(f"[PhotosBackfill] Supadata fallback error for {clean_url}: {e}")
+
+        return MarketScraper.ensure_twenty_images(found_imgs)
+
     def fetch_pisos_gallery(self, portal_url: str) -> List[str]:
         """
         Extrae la galería íntegra de alta resolución de Pisos.com mediante petición HTTP directa.
         Coste: 0 créditos Supadata.
         """
-        if not portal_url:
-            return []
-
-        clean_url = urllib.parse.unquote(portal_url.strip())
-        req = urllib.request.Request(
-            clean_url,
-            headers={
-                "User-Agent": self.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-            }
-        )
-
-        try:
-            with urllib.request.urlopen(req, timeout=9) as resp:
-                if resp.status != 200:
-                    return []
-                html = resp.read().decode("utf-8", errors="ignore")
-
-            # Buscar todas las fotos en el CDN imghs.net
-            from app.connectors.market_scraper import MarketScraper
-            raw_imgs = re.findall(r'https://fotos\.imghs\.net/[^\s\"\'\<\>]+', html)
-            clean_imgs = []
-            seen_uuids = set()
-
-            for img in raw_imgs:
-                if not MarketScraper.is_valid_real_portal_photo(img):
-                    continue
-                # Extraer UUID o identificador de foto
-                m = re.search(r'([a-f0-9\-]{36})', img)
-                photo_id = m.group(1) if m else img
-                if photo_id not in seen_uuids:
-                    seen_uuids.add(photo_id)
-                    # Convertir a resolución alta xl-wp
-                    high_res = re.sub(r'https://fotos\.imghs\.net/[^/]+/', 'https://fotos.imghs.net/xl-wp/', img)
-                    # Limpiar sufijos
-                    high_res = high_res.split("?")[0]
-                    if MarketScraper.is_valid_real_portal_photo(high_res):
-                        clean_imgs.append(high_res)
-
-            return clean_imgs
-        except Exception as e:
-            logger.debug(f"[PhotosBackfill] Pisos.com direct fetch error for {clean_url}: {e}")
-            return []
+        return self.fetch_generic_portal_gallery(portal_url, allow_supadata=False)
 
     def fetch_habitaclia_gallery(self, portal_url: str) -> List[str]:
         """
-        Extrae la galería de Habitaclia mediante petición directa SSR. Coste: 0 créditos Supadata.
+        Extrae la galería de Habitaclia/Fotocasa mediante petición directa SSR (y fallback).
         """
-        if not portal_url:
-            return []
-
-        clean_url = portal_url.strip()
-        req = urllib.request.Request(
-            clean_url,
-            headers={
-                "User-Agent": self.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-            }
-        )
-
-        try:
-            with urllib.request.urlopen(req, timeout=9) as resp:
-                if resp.status != 200:
-                    return []
-                html = resp.read().decode("utf-8", errors="ignore")
-
-            from app.connectors.market_scraper import MarketScraper
-            raw_imgs = re.findall(r'https?://[^\s\"\'\<\>]+\.static\.fotocasa\.es/[^\s\"\'\<\>]+', html)
-            raw_imgs += re.findall(r'https?://fotos\.habitaclia\.com/[^\s\"\'\<\>]+', html)
-
-            clean_imgs = []
-            seen = set()
-            for img in raw_imgs:
-                base = img.split("?")[0]
-                if not MarketScraper.is_valid_real_portal_photo(base):
-                    continue
-                if base not in seen:
-                    seen.add(base)
-                    clean_imgs.append(base)
-
-            return clean_imgs
-        except Exception as e:
-            logger.debug(f"[PhotosBackfill] Habitaclia fetch error: {e}")
-            return []
+        return self.fetch_generic_portal_gallery(portal_url, allow_supadata=False)
 
     def fetch_idealista_gallery(self, portal_url: str) -> List[str]:
         """
         Extrae la galería de Idealista mediante Supadata de forma estrictamente presupuestada.
         """
-        if not portal_url:
-            return []
+        return self.fetch_generic_portal_gallery(portal_url, allow_supadata=True)
 
-        try:
-            from app.connectors.supadata_client import SupadataClient
-            from app.connectors.market_scraper import MarketScraper
-            client = SupadataClient()
-            scrape_res = client.scrape_url(portal_url)
-            if not scrape_res:
-                return []
-
-            content = scrape_res.get("content", "")
-            raw_matches = re.findall(r'https?://img\d*\.idealista\.com/[^\s\"\)\']+', content)
-            clean_imgs = []
-            seen = set()
-
-            for img_url in raw_matches:
-                if img_url.endswith(".gif"):
-                    continue
-                clean = (
-                    img_url.replace("/blur/189_120_mq/", "/blur/WEB_DETAIL-XL-L/")
-                    .replace("/blur/360_240_mq/", "/blur/WEB_DETAIL-XL-L/")
-                    .replace("/blur/240_180_mq/", "/blur/WEB_DETAIL-XL-L/")
-                    .replace("/blur/120_90_mq/", "/blur/WEB_DETAIL-XL-L/")
-                )
-                if not MarketScraper.is_valid_real_portal_photo(clean):
-                    continue
-                if clean not in seen:
-                    seen.add(clean)
-                    clean_imgs.append(clean)
-
-            return clean_imgs
-        except Exception as e:
-            logger.warning(f"[PhotosBackfill] Error extrayendo Idealista vía Supadata: {e}")
-            return []
 
     # =========================================================================
     # AUDITORÍA Y BACKFILL POR LOTES
@@ -579,16 +513,7 @@ class PhotosBackfillWorker:
                 continue
 
             new_imgs = []
-            if "pisos.com" in portal or "pisos" in portal:
-                new_imgs = self.fetch_pisos_gallery(portal_url)
-                time.sleep(0.3)
-            elif "habitaclia" in portal:
-                new_imgs = self.fetch_habitaclia_gallery(portal_url)
-                time.sleep(0.3)
-            elif "fotocasa" in portal:
-                new_imgs = self.fetch_habitaclia_gallery(portal_url)
-                time.sleep(0.3)
-            elif "idealista" in portal and is_idealista:
+            if "idealista" in portal and is_idealista:
                 # Comprobar antes de gastar que no hayamos superado los 10 créditos
                 current_quota = self.get_daily_quota()
                 if current_quota.get("credits_remaining_today", 0) <= 0:
@@ -599,18 +524,27 @@ class PhotosBackfillWorker:
                 self.record_idealista_credit_used()
                 idealista_credits_consumed += 1
                 time.sleep(1.5)
+            elif "idealista" not in portal:
+                new_imgs = self.fetch_generic_portal_gallery(portal_url, allow_supadata=False)
+                time.sleep(0.3)
 
-            if new_imgs and len(new_imgs) > initial_count:
-                items[idx]["images"] = new_imgs
+            if new_imgs:
+                from app.connectors.market_scraper import MarketScraper
+                merged_imgs = MarketScraper.ensure_twenty_images(list(it.get("images") or []) + new_imgs)
+            else:
+                merged_imgs = []
+
+            if merged_imgs and len(merged_imgs) > initial_count:
+                items[idx]["images"] = merged_imgs
                 enriched_count += 1
                 enriched_details.append({
                     "id": it.get("id"),
                     "portal": it.get("primary_portal"),
                     "title": it.get("title", "")[:35],
                     "before": initial_count,
-                    "after": len(new_imgs)
+                    "after": len(merged_imgs)
                 })
-                logger.info(f"[PhotosBackfill] Enriquecido {it.get('id')} ({it.get('primary_portal')}): {initial_count} -> {len(new_imgs)} fotos.")
+                logger.info(f"[PhotosBackfill] Enriquecido {it.get('id')} ({it.get('primary_portal')}): {initial_count} -> {len(merged_imgs)} fotos.")
 
         # Persistir catálogo si hubo enriquecimientos
         if enriched_count > 0:

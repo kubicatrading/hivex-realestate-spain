@@ -3560,6 +3560,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function formatAdvisorSummaryHtml(str) {
+        if (str === null || str === undefined) return '';
+        let decoded = String(str)
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#0*39;/gi, "'")
+            .replace(/&amp;/gi, '&');
+        // Strip complete and truncated HTML tags so raw tags like <b> or <i> never appear as literal text
+        decoded = decoded.replace(/<\/?[a-zA-Z][^>]*>/g, '').replace(/<\/?[a-zA-Z][^>]*$/g, '');
+        return escapeHtml(decoded.replace(/\s+/g, ' ').trim());
+    }
+
     function showToast(message, type = 'info') {
         const toastContainer = document.getElementById('toast-container');
         const toast = document.createElement('div');
@@ -3659,33 +3672,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             let serverConsultations = [];
+            let serverOk = false;
             try {
                 const resp = await fetch('/api/v1/consultations', {
                     headers: { 'Authorization': `Bearer ${state.token}` }
                 });
                 if (resp.ok) {
                     const data = await resp.json();
-                    serverConsultations = data.consultations || [];
+                    serverConsultations = (data.consultations || []).filter(c => Number(c.id) >= 48);
+                    serverOk = true;
                 }
             } catch (netErr) {
                 console.warn('Aviso al recuperar consultas remotas:', netErr);
             }
 
-            // Unificar con consultas guardadas localmente (para persistencia instantánea y offline/serverless)
-            const localConsultations = getLocalConsultations();
-            const serverIds = new Set(serverConsultations.map(c => String(c.id)));
-            const merged = [...serverConsultations];
-
-            for (const loc of localConsultations) {
-                if (!serverIds.has(String(loc.id))) {
-                    merged.push(loc);
-                }
+            let merged = [];
+            if (serverOk) {
+                merged = [...serverConsultations];
+                try {
+                    localStorage.setItem('hivex_local_consultations', JSON.stringify(serverConsultations));
+                } catch (e) {}
+            } else {
+                const localConsultations = getLocalConsultations().filter(c => Number(c.id) >= 48);
+                merged = [...localConsultations];
             }
 
             // Ordenar por fecha descendente
             merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
-            // Deduplicar unificado (servidor + local) por usuario y huella canónica del prompt
+            // Deduplicar por usuario y huella canónica del prompt
             const seenKeys = new Set();
             const dedupedMerged = [];
             for (const item of merged) {
@@ -3696,22 +3711,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 seenKeys.add(dedupKey);
                 dedupedMerged.push(item);
             }
-
-            // Saneamiento proactivo de localStorage: eliminar duplicados acumulados históricamente
-            const cleanLocal = [];
-            const cleanLocalKeys = new Set();
-            for (const loc of localConsultations) {
-                const u = (loc.user_name || 'usuario').toLowerCase().trim();
-                const fp = getCanonicalPromptKey(loc.description);
-                const k = fp ? `${u}:::${fp}` : String(loc.id);
-                if (!cleanLocalKeys.has(k)) {
-                    cleanLocalKeys.add(k);
-                    cleanLocal.push(loc);
-                }
-            }
-            try {
-                localStorage.setItem('hivex_local_consultations', JSON.stringify(cleanLocal));
-            } catch (e) {}
 
             window._savedConsultations = dedupedMerged;
 
@@ -3883,7 +3882,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${c.ai_summary ? `
                             <div class="group-summary-box">
                                 <strong><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: -2px;"></i> Diagnóstico del Asesor HIVEX:</strong>
-                                ${escapeHtml(c.ai_summary)}
+                                ${formatAdvisorSummaryHtml(c.ai_summary)}
                             </div>
                         ` : ''}
 

@@ -67,13 +67,28 @@ class MarketScraper:
 
     FORBIDDEN_MOCK_IMAGE_PATTERNS = (
         "default_nophoto",
+        "nophoto",
+        "no-photo",
+        "no_photo",
+        "sin_foto",
+        "sin-foto",
         "/logos/",
+        "/logo/",
         "logo",
         "icon",
         "avatar",
         "placeholder",
         "watermark",
         "prof-wp",
+        "/prof/",
+        "/images/client/",
+        "map.imghs.net",
+        "maps.idealista",
+        "/statics/img/",
+        "/dist/img/",
+        "sello_de_calidad",
+        "/b.pro/",
+        "/blur/95_45_mq/",
         "loading",
         "static/common",
         "1347770919.jpg",
@@ -94,9 +109,51 @@ class MarketScraper:
         if not cleaned.startswith("http"):
             return False
         low = cleaned.lower()
+        base_low = low.split("?")[0]
+        if base_low.endswith((".svg", ".gif")):
+            return False
         if any(pat in low for pat in cls.FORBIDDEN_MOCK_IMAGE_PATTERNS):
             return False
         return True
+
+    @classmethod
+    def normalize_portal_photo_url(cls, url: str) -> str:
+        """Normaliza la URL de fotografía de cualquier portal a su variante de alta resolución limpia."""
+        cleaned = url.strip()
+        if "static.fotocasa.es/images/ads/" in cleaned:
+            cleaned = cleaned.split("?")[0]
+        elif "images.habimg.com/imgh/" in cleaned:
+            cleaned = re.sub(r'[PMG]\.(jpg|jpeg|webp)$', r'XL.\1', cleaned.split("?")[0], flags=re.I)
+        elif "fotos.imghs.net/" in cleaned:
+            cleaned = re.sub(r'/(?:fchm|apps|appswm|mm|s1)-wp/', '/fch-wp/', cleaned.split("?")[0], flags=re.I)
+        elif "idealista.com" in cleaned:
+            cleaned = re.sub(
+                r'/blur/(?:189_120_mq|360_240_mq|240_180_mq|120_90_mq)/',
+                '/blur/WEB_DETAIL-XL-L/',
+                cleaned,
+                flags=re.I
+            )
+        return cleaned
+
+    @classmethod
+    def canonical_photo_key(cls, url: str) -> str:
+        """Genera una clave canónica de deduplicación por imagen real en todos los portales."""
+        u_base = url.strip().split("?")[0]
+        # Idealista master path
+        m_id = re.search(r"id\.pro\.[a-z]+\.image\.master/[0-9a-f/]+", u_base, re.I)
+        if m_id:
+            return f"idealista:{m_id.group(0).lower()}"
+        # Fotocasa / Habitaclia UUID
+        m_uuid = re.search(r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})", u_base, re.I)
+        if m_uuid and any(d in u_base.lower() for d in ("fotocasa.es", "habimg.com", "habitaclia.com", "milanuncios.com", "scmspain.com")):
+            return f"adevinta:{m_uuid.group(1).lower()}"
+        # Pisos.com filename
+        if "fotos.imghs.net/" in u_base.lower():
+            return f"pisos:{u_base.split('/')[-1].lower()}"
+        # YaEncontré filename
+        if "yaencontre.com/" in u_base.lower():
+            return f"yaencontre:{u_base.split('/')[-1].lower()}"
+        return re.sub(r"\.(?:webp|jpg|jpeg|png)$", "", u_base, flags=re.I).lower()
 
     @classmethod
     def ensure_twenty_images(cls, images: Any, is_solar: bool = False, item_id: str = "") -> List[str]:
@@ -104,7 +161,9 @@ class MarketScraper:
         Garantiza máxima fidelidad y precisión: conserva única y exclusivamente las fotografías
         reales aportadas por el portal inmobiliario / anunciante para este inmueble concreto.
         No se añaden fotos simuladas ni de relleno artificial si el anuncio tiene menos imágenes.
-        Elimina duplicados, descarta URLs vacías, logos o mocks y aplica un tope máximo de 20 fotos reales.
+        Elimina duplicados (incluyendo distintas resoluciones de la misma foto en Pisos.com, Habitaclia,
+        Fotocasa, Idealista, Milanuncios y YaEncontré), descarta URLs vacías, logos o mocks
+        y aplica un tope máximo de 20 fotos reales.
         Acepta tanto una lista de URLs (`List[str]`) como un diccionario de oportunidad (`Dict[str, Any]`).
         """
         if isinstance(images, dict):
@@ -119,15 +178,337 @@ class MarketScraper:
             raw_list = []
 
         valid_imgs = []
+        seen_keys = set()
         for img in raw_list:
             if cls.is_valid_real_portal_photo(img):
-                cleaned = img.strip()
-                if cleaned not in valid_imgs:
+                cleaned = cls.normalize_portal_photo_url(img)
+                if not cls.is_valid_real_portal_photo(cleaned):
+                    continue
+                k = cls.canonical_photo_key(cleaned)
+                if k not in seen_keys:
+                    seen_keys.add(k)
                     valid_imgs.append(cleaned)
         return valid_imgs[:cls.TARGET_GALLERY_SIZE]
 
     # Alias de compatibilidad
     ensure_twelve_images = ensure_twenty_images
+
+    @classmethod
+    def broad_property_category(cls, opp: Dict[str, Any]) -> str:
+        """Clasifica un inmueble en su macro-categoría física para evitar fusionar tipologías distintas."""
+        pt = str(opp.get("property_type") or "").upper()
+        title = str(opp.get("title") or "").upper()
+        combined = f"{pt} {title}"
+        if any(k in combined for k in ("SOLAR", "TERRENO", "PARCELA", "RUSTIC", "RÚSTIC", "FINCA")):
+            return "TERRENO"
+        if any(k in combined for k in ("LOCAL", "NAVE", "OFICINA", "GARAJE", "TRASTERO", "EDIFICIO")):
+            return "LOCAL"
+        if any(k in combined for k in ("CHALET", "CASA", "ADOSAD", "PAREAD", "UNIFAMILIAR", "VILLA", "CASERIO", "CASERÍO", "MANSION", "MANSIÓN", "BUNGALOW")):
+            return "CHALET"
+        if any(k in combined for k in ("PISO", "APARTAMENTO", "ATICO", "ÁTICO", "DUPLEX", "DÚPLEX", "ESTUDIO", "LOFT", "VIVIENDA")):
+            return "PISO"
+        return "OTRO"
+
+    @classmethod
+    def normalize_desc_fingerprint(cls, text: Optional[str]) -> str:
+        """Normaliza la descripción eliminando acentos, signos y prefijos de agencia para comparar texto."""
+        if not text:
+            return ""
+        import unicodedata
+        t = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("ascii").lower()
+        t = re.sub(r"https?://\S+", " ", t)
+        t = re.sub(r"[^a-z0-9\s]", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @classmethod
+    def are_same_physical_property(cls, opp_a: Dict[str, Any], opp_b: Dict[str, Any]) -> bool:
+        """
+        Determina si dos anuncios (de distintos portales como Idealista vs Fotocasa, o del mismo portal)
+        corresponden al mismo inmueble físico real mediante validación multicapa:
+        - Capa 0: ID canónico, alias_ids, URL de portal o Referencia Catastral idéntica.
+        - Capa 1: Misma macro-categoría de inmueble y misma ubicación (municipio o código postal).
+        - Capa 2: Coincidencia de huella fotográfica (clave canónica o firma perceptual RGB),
+                  o solapamiento de descripción normalizada + precio similar (±8%),
+                  o coincidencia exacta de precio (±1%) + superficie m² (±3 m² o ±2%).
+        """
+        if not isinstance(opp_a, dict) or not isinstance(opp_b, dict):
+            return False
+
+        id_a = str(opp_a.get("id") or opp_a.get("portal_id") or "").strip().upper()
+        id_b = str(opp_b.get("id") or opp_b.get("portal_id") or "").strip().upper()
+        aliases_a = {str(x).strip().upper() for x in (opp_a.get("alias_ids") or []) if x}
+        aliases_b = {str(x).strip().upper() for x in (opp_b.get("alias_ids") or []) if x}
+        if id_a:
+            aliases_a.add(id_a)
+        if id_b:
+            aliases_b.add(id_b)
+        if aliases_a and aliases_b and (aliases_a & aliases_b):
+            return True
+
+        url_a = str(opp_a.get("url") or opp_a.get("portal_url") or "").strip().rstrip("/").lower()
+        url_b = str(opp_b.get("url") or opp_b.get("portal_url") or "").strip().rstrip("/").lower()
+        if url_a and url_b and url_a == url_b:
+            return True
+
+        ref_a = str(opp_a.get("refcat") or "").strip().upper()
+        ref_b = str(opp_b.get("refcat") or "").strip().upper()
+        if ref_a and ref_b and len(ref_a) >= 14 and ref_a == ref_b:
+            return True
+
+        # Solo deduplicar entre anuncios de mercado (o si ambos son del mismo origen)
+        src_a = str(opp_a.get("source_type") or "").strip().lower()
+        src_b = str(opp_b.get("source_type") or "").strip().lower()
+        is_mkt_a = src_a == "market" or id_a.startswith("MKT-")
+        is_mkt_b = src_b == "market" or id_b.startswith("MKT-")
+        if is_mkt_a != is_mkt_b:
+            return False
+
+        # Capa 1: Macro-categoría física compatible
+        cat_a = cls.broad_property_category(opp_a)
+        cat_b = cls.broad_property_category(opp_b)
+        if cat_a != "OTRO" and cat_b != "OTRO" and cat_a != cat_b:
+            return False
+
+        # Capa 1B: Coincidencia geográfica obligatoria por localidad/municipio (y provincia si existe)
+        loc_a = cls.normalize_desc_fingerprint(opp_a.get("locality") or "")
+        loc_b = cls.normalize_desc_fingerprint(opp_b.get("locality") or "")
+        prov_a = cls.normalize_desc_fingerprint(opp_a.get("province") or "")
+        prov_b = cls.normalize_desc_fingerprint(opp_b.get("province") or "")
+
+        if not loc_a or not loc_b:
+            return False
+        if loc_a != loc_b and loc_a not in loc_b and loc_b not in loc_a:
+            return False
+        if prov_a and prov_b and prov_a != prov_b:
+            return False
+
+        # Precios y superficies
+        try:
+            p_a = float(opp_a.get("listing_price") or opp_a.get("price") or 0.0)
+        except Exception:
+            p_a = 0.0
+        try:
+            p_b = float(opp_b.get("listing_price") or opp_b.get("price") or 0.0)
+        except Exception:
+            p_b = 0.0
+
+        try:
+            s_a = float(opp_a.get("surface_m2") or 0.0)
+        except Exception:
+            s_a = 0.0
+        try:
+            s_b = float(opp_b.get("surface_m2") or 0.0)
+        except Exception:
+            s_b = 0.0
+
+        # Regla estricta de superficie: si ambos tienen m² (>0) y difieren en más de 4 m² y >3%, NO son el mismo inmueble
+        if s_a > 0 and s_b > 0:
+            surf_diff_abs = abs(s_a - s_b)
+            if surf_diff_abs > 4.0 and (surf_diff_abs / max(s_a, s_b)) > 0.03:
+                return False
+
+        # Regla estricta de habitaciones: si ambos declaran habitaciones (>0) y difieren, NO son el mismo inmueble
+        rooms_a = opp_a.get("rooms")
+        rooms_b = opp_b.get("rooms")
+        if rooms_a and rooms_b:
+            try:
+                if int(rooms_a) != int(rooms_b):
+                    return False
+            except Exception:
+                pass
+
+        # Capa 2A: Huella de fotos (URL canónica o firma perceptual 16x16 RGB)
+        imgs_a = opp_a.get("images") or []
+        imgs_b = opp_b.get("images") or []
+        if imgs_a and imgs_b:
+            keys_a = {cls.canonical_photo_key(u) for u in imgs_a if isinstance(u, str) and u.strip()}
+            keys_b = {cls.canonical_photo_key(u) for u in imgs_b if isinstance(u, str) and u.strip()}
+            if keys_a and keys_b and (keys_a & keys_b):
+                return True
+
+        sig_a = opp_a.get("_photo_rgb_sig")
+        sig_b = opp_b.get("_photo_rgb_sig")
+        if sig_a and sig_b and len(sig_a) == len(sig_b):
+            mad = sum(abs(int(x) - int(y)) for x, y in zip(sig_a, sig_b)) / float(len(sig_a))
+            if mad < 6.5 and (p_a <= 0 or p_b <= 0 or abs(p_a - p_b) / max(p_a, p_b) <= 0.10):
+                return True
+
+        if p_a <= 0 or p_b <= 0:
+            return False
+        price_diff_ratio = abs(p_a - p_b) / max(p_a, p_b)
+
+        # Extraer prefijo de portal (ej. MKT-IDEALISTA vs MKT-FOTOCASA)
+        portal_prefix_a = "-".join(id_a.split("-")[:2]) if id_a.startswith("MKT-") else ""
+        portal_prefix_b = "-".join(id_b.split("-")[:2]) if id_b.startswith("MKT-") else ""
+        same_portal = bool(portal_prefix_a and portal_prefix_b and portal_prefix_a == portal_prefix_b)
+
+        # Capa 2B: Coincidencia de descripción real de agencia (excluyendo plantillas autogeneradas)
+        desc_a = cls.normalize_desc_fingerprint(opp_a.get("description") or "")
+        desc_b = cls.normalize_desc_fingerprint(opp_b.get("description") or "")
+        generic_patterns = (
+            "oportunidad de inversion",
+            "activo residencial",
+            "inmueble verificado",
+            "propiedad verificada",
+            "excelente oportunidad en",
+            "planta exterior con ascensor ubicado en",
+            "en venta en excelente estado de conservacion",
+        )
+        is_generic_desc = any(gp in desc_a or gp in desc_b for gp in generic_patterns)
+        if not is_generic_desc and len(desc_a) >= 48 and len(desc_b) >= 48 and price_diff_ratio <= 0.05:
+            prefix_len = min(55, len(desc_a), len(desc_b))
+            if desc_a[:prefix_len] == desc_b[:prefix_len] or desc_a[:50] in desc_b or desc_b[:50] in desc_a:
+                return True
+            words_a = {w for w in desc_a.split() if len(w) >= 4}
+            words_b = {w for w in desc_b.split() if len(w) >= 4}
+            if len(words_a) >= 10 and len(words_b) >= 10:
+                inter = len(words_a & words_b)
+                union = len(words_a | words_b)
+                if union > 0 and (inter / union) >= 0.72 and price_diff_ratio <= 0.03:
+                    return True
+
+        # Capa 2C: Entre DISTINTOS portales, mismo precio exacto (±0.5%) + misma superficie m² exacta (±1 m²)
+        # en el mismo municipio no-capital o compartiendo urbanización/calle/barrio específico
+        if not same_portal and price_diff_ratio <= 0.005 and s_a > 0 and s_b > 0 and abs(s_a - s_b) <= 1.0:
+            is_default_surf = s_a in (80.0, 90.0) or s_b in (80.0, 90.0)
+            if not is_default_surf:
+                big_capitals = {"madrid", "barcelona", "valencia", "sevilla", "zaragoza", "malaga", "murcia", "palma", "bilbao", "alicante"}
+                if loc_a not in big_capitals and loc_b not in big_capitals:
+                    return True
+                addr_a = cls.normalize_desc_fingerprint(opp_a.get("address") or "")
+                addr_b = cls.normalize_desc_fingerprint(opp_b.get("address") or "")
+                if addr_a and addr_b and addr_a != loc_a and addr_a == addr_b:
+                    return True
+
+        return False
+
+    @classmethod
+    def merge_duplicate_opportunities(cls, opp_a: Dict[str, Any], opp_b: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Consolida dos anuncios duplicados del mismo inmueble físico conservando como canónico
+        el que disponga de mayor riqueza fotográfica y descriptiva, fusionando publicaciones,
+        galería de imágenes y alias_ids para trazabilidad completa.
+        """
+        imgs_a = cls.ensure_twenty_images(opp_a.get("images") or [])
+        imgs_b = cls.ensure_twenty_images(opp_b.get("images") or [])
+        desc_a = str(opp_a.get("description") or "").strip()
+        desc_b = str(opp_b.get("description") or "").strip()
+
+        score_a = (len(imgs_a), len(desc_a))
+        score_b = (len(imgs_b), len(desc_b))
+
+        if score_b > score_a:
+            winner = dict(opp_b)
+            loser = dict(opp_a)
+            winner_imgs = imgs_b
+            loser_imgs = imgs_a
+        else:
+            winner = dict(opp_a)
+            loser = dict(opp_b)
+            winner_imgs = imgs_a
+            loser_imgs = imgs_b
+
+        # Fusionar galería sin perder fotos válidas (priorizando las del ganador)
+        merged_imgs = cls.ensure_twenty_images(winner_imgs + loser_imgs)
+        if merged_imgs:
+            winner["images"] = merged_imgs
+
+        # Conservar la descripción más completa
+        if len(str(loser.get("description") or "")) > len(str(winner.get("description") or "")):
+            winner["description"] = loser["description"]
+
+        # Conservar código postal y coordenadas más precisas si faltan en el ganador
+        if not winner.get("postal_code") and loser.get("postal_code"):
+            winner["postal_code"] = loser["postal_code"]
+        if not winner.get("rooms") and loser.get("rooms"):
+            winner["rooms"] = loser["rooms"]
+        if not winner.get("bathrooms") and loser.get("bathrooms"):
+            winner["bathrooms"] = loser["bathrooms"]
+
+        # Registrar alias_ids para que cualquier referencia previa a cualquiera de los dos IDs funcione
+        alias_set = set()
+        for item in (winner, loser):
+            oid = str(item.get("id") or item.get("portal_id") or "").strip().upper()
+            if oid:
+                alias_set.add(oid)
+            for al in (item.get("alias_ids") or []):
+                if al:
+                    alias_set.add(str(al).strip().upper())
+        winner["alias_ids"] = sorted(alias_set)
+
+        # Fusionar publicaciones multi-portal
+        pubs_merged: List[Dict[str, Any]] = []
+        seen_pub_urls = set()
+        for item in (winner, loser):
+            item_pubs = item.get("publications") or []
+            if not item_pubs and (item.get("url") or item.get("portal_url")):
+                item_pubs = [{
+                    "portal": item.get("portal") or item.get("source") or "Portal Inmobiliario",
+                    "url": item.get("url") or item.get("portal_url"),
+                    "price": item.get("listing_price") or item.get("price") or 0.0,
+                    "date": item.get("published_date") or ""
+                }]
+            for p in item_pubs:
+                if not isinstance(p, dict):
+                    continue
+                u = str(p.get("url") or "").strip().rstrip("/").lower()
+                if u and u not in seen_pub_urls:
+                    seen_pub_urls.add(u)
+                    pubs_merged.append(dict(p))
+        if pubs_merged:
+            winner["publications"] = pubs_merged
+            winner["x_publications_count"] = len(pubs_merged)
+            winner["is_multi_portal"] = len(pubs_merged) > 1
+            portals_list = []
+            for p in pubs_merged:
+                p_name = str(p.get("portal") or "").strip()
+                if p_name and p_name not in portals_list:
+                    portals_list.append(p_name)
+            if len(portals_list) > 1:
+                winner["multi_portal_sources"] = portals_list
+
+        # Precio mínimo vigente y precio original máximo para reflejar ahorro real
+        prices = [
+            float(x.get("listing_price") or x.get("price") or 0.0)
+            for x in (winner, loser)
+            if float(x.get("listing_price") or x.get("price") or 0.0) > 0
+        ]
+        if prices:
+            winner["listing_price"] = min(prices)
+            winner["price"] = min(prices)
+
+        orig_prices = [
+            float(x.get("original_listing_price") or 0.0)
+            for x in (winner, loser)
+            if float(x.get("original_listing_price") or 0.0) > 0
+        ]
+        if orig_prices:
+            winner["original_listing_price"] = max(orig_prices)
+
+        return winner
+
+    @classmethod
+    def deduplicate_cross_portal_opportunities(cls, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Deduplica una lista de oportunidades consolidando anuncios de distintos portales
+        (ej. Idealista y Fotocasa) que apuntan al mismo inmueble físico.
+        """
+        if not items:
+            return []
+        consolidated: List[Dict[str, Any]] = []
+        for candidate in items:
+            if not isinstance(candidate, dict):
+                continue
+            merged_into_existing = False
+            for idx, existing in enumerate(consolidated):
+                if cls.are_same_physical_property(existing, candidate):
+                    consolidated[idx] = cls.merge_duplicate_opportunities(existing, candidate)
+                    merged_into_existing = True
+                    break
+            if not merged_into_existing:
+                consolidated.append(candidate)
+        return consolidated
 
     def fetch_market_opportunities(
         self,
@@ -193,6 +574,9 @@ class MarketScraper:
             processed = self._process_market_listing(dedup_item)
             if processed:
                 processed_items.append(processed)
+
+        # Deduplicación cross-portal multicapa (ej. mismo chalet en Idealista y Fotocasa)
+        processed_items = self.deduplicate_cross_portal_opportunities(processed_items)
 
         # Enriquecer sinergias con planeamientos urbanísticos PGOU
         if pgou_items is None and processed_items:
@@ -694,6 +1078,8 @@ class MarketScraper:
             for fresh_it in new_map.values():
                 final_items.append(fresh_it)
 
+            final_items = self.deduplicate_cross_portal_opportunities(final_items)
+
             logger.info(
                 f"[Market Declarative Sync] Sincronización inmediata completada: "
                 f"{updated_count} actualizados, {added_count} nuevas altas, "
@@ -751,19 +1137,34 @@ class MarketScraper:
             close_db = True
 
         saved_count = 0
+        seen_q_keys = set()
+        items = cls.deduplicate_cross_portal_opportunities(items)
         try:
             for item in items:
                 opp_id = str(item.get("id") or "").strip().upper()
                 if not opp_id or opp_id in cls.SYNTHETIC_BLACKLIST_IDS:
                     continue
+                q_key = f"market_opp:{opp_id}"[:150]
+                if q_key in seen_q_keys:
+                    continue
                 valid_imgs = cls.ensure_twenty_images(item.get("images"), item_id=opp_id)
                 if not valid_imgs:
                     continue
+                seen_q_keys.add(q_key)
                 item_copy = dict(item)
                 item_copy["id"] = opp_id
                 item_copy["images"] = valid_imgs
 
-                q_key = f"market_opp:{opp_id}"[:150]
+                for al_id in (item_copy.get("alias_ids") or []):
+                    al_clean = str(al_id or "").strip().upper()
+                    if al_clean and al_clean != opp_id:
+                        al_qkey = f"market_opp:{al_clean}"[:150]
+                        old_al = session.query(CompanyKnowledgeBase).filter(
+                            CompanyKnowledgeBase.query_key == al_qkey
+                        ).first()
+                        if old_al:
+                            session.delete(old_al)
+
                 prov = str(item_copy.get("province") or "España")[:100]
                 loc = str(item_copy.get("locality") or "")[:100] or None
                 zone = str(item_copy.get("address") or item_copy.get("title") or "")[:100] or None
@@ -939,7 +1340,7 @@ class MarketScraper:
             if oid not in purged_ids:
                 merged_by_id[oid] = db_item
 
-        return list(merged_by_id.values())
+        return self.deduplicate_cross_portal_opportunities(list(merged_by_id.values()))
 
     def _process_market_listing(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1057,18 +1458,53 @@ class MarketScraper:
         title_text = (item.get("title") or "").lower()
         addr_text = (item.get("address") or "").lower()
 
-        # Detección rigurosa de Suelo / Finca Rústica
-        is_rustic = any(k in prop_type or k in desc_text or k in title_text or k in addr_text for k in [
-            "rústico", "rustico", "rústica", "rustica", "agrario", "no urbanizable", "secano", "regadio", "regadío", "finca"
-        ]) or surface > 2500.0
+        # Detección rigurosa de Suelo / Solar / Finca Rústica (sin falsos positivos por 'suelo radiante' o 'parcela' en chalets/pisos)
+        building_prefixes = (
+            "chalet", "casa", "piso", "vivienda", "apartamento", "ático", "atico",
+            "dúplex", "duplex", "loft", "estudio", "adosado", "pareado", "unifamiliar",
+            "villa", "local", "oficina", "garaje", "trastero", "nave", "edificio"
+        )
+        land_prefixes = (
+            "terreno", "solar", "parcela", "suelo", "finca rústica", "finca rustica",
+            "terreno urbano", "terreno urbanizable", "suelo urbano", "suelo urbanizable"
+        )
+        title_clean_start = title_text.strip()
+        is_explicit_land_title = any(
+            title_clean_start.startswith(lp) or f" {lp} en " in f" {title_clean_start} "
+            for lp in land_prefixes
+        ) or prop_type in ("solar", "terreno", "suelo", "parcela", "finca rústica", "finca rustica", "rústico", "rustico")
 
-        is_solar = is_rustic or (strategy == "LAND_DEVELOPMENT" or any(k in prop_type or k in desc_text or k in title_text or k in addr_text for k in ["solar", "terreno", "suelo", "parcela"]))
-        land_type = "RÚSTICO" if is_rustic else item.get("land_type", "URBANO")
+        is_building = (
+            not is_explicit_land_title
+            and (
+                any(title_clean_start.startswith(bp) or f" {bp} en " in f" {title_clean_start} " for bp in building_prefixes)
+                or prop_type in ("piso", "chalet", "casa", "vivienda", "apartamento", "ático", "atico", "dúplex", "duplex", "loft", "local", "oficina", "nave", "garaje")
+            )
+        )
 
-        if is_rustic:
-            item["property_type"] = "Finca Rústica"
-            item["land_type"] = "RÚSTICO"
-            item["is_solar"] = True
+        if is_building:
+            is_rustic = False
+            is_solar = False
+            land_type = "URBANO"
+            if prop_type in ("finca rústica", "finca rustica", "solar", "terreno"):
+                item["property_type"] = "CHALET" if any(k in title_clean_start for k in ("chalet", "casa", "adosad", "paread", "independiente", "villa")) else "PISO"
+        else:
+            is_rustic = any(k in prop_type or k in title_text for k in [
+                "rústico", "rustico", "rústica", "rustica", "agrario", "no urbanizable", "secano", "regadio", "regadío", "finca rústica", "finca rustica"
+            ]) or (is_explicit_land_title and surface > 2500.0 and "urbano" not in title_text and "urbanizable" not in title_text)
+
+            is_solar = is_rustic or is_explicit_land_title or strategy in ("LAND_DEVELOPMENT", "DEVELOPMENT")
+            land_type = "RÚSTICO" if is_rustic else item.get("land_type", "URBANO")
+
+            if is_rustic:
+                item["property_type"] = "Finca Rústica"
+                item["land_type"] = "RÚSTICO"
+                item["is_solar"] = True
+            elif is_solar:
+                item["property_type"] = "Solar"
+                item["land_type"] = "URBANO"
+                item["is_solar"] = True
+                item["strategy"] = "LAND_DEVELOPMENT"
 
         meso_m2_price, meso_code, meso_label = resolve_meso_market_price_2x2(
             province_str=province,
