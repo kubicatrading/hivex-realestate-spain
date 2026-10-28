@@ -308,6 +308,38 @@ class BOESubastasScraper:
             return "RÚSTICO"
         return "URBANO"
 
+    def classify_property_type(self, text: str, raw_type: str = "") -> str:
+        """
+        Clasifica con precisión el tipo de activo subastado ("Local Comercial", "Solar", "Vivienda")
+        evitando falsos positivos como 'localidad' -> 'local' o 'parcela con vivienda' -> 'Solar'.
+        """
+        t = f"{text or ''} {raw_type or ''}".lower()
+        # 1. Detectar Local Comercial / Oficina / Nave Comercial en núcleo urbano
+        is_commercial = bool(
+            re.search(
+                r'\b(?:local\s+(?:comercial|n[uú]mero|num\.?|nº|en\s+planta|de\s+negocio|industrial|destinado|sito|ubicado)|'
+                r'urbana\s*:\s*(?:n[uú]mero\s+\w+\s*[-.,]?\s*)?local\b|'
+                r'departamento\s+n[uú]mero\s+\w+\s*[-.,]?\s*local\b|'
+                r'local\s+de\s+la\s+planta\s+baja|planta\s+baja\s+destinad[oa]\s+a\s+local|'
+                r'oficina\s+(?:comercial|n[uú]mero|en\s+planta))\b',
+                t
+            )
+        )
+        has_explicit_vivienda = bool(
+            re.search(r'\b(?:vivienda\s+unifamiliar|vivienda\s+sita|piso\s+vivienda|urbana:\s*vivienda|destinado\s+a\s+vivienda|chalet|apartamento|d[uú]plex)\b', t)
+        )
+        if is_commercial and not has_explicit_vivienda:
+            return "Local Comercial"
+
+        # 2. Detectar Solar / Terreno / Finca Rústica (siempre que no sea una vivienda construida sobre parcela)
+        is_land = any(w in t for w in ["solar", "terreno", "finca rústica", "finca rustica", "suelo urbanizable", "suelo no urbanizable", "parcela de terreno", "tierra de secano", "tierra de regadío", "tierra de labor", "olivar", "monte"])
+        if not is_land and "parcela" in t and not any(v in t for v in ["vivienda", "piso", "apartamento", "chalet", "adosado", "edificio", "local"]):
+            is_land = True
+        if is_land and not has_explicit_vivienda:
+            return "Solar"
+
+        return "Vivienda"
+
     def extract_notarial_appraisal_value(self, text: str) -> Optional[float]:
         """
         Extrae el valor de tasación notarial / responsabilidad hipotecaria del texto del edicto BOE,
@@ -895,8 +927,7 @@ class BOESubastasScraper:
                     if sv_url:
                         images.append(sv_url)
 
-                    desc_lower = desc.lower()
-                    ptype = "Solar" if any(w in desc_lower for w in ["solar", "terreno", "parcela", "finca rústica", "rustica", "suelo"]) else "Vivienda"
+                    ptype = self.classify_property_type(desc)
 
                     item = {
                         "id": f"SUB-{aid}" if not str(aid).startswith("SUB-") else str(aid),

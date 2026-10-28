@@ -239,8 +239,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const directOppId = urlParams.get('opp_id');
 
         if (!state.token) {
+            if (directOppId) {
+                loadAndDisplayDirectOpportunity(directOppId);
+                return;
+            }
             showLoginOverlay();
             return;
+        }
+
+        if (directOppId) {
+            loadAndDisplayDirectOpportunity(directOppId);
         }
 
         try {
@@ -255,14 +263,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof syncFavoritesWithBackend === 'function') {
                     syncFavoritesWithBackend();
                 }
-                if (directOppId) {
+                if (directOppId && !window._openedDeepLinkOpp) {
                     loadAndDisplayDirectOpportunity(directOppId);
                 }
             } else {
-                logout();
+                if (!directOppId) logout();
             }
         } catch (e) {
-            logout();
+            if (!directOppId) logout();
         }
     }
 
@@ -352,12 +360,18 @@ document.addEventListener('DOMContentLoaded', () => {
         dashboardApp.classList.remove('hidden');
         inputLogin.value = '';
         inputPassword.value = '';
+        const urlParams = new URLSearchParams(window.location.search);
+        const hasDirectOpp = Boolean(urlParams.get('opp_id'));
         setTimeout(() => {
             initMap();
             if (map && typeof map.invalidateSize === 'function') {
                 try { map.invalidateSize(); } catch(e) {}
             }
-            fetchOpportunities();
+            if (hasDirectOpp) {
+                setTimeout(() => fetchOpportunities(true), 850);
+            } else {
+                fetchOpportunities();
+            }
         }, 80);
     }
 
@@ -1356,10 +1370,13 @@ document.addEventListener('DOMContentLoaded', () => {
             let surfaceDisplay = '<span style="color: #f59e0b; font-weight: 700; font-size: 0.80rem;">⚠️ Sin constancia BOE</span>';
             if (effectiveSurface && !isSurfaceMissing) {
                 const estBadge = opp.is_surface_estimated ? '<span style="font-size: 0.68rem; color: #c084fc; font-weight: 700; margin-left: 3px;" title="Superficie estimada">(est.)</span>' : '';
+                const plotBadge = (opp.has_plot_valuation && opp.plot_surface_m2 > 0)
+                    ? `<span style="font-size: 0.68rem; color: #34d399; font-weight: 700; display: block;">+ Parcela: ${formatNumber(opp.plot_surface_m2, 0)} m²</span>`
+                    : '';
                 if (ownershipPct < 100 && totalSurface) {
-                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}<span style="font-size: 0.68rem; color: #38bdf8; display: block;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m²)</span>`;
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}<span style="font-size: 0.68rem; color: #38bdf8; display: block;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m²)</span>${plotBadge}`;
                 } else {
-                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}`;
+                    surfaceDisplay = `${formatNumber(effectiveSurface, 2)} m² ${estBadge}${plotBadge}`;
                 }
             }
 
@@ -1770,13 +1787,17 @@ document.addEventListener('DOMContentLoaded', () => {
         let surfaceDisplayModal = '<span style="color: #f59e0b; font-weight: 700; font-size: 0.95rem;">⚠️ Sin constancia en BOE</span>';
         if (effectiveSurface && !isSurfaceMissingModal) {
             const estBadgeModal = opp.is_surface_estimated ? '<span style="font-size: 0.74rem; color: #c084fc; font-weight: 700; margin-left: 4px;" title="Superficie estimada">(est.)</span>' : '';
+            const plotBadgeModal = (opp.has_plot_valuation && opp.plot_surface_m2 > 0)
+                ? `<div style="font-size: 0.74rem; color: #34d399; font-weight: 700; margin-top: 2px;">+ Parcela: ${formatNumber(opp.plot_surface_m2, 0)} m² (+${formatCurrency(opp.plot_added_value || 0)} suelo)</div>`
+                : '';
             if (ownershipPct < 100 && totalSurface) {
                 surfaceDisplayModal = `
                     <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>
                     <div style="font-size: 0.72rem; color: #38bdf8; font-weight: 600; margin-top: 2px;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m² total)</div>
+                    ${plotBadgeModal}
                 `;
             } else {
-                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>`;
+                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>${plotBadgeModal}`;
             }
         }
 

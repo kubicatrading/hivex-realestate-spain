@@ -32,7 +32,11 @@ from app.connectors.portal_parsers import (
     MilanunciosMarkdownParser,
     YaEncontreMarkdownParser
 )
-from app.engine.meso_market_price import resolve_meso_market_price_2x2
+from app.engine.meso_market_price import (
+    resolve_meso_market_price_2x2,
+    extract_plot_surface_m2,
+    calculate_composite_market_value_2x2
+)
 
 logger = logging.getLogger(__name__)
 
@@ -770,9 +774,9 @@ class MarketScraper:
         Aplica deduplicación, cálculo de precio mínimo y normalización a oportunidades HIVEX.
         """
         results: List[Dict[str, Any]] = []
-        if not self.supadata_client.api_key:
-            logger.info("SUPADATA_API_KEY no configurada. Omitiendo scraping en vivo de portales.")
-            return results
+        has_supadata = bool(self.supadata_client.api_key)
+        if not has_supadata:
+            logger.info("SUPADATA_API_KEY no configurada. Ejecutando scraping en vivo directo de portales gratuitos (0 créditos).")
 
         # MATRIZ NACIONAL HIVEX: EXACTAMENTE 40 PÁGINAS (40 CRÉDITOS / DÍA = 1.200 CRÉDITOS / MES)
         # 1. Mercados Grandes: Idealista, Fotocasa, Habitaclia y Pisos.com
@@ -893,9 +897,9 @@ class MarketScraper:
         # Idealista requiere proxy residencial Supadata (1 crédito por página).
         # Capping estricto de <= 30 targets para Idealista (margen de seguridad garantizado).
         # Fotocasa, Habitaclia, Pisos.com, Milanuncios y YaEncontré se consultan directamente vía HTTP sin gastar créditos Supadata.
-        idealista_targets = [t for t in targets if t[2] == "idealista"][:30]
+        idealista_targets = [t for t in targets if t[2] == "idealista"][:30] if has_supadata else []
         free_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom", "milanuncios", "yaencontre"]]
-        active_targets = idealista_targets + free_targets
+        active_targets = free_targets + idealista_targets
 
         logger.info(
             f"[Market Live Scraper] Total targets preparados: {len(active_targets)} "
@@ -1433,6 +1437,26 @@ class MarketScraper:
             "algete": "28110",
             "san sebastian de los reyes": "28701",
             "san sebastián de los reyes": "28701",
+            "ciudalcampo": "28707",
+            "fuente del fresno": "28707",
+            "alcobendas": "28100",
+            "la moraleja": "28109",
+            "soto de la moraleja": "28109",
+            "el encinar de los reyes": "28109",
+            "encinar de los reyes": "28109",
+            "valdelasfuentes": "28100",
+            "fuentelucha": "28100",
+            "tres cantos": "28760",
+            "colmenar viejo": "28770",
+            "villanueva del pardillo": "28229",
+            "pozuelo de alarcon": "28223",
+            "pozuelo de alarcón": "28223",
+            "boadilla del monte": "28660",
+            "majadahonda": "28220",
+            "las rozas": "28231",
+            "villaviciosa de odon": "28670",
+            "villaviciosa de odón": "28670",
+            "torrelodones": "28250",
             "talamanca de jarama": "28160",
             "talamanca": "28160",
             "moralzarzal": "28411",
@@ -1446,6 +1470,9 @@ class MarketScraper:
         }
         loc_clean = (locality or "").lower().strip()
         addr_clean = (address or "").lower()
+        prov_clean = (province or "").lower().strip()
+        if postal_code == "28001" and "madrid" not in prov_clean and "madrid" not in loc_clean:
+            postal_code = None
         if not postal_code or postal_code == "28001":
             for mun_name, mun_cp in MUNICIPALITY_POSTAL_CODES.items():
                 if mun_name in loc_clean or mun_name in addr_clean:
@@ -1529,15 +1556,45 @@ class MarketScraper:
 
         has_house = any(k in desc_text or k in title_text or k in prop_type for k in ["casa", "chalet", "vivienda", "edificación", "edificacion"])
 
-        # Valoración de mercado
+        # Valoración de mercado compuesta 2x2 (Inmueble + Parcela Libre Orden ECO/805/2003 F3)
+        raw_plot_m2 = float(item.get("plot_surface_m2") or item.get("plot_m2") or item.get("parcel_m2") or 0.0)
         if is_rustic:
             # En fincas rústicas, el suelo cotiza a 10-35 €/m2. Si tiene vivienda construida, se suma el valor de la edificación
             house_sqm = float(item.get("built_area") or item.get("house_m2") or 140.0) if has_house else 0.0
             house_val = house_sqm * 650.0  # Valor constructivo rural consolidado
             land_val = surface * area_m2_price  # p.ej. 28.000 m2 * 20 €/m2 = 560.000 €
             estimated_market_value = round(house_val + land_val, 2)
-        else:
+            plot_surface_m2 = surface
+            solar_m2_price = area_m2_price
+            base_building_value = round(house_val, 2)
+            plot_added_value = round(land_val, 2)
+            has_plot_valuation = False
+        elif is_solar:
             estimated_market_value = round(surface * area_m2_price, 2)
+            plot_surface_m2 = surface
+            solar_m2_price = area_m2_price
+            base_building_value = 0.0
+            plot_added_value = estimated_market_value
+            has_plot_valuation = False
+        else:
+            comp_val = calculate_composite_market_value_2x2(
+                built_m2=surface,
+                inm_price_m2=area_m2_price,
+                province_str=province,
+                locality_str=locality,
+                full_address_str=address,
+                desc_text=f"{item.get('title', '')} {item.get('description', '')}",
+                land_type=land_type,
+                is_solar=False,
+                postal_code=postal_code,
+                explicit_plot_m2=raw_plot_m2 if raw_plot_m2 > 0 else None,
+            )
+            estimated_market_value = comp_val["estimated_market_value"]
+            plot_surface_m2 = comp_val["plot_m2"]
+            solar_m2_price = comp_val["solar_price_m2"]
+            base_building_value = comp_val["base_building_value"]
+            plot_added_value = comp_val["plot_added_value"]
+            has_plot_valuation = comp_val["has_plot_valuation"]
 
         potential_profit = max(0.0, round(estimated_market_value - min_price, 2))
         discount_vs_market = round(max(0.0, ((estimated_market_value - min_price) / estimated_market_value) * 100), 1) if estimated_market_value > 0 else 0.0
@@ -1624,10 +1681,19 @@ class MarketScraper:
             
             "property_m2_price": property_m2_price,
             "area_m2_price": area_m2_price,
+            "solar_m2_price": solar_m2_price,
+            "plot_surface_m2": plot_surface_m2,
+            "base_building_value": base_building_value,
+            "plot_added_value": plot_added_value,
+            "has_plot_valuation": has_plot_valuation,
             "area_m2_price_source": "IDEALISTA_INE_MESO",
-            "area_m2_price_label": meso_label or f"Ref. Barrio ({census.get('district', item.get('locality', ''))})",
+            "area_m2_price_label": (
+                f"{meso_label or ('Ref. Barrio (' + str(census.get('district', item.get('locality', ''))) + ')')} (+Parcela {int(plot_surface_m2)}m²)"
+                if has_plot_valuation and plot_surface_m2 > 0
+                else (meso_label or f"Ref. Barrio ({census.get('district', item.get('locality', ''))})")
+            ),
             "price_ref_level": "MESO",
-            "price_ref_level_label": "Portales Inmobiliarios",
+            "price_ref_level_label": "Portales Inmobiliarios (Matriz 2x2 + Parcela)" if has_plot_valuation else "Portales Inmobiliarios",
             "estimated_reference_value": estimated_market_value,
             "appraisal_value": original_price,
             "potential_gross_profit": potential_profit,

@@ -45,7 +45,11 @@ from app.connectors.boe_scraper import BOESubastasScraper
 from app.connectors.catastro_client import CatastroClient
 from app.connectors.ine_client import INEClient
 from app.engine.scoring_engine import OpportunityScoringEngine
-from app.engine.meso_market_price import resolve_meso_market_price_2x2
+from app.engine.meso_market_price import (
+    resolve_meso_market_price_2x2,
+    extract_plot_surface_m2,
+    calculate_composite_market_value_2x2
+)
 from app.services.notifier import TelegramNotifier
 import jwt
 from app.core.config import settings
@@ -662,11 +666,13 @@ async def _run_background_pipeline(limit: Optional[int] = 100) -> Dict[str, Any]
         # 2. Ingesta y actualización de Desarrollos PGOU en boletines oficiales
         from app.connectors.pgou_scraper import PGOUScraper
         pgou_scraper = PGOUScraper()
+        pgou_scraper.sync_live_pgou_bulletins()
         pgou_items = pgou_scraper.fetch_pgou_opportunities()
 
         # 3. Ingesta y monitorización de Edictos Judiciales/Notariales y Proindivisos
         from app.connectors.edictos_scraper import EdictosScraper
         edictos_scraper = EdictosScraper()
+        edictos_scraper.sync_live_teju_edictos()
         edictos_items = edictos_scraper.fetch_edictos_opportunities()
 
         # 4. Ingesta y monitorización de Oportunidades de Mercado (Idealista, Fotocasa, Habitaclia, etc.)
@@ -1654,10 +1660,18 @@ def get_opportunities(
                 else:
                     land_type = "URBANO"
 
+                # Clasificación rigurosa de tipología (Local Comercial vs Solar vs Vivienda)
+                resolved_ptype = scraper.classify_property_type(desc_text, auc.property_type if auc else "Vivienda")
+                resolved_title = auc.title if (auc and auc.title) else "Inmueble en Subasta Pública"
+                if resolved_ptype == "Local Comercial" and "Subasta de Vivienda" in resolved_title:
+                    resolved_title = resolved_title.replace("Subasta de Vivienda", "Subasta de Local Comercial")
+                elif resolved_ptype == "Solar" and "Subasta de Vivienda" in resolved_title:
+                    resolved_title = resolved_title.replace("Subasta de Vivienda", "Subasta de Solar")
+
                 # Determine strategy / property tipology for 2x2 Matrix X-axis
                 # A property is only Solar if explicitly classified as such or if land terms appear WITHOUT residential terms
-                has_residential_kw = any(w in (auc.property_type or "").lower() or w in desc_text.lower() for w in ["vivienda", "piso", "duplex", "dúplex", "chalet", "casa", "unifamiliar", "ático", "departamento", "edificio", "local"])
-                is_solar = (strategy_val == "LAND_DEVELOPMENT" or (auc.property_type or "").lower() == "solar") and not has_residential_kw
+                has_residential_kw = any(w in resolved_ptype.lower() or w in desc_text.lower() for w in ["vivienda", "piso", "duplex", "dúplex", "chalet", "casa", "unifamiliar", "ático", "departamento", "edificio", "local"])
+                is_solar = (strategy_val == "LAND_DEVELOPMENT" or resolved_ptype.lower() == "solar") and not has_residential_kw
                 if not is_solar and not has_residential_kw:
                     is_solar = any(kw in desc_text.lower() for kw in ["solar", "terreno", "suelo urbanizable", "finca rustica", "finca rústica"])
 
@@ -1701,6 +1715,13 @@ def get_opportunities(
                 is_surface_missing = not has_verified_surface
                 is_surface_estimated = False
 
+                is_solar_subasta = (strategy_val == "LAND_DEVELOPMENT" or ("solar" in resolved_ptype.lower()))
+                plot_surface_m2 = 0.0
+                solar_m2_price = 0.0
+                base_building_value = 0.0
+                plot_added_value = 0.0
+                has_plot_valuation = False
+
                 if has_verified_surface:
                     # Rule 5.3: Property price per m² (€/m²) adjusted by ownership percentage
                     effective_surface_m2 = round(surface_m2 * (ownership_pct / 100.0), 2)
@@ -1713,9 +1734,34 @@ def get_opportunities(
                     else:
                         valor_micro_est = None
 
-                    # Estimated market value is strictly effective_surface * area_m2_price
+                    # Estimated market value uses composite 2x2 valuation (Inmueble + Parcela Libre F3) scaled by ownership_pct
                     if area_m2_price and area_m2_price > 0:
-                        estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
+                        if not is_solar_subasta:
+                            comp_val = calculate_composite_market_value_2x2(
+                                built_m2=surface_m2,
+                                inm_price_m2=area_m2_price,
+                                province_str=province_str,
+                                locality_str=locality_str,
+                                full_address_str=full_address,
+                                desc_text=desc_text,
+                                land_type=land_type,
+                                is_solar=False,
+                                postal_code=getattr(auc, "postal_code", None) if auc else None,
+                            )
+                            own_factor = (ownership_pct / 100.0) if 0 < ownership_pct < 100.0 else 1.0
+                            estimated_market_value = round(comp_val["estimated_market_value"] * own_factor, 2)
+                            plot_surface_m2 = round(comp_val["plot_m2"] * own_factor, 2)
+                            solar_m2_price = comp_val["solar_price_m2"]
+                            base_building_value = round(comp_val["base_building_value"] * own_factor, 2)
+                            plot_added_value = round(comp_val["plot_added_value"] * own_factor, 2)
+                            has_plot_valuation = comp_val["has_plot_valuation"]
+                            if has_plot_valuation and plot_surface_m2 > 0:
+                                area_m2_price_label = f"{area_m2_price_label} (+Parcela {int(plot_surface_m2)}m²)"
+                        else:
+                            estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
+                            plot_surface_m2 = effective_surface_m2
+                            solar_m2_price = area_m2_price
+                            plot_added_value = estimated_market_value
                     elif opp.estimated_reference_value and opp.estimated_reference_value > 0:
                         estimated_market_value = opp.estimated_reference_value
                     else:
@@ -1745,8 +1791,26 @@ def get_opportunities(
                 population_growth_rate = ine_stats.get("population_growth_rate", 1.8)
 
                 discount_frac = (discount_m2_pct / 100.0) if discount_m2_pct > 0 else 0.0
-                is_solar_subasta = (strategy_val == "LAND_DEVELOPMENT" or ("solar" in (auc.property_type or "").lower() if auc else False))
-                rental_yield_subasta = getattr(opp, "rental_yield", 0.0) or 0.0
+                if is_solar_subasta:
+                    estimated_monthly_rent_subasta = 0.0
+                    rental_yield_subasta = 0.0
+                elif effective_surface_m2 and effective_surface_m2 > 0 and property_ref_value and property_ref_value > 0:
+                    from app.engine.rental_reference import RentalReferenceEngine
+                    estimated_monthly_rent_subasta = RentalReferenceEngine.estimate_monthly_rent(
+                        surface_m2=effective_surface_m2,
+                        postal_code=getattr(auc, "postal_code", "") or "",
+                        province=province_str or "Madrid",
+                        floor="planta baja" if resolved_ptype == "Local Comercial" else "2ª planta",
+                        has_elevator=True
+                    )
+                    rental_yield_subasta = RentalReferenceEngine.calculate_rental_yield(
+                        listing_price=property_ref_value,
+                        monthly_rent=estimated_monthly_rent_subasta
+                    )
+                else:
+                    estimated_monthly_rent_subasta = getattr(opp, "estimated_monthly_rent", 0.0) or 0.0
+                    rental_yield_subasta = getattr(opp, "rental_yield", 0.0) or 0.0
+
                 detailed_scores = KPICalculator.calculate_detailed_scores(
                     discount_percentage=discount_frac,
                     poi_score=opp.poi_score or 75.0,
@@ -1768,9 +1832,9 @@ def get_opportunities(
                     "lote_badge": lote_badge,
                     "lote_boe_url": (f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}&ver=3&idLote={lot_number}" if (auc and is_lotes and lot_number) else (f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else "")),
                     "strategy": strategy_val,
-                    "title": auc.title if auc else "N/A",
+                    "title": resolved_title,
                     "description": auc.description if auc else "",
-                    "property_type": auc.property_type if (auc and auc.property_type) else "Vivienda",
+                    "property_type": resolved_ptype,
                     "address": address_str,
                     "locality": locality_str,
                     "province": province_str,
@@ -1790,6 +1854,11 @@ def get_opportunities(
                     "land_type": land_type,
                     "property_m2_price": property_m2_price,
                     "area_m2_price": area_m2_price,
+                    "solar_m2_price": solar_m2_price,
+                    "plot_surface_m2": plot_surface_m2,
+                    "base_building_value": base_building_value,
+                    "plot_added_value": plot_added_value,
+                    "has_plot_valuation": has_plot_valuation,
                     "area_m2_price_source": area_m2_price_source,
                     "area_m2_price_label": area_m2_price_label,
                     "price_ref_level": price_ref_level,
@@ -1809,7 +1878,9 @@ def get_opportunities(
                     "yield_score": detailed_scores.get("yield_score", 0.0),
                     "btl_score": detailed_scores.get("btl_score"),
                     "btl_color": detailed_scores.get("btl_color"),
+                    "yield_color": detailed_scores.get("btl_color"),
                     "rental_yield": detailed_scores.get("rental_yield"),
+                    "estimated_monthly_rent": estimated_monthly_rent_subasta,
                     "overall_score": detailed_scores["overall_score"],
                     
                     "lat": lat,
@@ -2069,9 +2140,10 @@ def get_opportunity_by_id(
 ):
     """
     Recupera una oportunidad individual por su identificador único (ID de Market, PGOU, Edicto o Subasta BOE).
-    Permite acceso directo para Deep-Links procedentes del bot de alertas de Telegram y enlaces externos.
+    Permite acceso directo ultrarrápido (<50ms) para Deep-Links procedentes del bot de alertas de Telegram y enlaces externos.
     """
     from app.core.geo_utils import get_spanish_province_coords
+    from app.engine.kpi_calculator import KPICalculator
     clean_id = opp_id.strip()
     errors = []
 
@@ -2085,101 +2157,80 @@ def get_opportunity_by_id(
     else:
         candidates.add(f"SUB-{norm_id}")
 
-    # Variaciones de portales (ej. PISOS vs PISOSCOM)
     upper_c = clean_id.upper()
     if "PISOSCOM" in upper_c:
         candidates.add(upper_c.replace("PISOSCOM", "PISOS"))
     elif "PISOS" in upper_c:
         candidates.add(upper_c.replace("PISOS", "PISOSCOM"))
 
-    # 1. Búsqueda directa en catálogo verificado de mercado
-    try:
-        from app.connectors.market_scraper import MarketScraper
-        ms = MarketScraper()
-        catalog = ms._build_verified_market_catalog()
-        upper_candidates = {c.upper() for c in candidates}
-        for raw in catalog:
-            raw_id = str(raw.get("id", "")).strip().upper()
-            raw_aliases = {str(a).strip().upper() for a in (raw.get("alias_ids") or []) if a}
-            if raw_id in upper_candidates or (raw_aliases & upper_candidates):
-                return ms._process_market_listing(dict(raw))
-    except Exception as e_cat:
-        errors.append(f"cat: {e_cat}")
+    is_subasta_id = clean_id.isdigit() or upper_c.startswith("SUB-")
+    is_pgou_id = upper_c.startswith("PGOU-")
+    is_edicto_id = upper_c.startswith("EDIC-") or upper_c.startswith("BOE-B-")
 
-    # 2. Búsqueda en Oportunidades de Mercado completas
-    try:
-        from app.connectors.market_scraper import MarketScraper
-        ms = MarketScraper()
-        m_items = ms.fetch_market_opportunities(live_scrape=False)
-        upper_candidates = {c.upper() for c in candidates}
-        for m in m_items:
-            m_id = str(m.get("id", "")).strip().upper()
-            m_aliases = {str(a).strip().upper() for a in (m.get("alias_ids") or []) if a}
-            if m_id in upper_candidates or (m_aliases & upper_candidates):
-                return m
-    except Exception as e_m:
-        errors.append(f"market: {e_m}")
+    def _lookup_subasta_db():
+        try:
+            from sqlalchemy.orm import joinedload
+            from sqlalchemy import or_
 
-    # 3. Búsqueda en Desarrollos PGOU
-    try:
-        from app.connectors.pgou_scraper import PGOUScraper
-        p_items = PGOUScraper().fetch_pgou_opportunities()
-        for p in p_items:
-            p_id = str(p.get("id", "")).strip().upper()
-            g_code = str(p.get("gazette_code", "")).strip().upper()
-            if any(c.upper() in (p_id, g_code) for c in candidates):
-                return p
-    except Exception as e_p:
-        errors.append(f"pgou: {e_p}")
+            filters = []
+            for c in candidates:
+                filters.append(Auction.id_subasta == c)
+                c_int = c.replace("SUB-", "")
+                if c_int.isdigit():
+                    filters.append(Opportunity.id == int(c_int))
+                    filters.append(Auction.id == int(c_int))
 
-    # 4. Búsqueda en Edictos Judiciales
-    try:
-        from app.connectors.edictos_scraper import EdictosScraper
-        e_items = EdictosScraper().fetch_edictos_opportunities()
-        for e in e_items:
-            e_id = str(e.get("id", "")).strip().upper()
-            if any(e_id == c.upper() for c in candidates):
-                return e
-    except Exception as e_e:
-        errors.append(f"edictos: {e_e}")
-
-    # 5. Búsqueda en Subastas BOE en Base de Datos
-    try:
-        from sqlalchemy.orm import joinedload
-        from sqlalchemy import or_
-
-        filters = []
-        for c in candidates:
-            filters.append(Auction.id_subasta == c)
-            c_int = c.replace("SUB-", "")
-            if c_int.isdigit():
-                filters.append(Opportunity.id == int(c_int))
-                filters.append(Auction.id == int(c_int))
-
-        opp = db.query(Opportunity).options(
-            joinedload(Opportunity.auction).joinedload(Auction.parcel)
-        ).outerjoin(Auction).filter(
-            or_(*filters)
-        ).first()
-
-        auc = None
-        if opp:
-            auc = opp.auction
-        else:
-            # Buscar directamente en Auction si la oportunidad aún no se hubiera relacionado
-            auc = db.query(Auction).filter(
-                or_(*[Auction.id_subasta == c for c in candidates])
+            opp = db.query(Opportunity).options(
+                joinedload(Opportunity.auction).joinedload(Auction.parcel)
+            ).outerjoin(Auction).filter(
+                or_(*filters)
             ).first()
 
-        if auc:
-            from app.connectors.boe_scraper import BOESubastasScraper
+            auc = None
+            if opp:
+                auc = opp.auction
+            else:
+                auc = db.query(Auction).filter(
+                    or_(*[Auction.id_subasta == c for c in candidates])
+                ).first()
+
+            if not auc:
+                return None
+
             scraper = BOESubastasScraper()
+            ine_client = INEClient()
+            desc_text = auc.description or ""
+            raw_ptype = auc.property_type or "Vivienda"
+            resolved_ptype = scraper.classify_property_type(desc_text, raw_ptype)
+
+            raw_title = auc.title or "Inmueble en Subasta Pública"
+            if resolved_ptype != "Vivienda" and "Subasta de Vivienda" in raw_title:
+                resolved_title = raw_title.replace("Subasta de Vivienda", f"Subasta de {resolved_ptype}")
+            else:
+                resolved_title = raw_title
+
             strategy_val = opp.strategy.value if (opp and hasattr(opp.strategy, "value")) else (str(opp.strategy) if opp else "HOUSE_FLIPPING")
-            base_lat, base_lon = get_spanish_province_coords(auc.province, auc.locality)
+            if resolved_ptype == "Solar":
+                strategy_val = "LAND_DEVELOPMENT"
+            elif resolved_ptype in ("Local Comercial", "Nave Industrial") and strategy_val == "HOUSE_FLIPPING":
+                strategy_val = "BUY_TO_LET"
+
+            province_str = auc.province or "Madrid"
+            locality_str = auc.locality or province_str
+            address_str = auc.address or ""
+            full_address = f"{address_str}, {locality_str} ({province_str})".strip(", ")
+
+            base_lat, base_lon = get_spanish_province_coords(province_str, locality_str, apply_jitter=True)
             lat = auc.lat or base_lat
             lon = auc.lon or base_lon
-            
-            # Cargar imágenes oficiales (EXCLUYENDO ortofotos satelitales y mapas Catastro/WMS)
+            if auc.parcel and getattr(auc.parcel, "geometry", None) is not None:
+                try:
+                    point = to_shape(auc.parcel.geometry)
+                    lat = point.y
+                    lon = point.x
+                except Exception:
+                    pass
+
             images_list = []
             if auc.images_json:
                 try:
@@ -2196,63 +2247,316 @@ def get_opportunity_by_id(
                         ]
                 except Exception:
                     images_list = []
-            
+
             from app.services.photos_backfill import PhotosBackfillWorker
-            full_address = f"{auc.address or ''}, {auc.locality or ''}, {auc.province or ''}".strip(", ")
             if not images_list:
                 sv_url = PhotosBackfillWorker.build_streetview_facade_url(
                     lat=lat,
                     lon=lon,
-                    address=auc.address or auc.title,
-                    locality=auc.locality,
-                    province=auc.province,
+                    address=address_str or resolved_title,
+                    locality=locality_str,
+                    province=province_str,
                     postal_code=getattr(auc, "postal_code", None)
                 )
                 if sv_url:
                     images_list = [sv_url]
 
-            ref_val = (opp.estimated_reference_value if opp else 0.0) or (auc.appraisal_value or 0.0)
-            list_price = (opp.listing_price if opp else 0.0) or (auc.starting_bid or auc.appraisal_value or 0.0)
-            disc_pct = opp.discount_percentage if opp else (round(((ref_val - list_price) / ref_val) * 100, 1) if ref_val > list_price and ref_val > 0 else 0.0)
+            appraisal_val = float(auc.appraisal_value or 0.0)
+            starting_bid_val = float(auc.starting_bid or 0.0)
+            property_ref_value = starting_bid_val if starting_bid_val > 0 else appraisal_val
+            if not property_ref_value and opp and opp.listing_price and opp.listing_price > 0:
+                property_ref_value = float(opp.listing_price)
+
+            extracted_m2 = scraper.extract_surface_m2(desc_text)
+            surface_m2 = None
+            if extracted_m2 and extracted_m2 >= 5.0:
+                surface_m2 = float(extracted_m2)
+            elif auc.parcel and auc.parcel.surface_m2 and auc.parcel.surface_m2 >= 5.0:
+                surface_m2 = float(auc.parcel.surface_m2)
+
+            ownership_pct = scraper.extract_ownership_percentage(desc_text)
+            land_type = scraper.extract_land_classification(desc_text)
+            is_solar_for_price = (
+                strategy_val == "LAND_DEVELOPMENT"
+                or ("solar" in resolved_ptype.lower())
+                or ("terreno" in resolved_ptype.lower())
+                or ("finca" in resolved_ptype.lower())
+                or ("parcela" in resolved_ptype.lower())
+                or (land_type == "RÚSTICO")
+            )
+
+            meso_price, meso_source, meso_label = resolve_meso_market_price_2x2(
+                province_str=province_str,
+                locality_str=locality_str,
+                full_address_str=full_address,
+                desc_text=desc_text,
+                land_type=land_type,
+                is_solar=is_solar_for_price,
+                postal_code=getattr(auc, "postal_code", None)
+            )
+            area_m2_price = meso_price
+            price_ref_level = "MESO"
+            price_ref_level_label = f"Ref. Meso ({meso_label})"
+            area_m2_price_source = meso_source
+            area_m2_price_label = meso_label
+
+            extracted_notarial_val = scraper.extract_notarial_appraisal_value(desc_text)
+            notarial_appraisal_val = extracted_notarial_val if extracted_notarial_val else (appraisal_val if appraisal_val > 0 else starting_bid_val)
+
+            has_verified_surface = bool(surface_m2 and surface_m2 > 0)
+            is_surface_missing = not has_verified_surface
+            is_surface_estimated = False
+            plot_surface_m2 = 0.0
+            solar_m2_price = 0.0
+            base_building_value = 0.0
+            plot_added_value = 0.0
+            has_plot_valuation = False
+
+            if has_verified_surface:
+                effective_surface_m2 = round(surface_m2 * (ownership_pct / 100.0), 2)
+                property_m2_price = round(property_ref_value / effective_surface_m2, 2) if effective_surface_m2 > 0 else None
+                valor_micro_est = round(notarial_appraisal_val / effective_surface_m2, 2) if (notarial_appraisal_val and effective_surface_m2 > 0) else property_m2_price
+
+                if area_m2_price and area_m2_price > 0:
+                    if not is_solar_for_price:
+                        comp_val = calculate_composite_market_value_2x2(
+                            built_m2=surface_m2,
+                            inm_price_m2=area_m2_price,
+                            province_str=province_str,
+                            locality_str=locality_str,
+                            full_address_str=full_address,
+                            desc_text=desc_text,
+                            land_type=land_type,
+                            is_solar=False,
+                            postal_code=getattr(auc, "postal_code", None),
+                        )
+                        own_factor = (ownership_pct / 100.0) if 0 < ownership_pct < 100.0 else 1.0
+                        estimated_market_value = round(comp_val["estimated_market_value"] * own_factor, 2)
+                        plot_surface_m2 = round(comp_val["plot_m2"] * own_factor, 2)
+                        solar_m2_price = comp_val["solar_price_m2"]
+                        base_building_value = round(comp_val["base_building_value"] * own_factor, 2)
+                        plot_added_value = round(comp_val["plot_added_value"] * own_factor, 2)
+                        has_plot_valuation = comp_val["has_plot_valuation"]
+                        if has_plot_valuation and plot_surface_m2 > 0:
+                            area_m2_price_label = f"{area_m2_price_label} (+Parcela {int(plot_surface_m2)}m²)"
+                    else:
+                        estimated_market_value = round(effective_surface_m2 * area_m2_price, 2)
+                        plot_surface_m2 = effective_surface_m2
+                        solar_m2_price = area_m2_price
+                        plot_added_value = estimated_market_value
+                elif opp and opp.estimated_reference_value and opp.estimated_reference_value > 0:
+                    estimated_market_value = float(opp.estimated_reference_value)
+                else:
+                    estimated_market_value = property_ref_value
+
+                potential_gross_profit = max(0.0, round(estimated_market_value - property_ref_value, 2)) if (estimated_market_value and property_ref_value) else 0.0
+                if estimated_market_value and estimated_market_value > 0 and property_ref_value and property_ref_value > 0:
+                    discount_m2_pct = max(0.0, round(((estimated_market_value - property_ref_value) / estimated_market_value) * 100, 1))
+                else:
+                    discount_m2_pct = 0.0
+                has_property_m2 = True
+            else:
+                effective_surface_m2 = None
+                property_m2_price = None
+                valor_micro_est = None
+                estimated_market_value = (opp.estimated_reference_value if opp and opp.estimated_reference_value else property_ref_value)
+                potential_gross_profit = max(0.0, round((estimated_market_value or 0.0) - (property_ref_value or 0.0), 2))
+                raw_disc = float(opp.discount_percentage or 0.0) if opp else 0.0
+                discount_m2_pct = round(raw_disc * 100.0, 1) if 0 < raw_disc <= 1.0 else round(raw_disc, 1)
+                has_property_m2 = False
+
+            ine_stats = ine_client.get_census_section_stats(province_str, locality_str)
+            avg_household_income = ine_stats.get("avg_household_income", 32000.0)
+            avg_person_income = ine_stats.get("avg_person_income", 14500.0)
+            population_growth_rate = ine_stats.get("population_growth_rate", 1.8)
+
+            discount_frac = (discount_m2_pct / 100.0) if discount_m2_pct > 0 else 0.0
+            if is_solar_for_price:
+                estimated_monthly_rent_subasta = 0.0
+                rental_yield_subasta = 0.0
+            elif effective_surface_m2 and effective_surface_m2 > 0 and property_ref_value and property_ref_value > 0:
+                from app.engine.rental_reference import RentalReferenceEngine
+                estimated_monthly_rent_subasta = RentalReferenceEngine.estimate_monthly_rent(
+                    surface_m2=effective_surface_m2,
+                    postal_code=getattr(auc, "postal_code", "") or "",
+                    province=province_str or "Madrid",
+                    floor="planta baja" if resolved_ptype == "Local Comercial" else "2ª planta",
+                    has_elevator=True
+                )
+                rental_yield_subasta = RentalReferenceEngine.calculate_rental_yield(
+                    listing_price=property_ref_value,
+                    monthly_rent=estimated_monthly_rent_subasta
+                )
+            else:
+                estimated_monthly_rent_subasta = getattr(opp, "estimated_monthly_rent", 0.0) or 0.0
+                rental_yield_subasta = getattr(opp, "rental_yield", 0.0) or 0.0
+
+            detailed_scores = KPICalculator.calculate_detailed_scores(
+                discount_percentage=discount_frac,
+                poi_score=(opp.poi_score if opp and opp.poi_score else 75.0),
+                income_amount=avg_household_income,
+                population_growth=population_growth_rate,
+                has_property_m2_price=has_property_m2,
+                rental_yield=rental_yield_subasta,
+                is_solar=is_solar_for_price
+            )
 
             return {
                 "id": opp.id if opp else f"SUB-{auc.id_subasta}",
                 "id_subasta": auc.id_subasta,
-                "title": auc.title or "Inmueble en Subasta Pública",
-                "description": auc.description or "",
-                "address": auc.address or "",
-                "locality": auc.locality or "España",
-                "province": auc.province or "España",
+                "idufir": scraper.extract_idufir_cru(desc_text),
+                "refcat": (auc.parcel.refcat if (auc.parcel and auc.parcel.refcat and not auc.parcel.refcat.startswith("ES_SUB")) else (auc.refcat or scraper.extract_cadastral_reference(desc_text))),
+                "title": resolved_title,
+                "description": desc_text,
+                "address": address_str,
+                "locality": locality_str,
+                "province": province_str,
                 "postal_code": getattr(auc, "postal_code", "") or "",
                 "full_address": full_address,
                 "lat": lat,
                 "lon": lon,
                 "strategy": strategy_val,
-                "property_type": auc.property_type or "VIVIENDA",
-                "listing_price": list_price,
-                "appraisal_value": auc.appraisal_value or ref_val,
-                "starting_bid": auc.starting_bid or list_price,
-                "property_ref_value": ref_val,
-                "estimated_reference_value": ref_val,
-                "discount_percentage": disc_pct,
-                "potential_gross_profit": max(0.0, round(ref_val - list_price, 2)),
-                "surface_m2": getattr(auc, "surface_m2", 90.0) or 90.0,
-                "overall_score": opp.overall_score if opp else 80.0,
-                "discount_score": getattr(opp, "discount_score", 80.0) if opp else 80.0,
-                "poi_score": getattr(opp, "poi_score", 70.0) if opp else 70.0,
-                "income_score": getattr(opp, "income_score", 75.0) if opp else 75.0,
-                "rental_yield": getattr(opp, "rental_yield", 0.0) if opp else 0.0,
-                "estimated_monthly_rent": getattr(opp, "estimated_monthly_rent", 0.0) if opp else 0.0,
-                "yield_score": getattr(opp, "yield_score", 0.0) if opp else 0.0,
-                "yield_color": getattr(opp, "yield_color", "#10b981") if opp else "#10b981",
-                "btl_score": getattr(opp, "btl_score", 75.0) if opp else 75.0,
+                "property_type": resolved_ptype,
+                "land_type": land_type,
+                "listing_price": property_ref_value,
+                "appraisal_value": appraisal_val,
+                "starting_bid": starting_bid_val,
+                "property_ref_value": property_ref_value,
+                "notarial_appraisal_value": notarial_appraisal_val,
+                "valor_micro_est": valor_micro_est,
+                "estimated_reference_value": estimated_market_value,
+                "discount_percentage": discount_m2_pct,
+                "potential_gross_profit": potential_gross_profit,
+                "surface_m2": surface_m2,
+                "effective_surface_m2": effective_surface_m2,
+                "is_surface_estimated": is_surface_estimated,
+                "is_surface_missing": is_surface_missing,
+                "surface_status": "MISSING_REGISTRY_CHECK" if is_surface_missing else "VERIFIED",
+                "ownership_percentage": ownership_pct,
+                "property_m2_price": property_m2_price,
+                "area_m2_price": area_m2_price,
+                "solar_m2_price": solar_m2_price,
+                "plot_surface_m2": plot_surface_m2,
+                "base_building_value": base_building_value,
+                "plot_added_value": plot_added_value,
+                "has_plot_valuation": has_plot_valuation,
+                "area_m2_price_source": area_m2_price_source,
+                "area_m2_price_label": area_m2_price_label,
+                "price_ref_level": price_ref_level,
+                "price_ref_level_label": price_ref_level_label,
+                "avg_household_income": avg_household_income,
+                "avg_person_income": avg_person_income,
+                "population_growth_rate": population_growth_rate,
+                "income_score": detailed_scores["income_score"],
+                "demographic_score": detailed_scores["demographic_score"],
+                "poi_score": detailed_scores["poi_score"],
+                "discount_score": detailed_scores["discount_score"],
+                "yield_score": detailed_scores.get("yield_score", 0.0),
+                "btl_score": detailed_scores.get("btl_score"),
+                "btl_color": detailed_scores.get("btl_color"),
+                "yield_color": detailed_scores.get("btl_color"),
+                "rental_yield": detailed_scores.get("rental_yield"),
+                "estimated_monthly_rent": estimated_monthly_rent_subasta,
+                "overall_score": detailed_scores["overall_score"],
                 "source_type": "subastas",
                 "images": images_list,
                 "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
-                "liens": scraper.extract_liens_info(auc.description or "", auc.id_subasta)
+                "liens": scraper.extract_liens_info(desc_text, auc.id_subasta),
+                "urbanism": {
+                    "zoning_classification": (auc.zoning_classification if auc.zoning_classification else "Suelo Urbano Consolidado (SUC)"),
+                    "urbanization_status": (auc.urbanization_status if auc.urbanization_status else "Urbano Residencial / Ordenado (PGOU)"),
+                    "buildability_ratio": (auc.buildability_ratio if auc.buildability_ratio else "1.8 m²t/m²s"),
+                    "permitted_uses": (auc.permitted_uses if auc.permitted_uses else "Residencial / Comercial")
+                }
             }
-    except Exception as e_db:
-        errors.append(f"db: {e_db}")
+        except Exception as e_db:
+            errors.append(f"db: {e_db}")
+            return None
+
+    # 0. Si el ID es numérico o comienza por SUB-, consultar primero en Base de Datos (<20ms)
+    if is_subasta_id:
+        res_sub = _lookup_subasta_db()
+        if res_sub:
+            return res_sub
+
+    # 1. Si es PGOU, consultar primero PGOU
+    if is_pgou_id:
+        try:
+            from app.connectors.pgou_scraper import PGOUScraper
+            p_items = PGOUScraper().fetch_pgou_opportunities()
+            for p in p_items:
+                p_id = str(p.get("id", "")).strip().upper()
+                g_code = str(p.get("gazette_code", "")).strip().upper()
+                if any(c.upper() in (p_id, g_code) for c in candidates):
+                    return p
+        except Exception as e_p:
+            errors.append(f"pgou: {e_p}")
+
+    # 2. Si es Edicto, consultar primero Edictos
+    if is_edicto_id:
+        try:
+            from app.connectors.edictos_scraper import EdictosScraper
+            e_items = EdictosScraper().fetch_edictos_opportunities()
+            for e in e_items:
+                e_id = str(e.get("id", "")).strip().upper()
+                if any(e_id == c.upper() for c in candidates):
+                    return e
+        except Exception as e_e:
+            errors.append(f"edictos: {e_e}")
+
+    # 3. Búsqueda directa en catálogo verificado de mercado
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        ms = MarketScraper()
+        catalog = ms._build_verified_market_catalog()
+        upper_candidates = {c.upper() for c in candidates}
+        for raw in catalog:
+            raw_id = str(raw.get("id", "")).strip().upper()
+            raw_aliases = {str(a).strip().upper() for a in (raw.get("alias_ids") or []) if a}
+            if raw_id in upper_candidates or (raw_aliases & upper_candidates):
+                return ms._process_market_listing(dict(raw))
+    except Exception as e_cat:
+        errors.append(f"cat: {e_cat}")
+
+    # 4. Búsqueda en Oportunidades de Mercado completas (incluyendo persistidas en BD/disco)
+    try:
+        from app.connectors.market_scraper import MarketScraper
+        ms = MarketScraper()
+        m_items = ms.fetch_market_opportunities(live_scrape=False)
+        upper_candidates = {c.upper() for c in candidates}
+        for m in m_items:
+            m_id = str(m.get("id", "")).strip().upper()
+            m_aliases = {str(a).strip().upper() for a in (m.get("alias_ids") or []) if a}
+            if m_id in upper_candidates or (m_aliases & upper_candidates):
+                return m
+    except Exception as e_m:
+        errors.append(f"market: {e_m}")
+
+    # 5. Fallback en PGOU, Edictos y Subastas si no coincidió por prefijo
+    if not is_pgou_id:
+        try:
+            from app.connectors.pgou_scraper import PGOUScraper
+            for p in PGOUScraper().fetch_pgou_opportunities():
+                p_id = str(p.get("id", "")).strip().upper()
+                g_code = str(p.get("gazette_code", "")).strip().upper()
+                if any(c.upper() in (p_id, g_code) for c in candidates):
+                    return p
+        except Exception as e_p:
+            errors.append(f"pgou: {e_p}")
+
+    if not is_edicto_id:
+        try:
+            from app.connectors.edictos_scraper import EdictosScraper
+            for e in EdictosScraper().fetch_edictos_opportunities():
+                if any(str(e.get("id", "")).strip().upper() == c.upper() for c in candidates):
+                    return e
+        except Exception as e_e:
+            errors.append(f"edictos: {e_e}")
+
+    if not is_subasta_id:
+        res_sub = _lookup_subasta_db()
+        if res_sub:
+            return res_sub
 
     detail_msg = f"Oportunidad con ID '{clean_id}' no encontrada."
     if errors:

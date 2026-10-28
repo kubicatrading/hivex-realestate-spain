@@ -112,9 +112,26 @@ class OpportunityScoringEngine:
                         existing.images_json = images_json_str
                     self.db.commit()
 
-                # 1. Enriquecer con datos del Catastro
+                from app.connectors.boe_scraper import BOESubastasScraper
+                boe_helper = BOESubastasScraper()
+                desc_text = item.get("description") or (existing.description if existing else "") or ""
+                resolved_ptype = boe_helper.classify_property_type(desc_text, item.get("property_type", "Vivienda"))
+                item["property_type"] = resolved_ptype
+                if existing and existing.property_type != resolved_ptype:
+                    existing.property_type = resolved_ptype
+                    self.db.commit()
+
+                # 1. Enriquecer con datos del Catastro y texto registral BOE
                 refcat = item.get("refcat") or f"ES_{auction_id}"
                 cat_data = self.catastro.get_parcel_details(refcat)
+                extracted_m2 = boe_helper.extract_surface_m2(desc_text)
+                if extracted_m2 and extracted_m2 >= 5.0:
+                    unit_surface_m2 = float(extracted_m2)
+                else:
+                    unit_surface_m2 = float(cat_data.get("surface_m2") or 85.0)
+
+                ownership_pct = boe_helper.extract_ownership_percentage(desc_text)
+                effective_surface_m2 = round(unit_surface_m2 * (ownership_pct / 100.0), 2) if 0 < ownership_pct < 100.0 else unit_surface_m2
 
                 # 2. Enriquecer con datos del INE
                 ine_data = self.ine.get_census_section_stats(
@@ -127,16 +144,58 @@ class OpportunityScoringEngine:
                 lon = item.get("lon", -3.7038)
                 poi_data = self.osm.get_poi_metrics(lat, lon, radius_meters=500)
 
-                # 4. Cálculo de KPIs
-                strategy = KPICalculator.determine_strategy(item.get("property_type", "Vivienda"))
-                
+                # 4. Cálculo de KPIs ajustado a la superficie efectiva subastada y precio meso 2x2 km
+                strategy = KPICalculator.determine_strategy(resolved_ptype)
+                is_solar = (strategy == StrategyType.LAND_DEVELOPMENT)
+                is_rustic_land = is_solar and boe_helper.extract_land_classification(desc_text) == "RÚSTICO"
+
                 listing_price = existing.starting_bid if existing.starting_bid > 0 else existing.appraisal_value
-                
-                estimated_market_value = KPICalculator.calculate_estimated_market_value(
-                    surface_m2=cat_data["surface_m2"],
-                    reference_price_m2=cat_data["reference_price_m2"],
-                    strategy=strategy
-                )
+
+                ref_price_m2 = float(cat_data.get("reference_price_m2") or 1800.0)
+                land_type_str = "RÚSTICO" if is_rustic_land else boe_helper.extract_land_classification(desc_text)
+                try:
+                    from app.engine.meso_market_price import resolve_meso_market_price_2x2, calculate_composite_market_value_2x2
+                    meso_p, _, _ = resolve_meso_market_price_2x2(
+                        province_str=item.get("province", "Madrid"),
+                        locality_str=item.get("locality", "Madrid"),
+                        full_address_str=item.get("address", ""),
+                        desc_text=desc_text,
+                        land_type=land_type_str,
+                        is_solar=is_solar,
+                        postal_code=item.get("postal_code")
+                    )
+                    if meso_p and meso_p > 0:
+                        ref_price_m2 = float(meso_p)
+                except Exception:
+                    pass
+
+                if not is_solar:
+                    try:
+                        from app.engine.meso_market_price import calculate_composite_market_value_2x2
+                        comp_val = calculate_composite_market_value_2x2(
+                            built_m2=unit_surface_m2,
+                            inm_price_m2=ref_price_m2,
+                            province_str=item.get("province", "Madrid"),
+                            locality_str=item.get("locality", "Madrid"),
+                            full_address_str=item.get("address", ""),
+                            desc_text=desc_text,
+                            land_type=land_type_str,
+                            is_solar=False,
+                            postal_code=item.get("postal_code")
+                        )
+                        full_unit_val = comp_val["estimated_market_value"]
+                        estimated_market_value = round(full_unit_val * (ownership_pct / 100.0), 2) if 0 < ownership_pct < 100.0 else full_unit_val
+                    except Exception:
+                        estimated_market_value = round(effective_surface_m2 * ref_price_m2, 2)
+                else:
+                    estimated_market_value = round(effective_surface_m2 * ref_price_m2, 2)
+
+                if estimated_market_value <= 0:
+                    estimated_market_value = KPICalculator.calculate_estimated_market_value(
+                        surface_m2=effective_surface_m2,
+                        reference_price_m2=ref_price_m2,
+                        strategy=strategy
+                    )
 
                 discount_pct = KPICalculator.calculate_discount_percentage(
                     listing_price=listing_price,
@@ -144,8 +203,6 @@ class OpportunityScoringEngine:
                 )
 
                 from app.engine.rental_reference import RentalReferenceEngine
-
-                is_solar = (strategy == StrategyType.LAND_DEVELOPMENT)
 
                 if is_solar:
                     monthly_rent = 0.0
@@ -155,10 +212,10 @@ class OpportunityScoringEngine:
                     btl_score = None
                 else:
                     monthly_rent = RentalReferenceEngine.estimate_monthly_rent(
-                        surface_m2=cat_data["surface_m2"],
+                        surface_m2=effective_surface_m2,
                         postal_code=item.get("postal_code", ""),
                         province=item.get("province", "Madrid"),
-                        floor="2ª planta",
+                        floor="planta baja" if resolved_ptype == "Local Comercial" else "2ª planta",
                         has_elevator=True
                     )
                     rental_yield = RentalReferenceEngine.calculate_rental_yield(

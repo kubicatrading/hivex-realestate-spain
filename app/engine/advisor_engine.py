@@ -1741,13 +1741,16 @@ class AdvisorEngine:
                 filtered = [
                     o for o in filtered
                     if _is_building_opp(o)
-                    and not any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower() for w in ["solar", "terreno", "suelo", "parcela", "local comercial", "nave"])
+                    and not any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower() for w in ["solar", "terreno", "suelo", "parcela", "local comercial", "subasta de local", "nave"])
                 ]
             elif ptype in ("local", "comercial") or "local" in ptype or "comercial" in ptype:
-                filtered = [
-                    o for o in filtered
-                    if any(w in (str(o.get("title", "")) + " " + str(o.get("property_type", "")) + " " + str(o.get("description", ""))).lower() for w in ["local", "comercial", "nave", "oficina", "cambio de uso", "loft"])
-                ]
+                def _is_commercial_opp(o):
+                    pt_t = (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower()
+                    desc_t = str(o.get("description", "")).lower()
+                    if any(w in pt_t for w in ["local comercial", "local", "comercial", "nave", "oficina", "loft"]):
+                        return True
+                    return bool(re.search(r'\b(?:local\s+comercial|local\s+en\s+planta|local\s+n[uú]mero|cambio\s+de\s+uso|nave\s+industrial|oficina)\b', desc_t))
+                filtered = [o for o in filtered if _is_commercial_opp(o)]
 
         # Superficie Mínima (m2)
         if criteria.get("min_sqm"):
