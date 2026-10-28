@@ -62,9 +62,9 @@ class PhotosBackfillWorker:
         data = {
             "date": today_str,
             "credits_used_today": 0,
-            "daily_budget": 10,
-            "monthly_budget": 300,
-            "credits_remaining_today": 10
+            "daily_budget": 5000,
+            "monthly_budget": 150000,
+            "credits_remaining_today": 5000
         }
         for qp in quota_paths:
             if os.path.exists(qp):
@@ -87,8 +87,8 @@ class PhotosBackfillWorker:
         quota = self.get_daily_quota()
         quota["credits_used_today"] += 1
         quota["date"] = today_str
-        quota["daily_budget"] = 10
-        quota["monthly_budget"] = 300
+        quota["daily_budget"] = 5000
+        quota["monthly_budget"] = 150000
         quota["credits_remaining_today"] = max(0, quota["daily_budget"] - quota["credits_used_today"])
         quota["last_updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 

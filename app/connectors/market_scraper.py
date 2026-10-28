@@ -893,18 +893,15 @@ class MarketScraper:
             for t_list in list(tier_1.values()) + list(tier_2.values()) + list(tier_3.values()):
                 targets.extend(t_list)
 
-        # CONTROL ESTRICTO DE PRESUPUESTO SUPADATA (1.200 créditos/mes = máx 40/día):
-        # Idealista requiere proxy residencial Supadata (1 crédito por página).
-        # Capping estricto de <= 30 targets para Idealista (margen de seguridad garantizado).
-        # Fotocasa, Habitaclia, Pisos.com, Milanuncios y YaEncontré se consultan directamente vía HTTP sin gastar créditos Supadata.
-        idealista_targets = [t for t in targets if t[2] == "idealista"][:30] if has_supadata else []
-        free_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom", "milanuncios", "yaencontre"]]
-        active_targets = free_targets + idealista_targets
+        # Extracción multicanal completa: Idealista vía Supadata + Fotocasa, Habitaclia, Pisos.com, Milanuncios y YaEncontré (HTTP directo + fallback automático a Supadata)
+        idealista_targets = [t for t in targets if t[2] == "idealista"] if has_supadata else []
+        other_targets = [t for t in targets if t[2] in ["fotocasa", "habitaclia", "pisoscom", "milanuncios", "yaencontre"]]
+        active_targets = idealista_targets + other_targets
 
         logger.info(
             f"[Market Live Scraper] Total targets preparados: {len(active_targets)} "
-            f"({len(idealista_targets)} Idealista [<= 30 créditos Supadata], "
-            f"{len(free_targets)} portales directos [0 créditos])."
+            f"({len(idealista_targets)} Idealista vía Supadata, "
+            f"{len(other_targets)} otros portales con fallback Supadata)."
         )
 
         def _scrape_worker(target_info):
