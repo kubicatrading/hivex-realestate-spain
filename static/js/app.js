@@ -1787,21 +1787,28 @@ document.addEventListener('DOMContentLoaded', () => {
         let surfaceDisplayModal = '<span style="color: #f59e0b; font-weight: 700; font-size: 0.95rem;">⚠️ Sin constancia en BOE</span>';
         if (effectiveSurface && !isSurfaceMissingModal) {
             const estBadgeModal = opp.is_surface_estimated ? '<span style="font-size: 0.74rem; color: #c084fc; font-weight: 700; margin-left: 4px;" title="Superficie estimada">(est.)</span>' : '';
-            const plotBadgeModal = (opp.has_plot_valuation && opp.plot_surface_m2 > 0)
-                ? `<div style="font-size: 0.74rem; color: #34d399; font-weight: 700; margin-top: 2px;">+ Parcela: ${formatNumber(opp.plot_surface_m2, 0)} m² (+${formatCurrency(opp.plot_added_value || 0)} suelo)</div>`
-                : '';
             if (ownershipPct < 100 && totalSurface) {
                 surfaceDisplayModal = `
                     <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>
                     <div style="font-size: 0.72rem; color: #38bdf8; font-weight: 600; margin-top: 2px;">(${ownershipFormatted}% de ${formatNumber(totalSurface, 2)} m² total)</div>
-                    ${plotBadgeModal}
                 `;
             } else {
-                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>${plotBadgeModal}`;
+                surfaceDisplayModal = `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(effectiveSurface, 2)} m² ${estBadgeModal}</div>`;
             }
         }
 
+        const plotSqmModal = (opp.plot_surface_m2 && opp.plot_surface_m2 > 0)
+            ? Number(opp.plot_surface_m2)
+            : (opp.is_solar && effectiveSurface ? Number(effectiveSurface) : 0);
+        const plotAddedBadgeModal = (opp.has_plot_valuation && opp.plot_added_value > 0)
+            ? `<div style="font-size: 0.72rem; color: #34d399; font-weight: 600; margin-top: 2px;">+${formatCurrency(opp.plot_added_value)} suelo (F3)</div>`
+            : '';
+        const plotSurfaceDisplayModal = plotSqmModal > 0
+            ? `<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">${formatNumber(plotSqmModal, 0)} m²</div>${plotAddedBadgeModal}`
+            : `<div style="font-size: 1.05rem; font-weight: 600; color: #94a3b8;">0 m²</div>`;
+
         const propertyM2Display = (opp.property_m2_price && opp.property_m2_price > 0) ? `${formatCurrency(opp.property_m2_price)}/m²` : '-';
+        const solarM2Display = (opp.solar_m2_price && opp.solar_m2_price > 0) ? `${formatCurrency(opp.solar_m2_price)}/m² (*)` : '-';
         let districtName = '';
         if (opp.census_tract_data && opp.census_tract_data.district) {
             districtName = opp.census_tract_data.district;
@@ -2550,8 +2557,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Precio €/m² Zona</span>
                         <span class="fin-val" style="display: block; font-size: 1.05rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${areaM2Display} (*)</span>
                     </div>
-                    <div></div>
-                    <div></div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #94a3b8; font-weight: 600; line-height: 1.2;">m² Terreno</span>
+                        <div class="fin-val" style="display: block; font-size: 1.05rem; color: #f8fafc; font-weight: 600; margin-top: 2px;">${plotSurfaceDisplayModal}</div>
+                    </div>
+                    <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
+                        <span class="fin-label" style="display: block; font-size: 0.8rem; color: #38bdf8; font-weight: 600; line-height: 1.2;">Precio €/m² Terreno</span>
+                        <span class="fin-val" style="display: block; font-size: 1.05rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${solarM2Display}</span>
+                    </div>
                     <div class="fin-item" style="display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px;">
                         <span class="fin-label" style="display: block; font-size: 0.8rem; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : '#94a3b8'}; font-weight: 700; line-height: 1.2;">${opp.source_type === 'pgou' ? 'SCORE GENERAL ENTORNO' : (opp.source_type === 'edictos' ? 'Margen Bruto Est.' : (opp.source_type === 'market' ? 'Margen vs Ref. Barrio' : 'Beneficio / Margen Est.'))}</span>
                         <span class="fin-val profit" style="display: block; font-size: 1.15rem; font-weight: 800; color: ${opp.source_type === 'pgou' ? getScoreColor(opp.overall_score) : (profitValModal >= 0 ? '#4ade80' : '#f87171')}; margin-top: 2px;">${opp.source_type === 'pgou' ? `${formatScore(opp.overall_score)} / 100 pts` : `${profitFormattedModal} (*)`}</span>

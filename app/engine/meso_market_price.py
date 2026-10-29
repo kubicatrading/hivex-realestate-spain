@@ -1350,12 +1350,12 @@ def resolve_urbanization_cost_m2s(
 # --- COMPOSITE VALUATION ENGINE FOR PROPERTIES WITH PLOT / PARCELA (FÓRMULA F3 ECO/CATASTRAL 2x2) ---
 
 _PLOT_REGEX_PATTERNS = [
-    r'parcela\s+(?:de\s+|con\s+|ajardinada\s+de\s+|privada\s+de\s+|gr[aá]fica\s+de\s+|catastral\s+de\s+|n[º°o\.]?\s*\d+\s*[,:]?\s*(?:de\s+)?)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|metros)',
-    r'(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2]|metros\s+cuadrados|m)\s+de\s+(?:parcela|terreno|jard[ií]n(?:\s+privado)?|solar|finca)',
-    r'terreno\s+(?:de\s+|con\s+|anexo\s+de\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{3,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|metros)',
-    r'solar\s+(?:de\s+|sobre\s+el\s+que\s+se\s+asienta\s+de\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|metros)',
-    r'(?:superficie\s+(?:total\s+)?(?:de\s+)?(?:la\s+)?(?:parcela|terreno|solar)|la\s+parcela\s+tiene\s+una\s+superficie)\s*:?\s*(?:de\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|metros)',
-    r'ocupa\s+una\s+parcela\s+de\s+(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|metros)',
+    r'parcela\s*(?::|de|con|sobre\s+una\s+parcela\s+de)?\s*(?:aproximadamente\s+|unos\s+|más\s+de\s+|mas\s+de\s+|cerca\s+de\s+|espectacular\s+de\s+|urbana\s+de\s+(?:más\s+de\s+|mas\s+de\s+)?|ajardinada\s+de\s+|privada\s+de\s+|gr[aá]fica\s+de\s+|catastral\s+de\s+|n[º°o\.]?\s*\d+\s*[,:]?\s*(?:de\s+)?)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|mtrs\.?|metros)',
+    r'(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2]|mtrs\.?|metros\s+cuadrados|m)\s+de\s+(?:parcela|terreno|jard[ií]n(?:\s+privado)?|solar|finca)',
+    r'terreno\s*(?::|de|con|anexo\s+de)?\s*(?:aproximadamente\s+|unos\s+|más\s+de\s+|mas\s+de\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{3,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|mtrs\.?|metros)',
+    r'solar\s*(?::|de|sobre\s+el\s+que\s+se\s+asienta\s+de)?\s*(?:aproximadamente\s+|unos\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|mtrs\.?|metros)',
+    r'(?:superficie\s+(?:total\s+)?(?:de\s+)?(?:la\s+)?(?:parcela|terreno|solar)|la\s+parcela\s+tiene\s+una\s+superficie)\s*:?\s*(?:de\s+|aproximadamente\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|mtrs\.?|metros)',
+    r'ocupa\s+una\s+parcela\s+de\s+(?:aproximadamente\s+|unos\s+)?(\d{1,3}(?:[\.,]\d{3})+|\d{2,6})(?:[\.,]\d+)?\s*(?:m[²2\s]|mtrs\.?|metros)',
 ]
 
 _SPANISH_WORD_PLOT_MAP = {

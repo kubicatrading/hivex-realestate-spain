@@ -1156,13 +1156,37 @@ class AdvisorEngine:
                         # REGLA DE ORO: Si no dispone de ninguna fotografía válida, no debe estar en plataforma ni enviarse
                         continue
 
+                    from app.engine.meso_market_price import calculate_composite_market_value_2x2
+                    auc_surface = float(getattr(auc, "surface_m2", None) or 90.0)
+                    auc_prop_type = getattr(auc, "property_type", "Inmueble") or "Inmueble"
+                    auc_is_solar = any(k in auc_prop_type.lower() for k in ("solar", "terreno", "parcela", "finca", "suelo"))
+                    auc_land_type = "RUSTICO" if "rustic" in auc_prop_type.lower() or "rústic" in auc_prop_type.lower() else "URBANO"
+                    comp_sub = calculate_composite_market_value_2x2(
+                        built_m2=auc_surface,
+                        province_str=auc.province or "España",
+                        locality_str=auc.locality or "España",
+                        full_address_str=f"{auc.address or ''} {auc.locality or ''} {auc.province or ''}",
+                        desc_text=f"{auc.title or ''} {getattr(auc, 'description', '') or ''}",
+                        land_type=auc_land_type,
+                        is_solar=auc_is_solar,
+                        postal_code=getattr(auc, "postal_code", "") or None,
+                        property_type=auc_prop_type,
+                    )
+                    est_ref_sub = float(comp_sub.get("total_market_value") or opp.estimated_reference_value or 0.0)
+                    if est_ref_sub <= 0:
+                        est_ref_sub = float(opp.estimated_reference_value or 0.0)
+                    sub_price = float(opp.listing_price or 0.0)
+                    if est_ref_sub > 0 and sub_price > 0:
+                        disc_pct = round(((est_ref_sub - sub_price) / est_ref_sub) * 100.0, 2)
+                        profit = max(0.0, round(est_ref_sub - sub_price, 2))
+
                     all_opps.append({
                         "id": sub_id,
                         "id_subasta": sub_id,
                         "source_type": "subastas",
                         "primary_portal": auc.source or "BOE",
                         "strategy": opp.strategy.value if hasattr(opp.strategy, "value") else str(opp.strategy),
-                        "property_type": getattr(auc, "property_type", "Inmueble") or "Inmueble",
+                        "property_type": auc_prop_type,
                         "title": auc.title or "Inmueble en Subasta Pública",
                         "description": getattr(auc, "description", "") or "",
                         "locality": auc.locality or "España",
@@ -1170,14 +1194,20 @@ class AdvisorEngine:
                         "address": auc.address or "",
                         "postal_code": getattr(auc, "postal_code", "") or "",
                         "listing_price": opp.listing_price,
-                        "estimated_reference_value": opp.estimated_reference_value,
+                        "estimated_reference_value": est_ref_sub,
                         "discount_percentage": disc_pct,
                         "potential_gross_profit": profit,
                         "rental_yield": getattr(opp, "rental_yield", 0.0) or 0.0,
                         "estimated_monthly_rent": getattr(opp, "estimated_monthly_rent", 0.0) or 0.0,
                         "overall_score": opp.overall_score or 75.0,
                         "poi_score": opp.poi_score or 70.0,
-                        "surface_m2": getattr(auc, "surface_m2", None) or 90.0,
+                        "surface_m2": auc_surface,
+                        "plot_surface_m2": float(comp_sub.get("plot_m2", 0.0) or 0.0),
+                        "area_m2_price": float(comp_sub.get("inm_price_m2", 0.0) or 0.0),
+                        "solar_m2_price": float(comp_sub.get("solar_price_m2", 0.0) or 0.0),
+                        "base_building_value": float(comp_sub.get("base_building_value", 0.0) or 0.0),
+                        "plot_added_value": float(comp_sub.get("plot_added_value", 0.0) or 0.0),
+                        "has_plot_valuation": bool(comp_sub.get("has_plot_valuation", False)),
                         "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}",
                         "images": valid_sub_imgs,
                         "lat": lat_auc,
@@ -1195,6 +1225,7 @@ class AdvisorEngine:
 
         # 2. Carga de Catálogo Market Verificado (JSON empaquetado + Oportunidades On-Demand en Supabase PostgreSQL)
         try:
+            from app.engine.meso_market_price import calculate_composite_market_value_2x2
             market_items = MarketScraper()._build_verified_market_catalog()
             for item in market_items:
                 item_id = str(item.get("id") or "").strip().upper()
@@ -1206,17 +1237,34 @@ class AdvisorEngine:
                     continue
 
                 price = float(item.get("price") or item.get("listing_price") or 0)
-                mkt_val = float(item.get("estimated_reference_value") or item.get("market_valuation") or price)
-                disc = float(item.get("discount_percentage") or 0)
-                if disc <= 0 and mkt_val > price and mkt_val > 0:
-                    disc = round(((mkt_val - price) / mkt_val) * 100, 1)
+                sqm_val = float(item.get("surface_m2") or 80.0)
+                is_solar_val = bool(item.get("is_solar", False))
+                land_type_val = item.get("land_type", "URBANO")
+                prop_type_val = item.get("property_type") or "Vivienda"
+
+                comp_mkt = calculate_composite_market_value_2x2(
+                    built_m2=sqm_val,
+                    plot_m2=float(item.get("plot_surface_m2") or item.get("plot_m2") or 0.0),
+                    province_str=item.get("province", "España"),
+                    locality_str=item.get("locality", "España"),
+                    full_address_str=f"{item.get('address') or item.get('full_address') or ''} {item.get('locality', '')} {item.get('province', '')}",
+                    desc_text=f"{item.get('title', '')} {item.get('description', '')}",
+                    land_type=land_type_val,
+                    is_solar=is_solar_val,
+                    postal_code=item.get("postal_code") or None,
+                    inm_price_m2=(float(item.get("area_m2_price") or 0.0) if not is_solar_val else 0.0) or None,
+                    solar_price_m2=float(item.get("solar_m2_price") or 0.0) or None,
+                    property_type=prop_type_val,
+                )
+                mkt_val = float(comp_mkt.get("total_market_value") or item.get("estimated_reference_value") or item.get("market_valuation") or price)
+                disc = round(((mkt_val - price) / mkt_val) * 100, 1) if (mkt_val > price and mkt_val > 0) else float(item.get("discount_percentage") or 0)
 
                 all_opps.append({
                     "id": str(item.get("id")),
                     "source_type": "market",
                     "primary_portal": item.get("primary_portal") or item.get("portal") or "Idealista",
                     "strategy": item.get("strategy", "HOUSE_FLIPPING"),
-                    "property_type": item.get("property_type") or "Vivienda",
+                    "property_type": prop_type_val,
                     "title": item.get("title", "Oportunidad Residencial"),
                     "description": item.get("description") or "",
                     "locality": item.get("locality", "España"),
@@ -1231,13 +1279,18 @@ class AdvisorEngine:
                     "estimated_monthly_rent": float(item.get("estimated_monthly_rent") or 0.0),
                     "overall_score": float(item.get("overall_score") or 80.0),
                     "poi_score": float(item.get("poi_score") or 75.0),
-                    "surface_m2": float(item.get("surface_m2") or 80.0),
+                    "surface_m2": sqm_val,
+                    "plot_surface_m2": float(comp_mkt.get("plot_m2", 0.0) or 0.0),
                     "rooms": item.get("rooms") or 0,
                     "bathrooms": item.get("bathrooms") or 0,
-                    "area_m2_price": float(item.get("area_m2_price") or 0.0),
+                    "area_m2_price": float(comp_mkt.get("inm_price_m2") or item.get("area_m2_price") or 0.0),
+                    "solar_m2_price": float(comp_mkt.get("solar_price_m2") or item.get("solar_m2_price") or 0.0),
+                    "base_building_value": float(comp_mkt.get("base_building_value", 0.0) or 0.0),
+                    "plot_added_value": float(comp_mkt.get("plot_added_value", 0.0) or 0.0),
+                    "has_plot_valuation": bool(comp_mkt.get("has_plot_valuation", False)),
                     "discount_vs_market": disc,
-                    "land_type": item.get("land_type", "URBANO"),
-                    "is_solar": item.get("is_solar", False),
+                    "land_type": land_type_val,
+                    "is_solar": is_solar_val,
                     "url": item.get("url") or item.get("portal_url") or "",
                     "portal_url": item.get("portal_url") or item.get("url") or "",
                     "images": valid_imgs

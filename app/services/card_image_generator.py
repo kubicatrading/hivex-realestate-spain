@@ -747,11 +747,44 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
 
     # Métricas financieras
     price = float(opp.get("listing_price") or opp.get("original_listing_price") or opp.get("price") or 0.0)
-    sqm = float(opp.get("surface_m2") or opp.get("sqm") or opp.get("surface") or 0.0)
+    is_solar_flag = bool(opp.get("is_solar", False))
+    raw_sqm = float(opp.get("surface_m2") or opp.get("sqm") or opp.get("surface") or 0.0)
+    sqm = 0.0 if is_solar_flag else raw_sqm
+    plot_m2 = float(opp.get("plot_surface_m2") or opp.get("plot_m2") or (raw_sqm if is_solar_flag else 0.0))
     m2_price = float(opp.get("area_m2_price") or 0.0)
+    solar_m2_price = float(opp.get("solar_m2_price") or opp.get("solar_price_m2") or 0.0)
     market_val = float(opp.get("market_price") or opp.get("estimated_market_price") or opp.get("estimated_reference_value") or opp.get("market_valuation") or 0.0)
-    if not market_val and sqm and m2_price:
-        market_val = round(sqm * m2_price, 2)
+
+    if solar_m2_price <= 0 or m2_price <= 0 or is_solar_flag or (plot_m2 <= 0 and opp.get("description")):
+        try:
+            from app.engine.meso_market_price import calculate_composite_market_value_2x2
+            comp_card = calculate_composite_market_value_2x2(
+                built_m2=raw_sqm or 80.0,
+                plot_m2=plot_m2,
+                province_str=str(opp.get("province") or "España"),
+                locality_str=str(opp.get("locality") or "España"),
+                full_address_str=f"{opp.get('address') or ''} {opp.get('locality') or ''} {opp.get('province') or ''}",
+                desc_text=f"{opp.get('title') or ''} {opp.get('description') or ''}",
+                land_type=str(opp.get("land_type") or "URBANO"),
+                is_solar=is_solar_flag,
+                postal_code=str(opp.get("postal_code") or "") or None,
+                inm_price_m2=(m2_price if (m2_price > 0 and not is_solar_flag) else None),
+                solar_price_m2=(solar_m2_price if solar_m2_price > 0 else None),
+                property_type=str(opp.get("property_type") or "Vivienda"),
+            )
+            if plot_m2 <= 0:
+                plot_m2 = float(comp_card.get("plot_m2") or 0.0)
+            if m2_price <= 0 or is_solar_flag:
+                m2_price = float(comp_card.get("inm_price_m2") or m2_price or 0.0)
+            if solar_m2_price <= 0:
+                solar_m2_price = float(comp_card.get("solar_price_m2") or 0.0)
+            if not market_val or (comp_card.get("has_plot_valuation") and float(comp_card.get("total_market_value") or 0.0) > market_val):
+                market_val = float(comp_card.get("total_market_value") or market_val or 0.0)
+        except Exception:
+            pass
+
+    if not market_val and raw_sqm and m2_price:
+        market_val = round(raw_sqm * (solar_m2_price if is_solar_flag and solar_m2_price > 0 else m2_price), 2)
     if not m2_price and sqm > 0 and market_val > 0:
         m2_price = round(market_val / sqm, 2)
     discount = float(opp.get("discount_vs_market") or opp.get("discount_percentage") or opp.get("discount_pct") or opp.get("margin_pct") or 0.0)
@@ -762,32 +795,45 @@ def generate_whatsapp_style_card(opp: Dict[str, Any]) -> Optional[bytes]:
 
     col1_x = pad_x
     col2_x = W // 2 + 10
+    max_col2_val_w = W - pad_x - (col2_x + 85)
 
-    # Fila 1: Precio y Superficie
+    # Fila 1: Precio y Superficie (Construida / Terreno)
     draw.text((col1_x, y), "Precio de Oferta:", fill=(71, 85, 105), font=font_label)
     draw.text((col1_x + 125, y - 2), f"{price:,.0f} €".replace(",", "."), fill=(15, 23, 42), font=font_bold)
 
     draw.text((col2_x, y), "Superficie:", fill=(71, 85, 105), font=font_label)
-    specs_str = f"{sqm:,.0f} m²".replace(",", ".") if sqm else "N/D"
-    if rooms: specs_str += f" · {rooms} hab"
-    if bathrooms: specs_str += f" · {bathrooms} bñ"
-    draw.text((col2_x + 85, y - 1), specs_str, fill=(15, 23, 42), font=font_bold)
+    built_str = f"{sqm:,.0f} m²".replace(",", ".") if (sqm or is_solar_flag) else "N/D"
+    plot_str = f"{plot_m2:,.0f} m²".replace(",", ".")
+    specs_str = f"{built_str} / {plot_str}"
+    if rooms and draw.textlength(f"{specs_str} · {rooms} hab", font=font_bold) <= max_col2_val_w:
+        specs_str += f" · {rooms} hab"
+    font_specs = font_bold if draw.textlength(specs_str, font=font_bold) <= max_col2_val_w else get_font(15, bold=True)
+    draw.text((col2_x + 85, y - 1 if font_specs == font_bold else y + 1), specs_str, fill=(15, 23, 42), font=font_specs)
     y += 32
 
-    # Fila 2: Estimación Mercado y Referencia Zona
+    # Fila 2: Estimación Mercado y Referencia Zona (Inmueble / Terreno)
     draw.text((col1_x, y), "Estimación Mercado:", fill=(71, 85, 105), font=font_label)
     est_str = f"{market_val:,.0f} €".replace(",", ".") if market_val > 0 else "Consultar"
     draw.text((col1_x + 155, y - 2), est_str, fill=(2, 132, 199), font=font_bold)
 
+    def _fmt_m2_unit(val: float) -> str:
+        if not val or val <= 0:
+            return "N/D"
+        if val < 50:
+            return f"{val:.1f} €/m²".replace(".", ",")
+        return f"{val:,.0f} €/m²".replace(",", ".")
+
     draw.text((col2_x, y), "Ref. Zona:", fill=(71, 85, 105), font=font_label)
-    if m2_price:
-        if m2_price < 50:
-            ref_str = f"{m2_price:.1f} €/m²".replace(".", ",")
-        else:
-            ref_str = f"{m2_price:,.0f} €/m²".replace(",", ".")
+    if m2_price or solar_m2_price:
+        ref_str = f"{_fmt_m2_unit(m2_price)} / {_fmt_m2_unit(solar_m2_price)}"
     else:
         ref_str = "MIVAU"
-    draw.text((col2_x + 85, y - 1), ref_str, fill=(100, 116, 139), font=font_bold)
+    font_ref = font_bold
+    if draw.textlength(ref_str, font=font_ref) > max_col2_val_w:
+        font_ref = get_font(15, bold=True)
+    if draw.textlength(ref_str, font=font_ref) > max_col2_val_w:
+        font_ref = get_font(13, bold=True)
+    draw.text((col2_x + 85, y - 1 if font_ref == font_bold else y + 1), ref_str, fill=(100, 116, 139), font=font_ref)
     y += 34
 
     # Fila 3: Descuento vs Mercado Badge y Rentabilidad BTL
