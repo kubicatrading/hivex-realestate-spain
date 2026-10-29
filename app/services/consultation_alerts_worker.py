@@ -52,23 +52,17 @@ class ConsultationAlertsWorker:
     def _extract_consultation_criteria(consultation: SavedConsultation) -> Dict[str, Any]:
         """
         Construye el diccionario de filtros (criteria) de una consulta guardada priorizando
-        los parámetros estructurados persistidos en criteria_json y completando cualquier
-        campo ausente mediante el parser heurístico sobre la descripción.
+        los parámetros estructurados persistidos en criteria_json (extraídos por Gemini).
         """
-        heur_criteria = advisor_engine._parse_query_intent_heuristics(consultation.description or "")
-        criteria: Dict[str, Any] = dict(heur_criteria)
-
         if consultation.criteria_json:
             try:
                 stored_crit = json.loads(consultation.criteria_json)
-                if isinstance(stored_crit, dict):
-                    for k, v in stored_crit.items():
-                        if v is not None and v != "" and v != []:
-                            criteria[k] = v
+                if isinstance(stored_crit, dict) and stored_crit:
+                    return dict(stored_crit)
             except Exception as e_crit:
                 logger.warning(f"[Alerts Worker] Aviso parseando criteria_json en consulta #{consultation.id}: {e_crit}")
 
-        return criteria
+        return dict(advisor_engine._parse_query_intent_heuristics(consultation.description or ""))
 
     async def run_daily_scan(
         self,
@@ -191,21 +185,27 @@ class ConsultationAlertsWorker:
                                 return True
                         return False
 
-                    # Extraer los filtros de la consulta guardada
-                    criteria = self._extract_consultation_criteria(fresh_c)
+                    # Extraer los filtros de la consulta guardada (o parsear con Gemini si no tuviera criteria_json)
+                    if fresh_c.criteria_json:
+                        criteria = self._extract_consultation_criteria(fresh_c)
+                    else:
+                        criteria = await advisor_engine.parse_query_intent(fresh_c.description or fresh_c.title or "")
 
                     # 1. Evaluar oportunidades nuevas ya presentes en el catálogo interno
                     matching = advisor_engine.filter_opportunities(all_opps, criteria)
                     new_opps = [o for o in matching if not _is_already_delivered_physical(o)]
 
-                    # 2. Sincronizar proactivamente con los portales externos para descubrir nuevos anuncios publicados
-                    if sync_external_portals and len(new_opps) < max_cards_per_consultation:
+                    # 2. Si el catálogo interno tiene 0 novedades para esta consulta, sincronizar con portales externos (con timeout seguro de 25s por consulta para evitar timeout de Vercel)
+                    if sync_external_portals and len(new_opps) == 0:
                         try:
-                            newly_synced = await advisor_engine.sync_portal_opportunities_on_demand(
-                                criteria=criteria,
-                                prompt_text=fresh_c.description or fresh_c.title or "",
-                                target_count=max_cards_per_consultation,
-                                db=db
+                            newly_synced = await asyncio.wait_for(
+                                advisor_engine.sync_portal_opportunities_on_demand(
+                                    criteria=criteria,
+                                    prompt_text=fresh_c.description or fresh_c.title or "",
+                                    target_count=max_cards_per_consultation,
+                                    db=db
+                                ),
+                                timeout=25.0
                             )
                             if newly_synced:
                                 all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
@@ -215,7 +215,6 @@ class ConsultationAlertsWorker:
                                     if nu and nu not in seen_urls:
                                         all_opps.append(n_item)
                                         seen_urls.add(nu)
-                                all_opps = MarketScraper.deduplicate_cross_portal_opportunities(all_opps)
                                 opps_by_id = {}
                                 for o in all_opps:
                                     if o.get("id"):
@@ -233,6 +232,21 @@ class ConsultationAlertsWorker:
                             "consultation_id": fresh_c.id,
                             "title": fresh_c.title,
                             "status": "no_new_opportunities",
+                            "delivered_count": 0
+                        })
+                        continue
+
+                    # 2.5 Validación semántica con Gemini Flash (descarta falsos positivos de tipología o ubicación)
+                    new_opps = await advisor_engine.semantic_filter_with_gemini(
+                        new_opps,
+                        criteria,
+                        f"{fresh_c.title or ''} | {fresh_c.description or ''}"
+                    )
+                    if not new_opps:
+                        report["details"].append({
+                            "consultation_id": fresh_c.id,
+                            "title": fresh_c.title,
+                            "status": "filtered_by_gemini_semantics",
                             "delivered_count": 0
                         })
                         continue

@@ -299,22 +299,97 @@ class BOESubastasScraper:
 
     def extract_land_classification(self, text: str) -> str:
         """
-        Determina si el suelo/finca es RÚSTICO o URBANO.
+        Determina si el suelo/finca es RÚSTICO, URBANIZABLE o URBANO mediante Gemini con respaldo offline.
         """
         if not text:
             return "URBANO"
+        gem_res = self.classify_auction_with_gemini(text=text)
+        if gem_res and gem_res.get("urban_classification") in ("URBANO", "URBANIZABLE", "RÚSTICO"):
+            return "RÚSTICO" if gem_res["urban_classification"] == "RÚSTICO" else "URBANO"
         t = text.lower()
         if "rústic" in t or "rustica" in t or "agrari" in t or "suelo no urbanizable" in t or "snu" in t or "no urbanizable" in t:
             return "RÚSTICO"
         return "URBANO"
 
+    _GEMINI_BOE_CACHE: Dict[str, Dict[str, Any]] = {}
+
+    def classify_auction_with_gemini(self, text: str, raw_type: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Clasifica semánticamente mediante Gemini el texto registral/edictal completo de una subasta BOE,
+        devolviendo JSON estructurado con property_type ("Local Comercial", "Solar", "Vivienda")
+        y urban_classification ("URBANO", "URBANIZABLE", "RÚSTICO") sin depender de parseadores por keywords.
+        """
+        import hashlib
+        import json
+        if not text and not raw_type:
+            return None
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return None
+
+        combined = f"{raw_type or ''}\n{text or ''}".strip()[:3000]
+        cache_key = hashlib.sha256(combined.encode("utf-8", errors="ignore")).hexdigest()[:24]
+        if cache_key in self._GEMINI_BOE_CACHE:
+            return self._GEMINI_BOE_CACHE[cache_key]
+
+        api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or ""
+        ).strip()
+        if not api_key:
+            try:
+                from app.core.config import settings
+                api_key = (settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY or "").strip()
+            except Exception:
+                pass
+        if not api_key:
+            return None
+
+        sys_inst = (
+            "Eres un perito tasador y jurista inmobiliario en España. "
+            "Analiza la descripción registral/edictal del lote de subasta del BOE y devuelve EXCLUSIVAMENTE un JSON con:\n"
+            '- "property_type": exactamente uno de ["Local Comercial", "Solar", "Vivienda"]. '
+            '(Usa "Local Comercial" para locales comerciales, oficinas o naves comerciales; '
+            '"Solar" únicamente cuando sea un terreno/solar/finca rústica SIN vivienda ni local construido; '
+            '"Vivienda" para pisos, casas, chalets o viviendas unifamiliares construidas sobre parcela).\n'
+            '- "urban_classification": exactamente uno de ["URBANO", "URBANIZABLE", "RÚSTICO"].'
+        )
+        payload = {
+            "contents": [{"parts": [{"text": f"Clasifica este bien subastado en el BOE:\n{combined}"}]}],
+            "system_instruction": {"parts": [{"text": sys_inst}]},
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+            },
+        }
+        models = ["gemini-4-argon", "gemini-2.5-flash", "gemini-flash-latest"]
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                resp = requests.post(url, json=payload, timeout=8.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+                    if parts and "text" in parts[0]:
+                        parsed = json.loads(parts[0]["text"].strip())
+                        if isinstance(parsed, dict) and parsed.get("property_type") in ("Local Comercial", "Solar", "Vivienda"):
+                            self._GEMINI_BOE_CACHE[cache_key] = parsed
+                            return parsed
+            except Exception as e_gem:
+                logger.debug(f"[BOE Gemini Classifier] Aviso con {model}: {e_gem}")
+        return None
+
     def classify_property_type(self, text: str, raw_type: str = "") -> str:
         """
         Clasifica con precisión el tipo de activo subastado ("Local Comercial", "Solar", "Vivienda")
-        evitando falsos positivos como 'localidad' -> 'local' o 'parcela con vivienda' -> 'Solar'.
+        priorizando comprensión semántica mediante Gemini y manteniendo respaldo determinista offline.
         """
+        gem_res = self.classify_auction_with_gemini(text=text, raw_type=raw_type)
+        if gem_res and gem_res.get("property_type") in ("Local Comercial", "Solar", "Vivienda"):
+            return gem_res["property_type"]
+
         t = f"{text or ''} {raw_type or ''}".lower()
-        # 1. Detectar Local Comercial / Oficina / Nave Comercial en núcleo urbano
+        # Respaldo offline determinista cuando Gemini no está disponible (ej. tests unitarios sin red)
         is_commercial = bool(
             re.search(
                 r'\b(?:local\s+(?:comercial|n[uú]mero|num\.?|nº|en\s+planta|de\s+negocio|industrial|destinado|sito|ubicado)|'
@@ -331,7 +406,6 @@ class BOESubastasScraper:
         if is_commercial and not has_explicit_vivienda:
             return "Local Comercial"
 
-        # 2. Detectar Solar / Terreno / Finca Rústica (siempre que no sea una vivienda construida sobre parcela)
         is_land = any(w in t for w in ["solar", "terreno", "finca rústica", "finca rustica", "suelo urbanizable", "suelo no urbanizable", "parcela de terreno", "tierra de secano", "tierra de regadío", "tierra de labor", "olivar", "monte"])
         if not is_land and "parcela" in t and not any(v in t for v in ["vivienda", "piso", "apartamento", "chalet", "adosado", "edificio", "local"]):
             is_land = True

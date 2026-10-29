@@ -9,15 +9,15 @@
   "crons": [
     {
       "path": "/api/v1/pipeline/run",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/v1/alerts/daily-run",
       "schedule": "0 7 * * *"
     },
     {
-      "path": "/api/v1/health/cockpit-telegram",
+      "path": "/api/v1/alerts/daily-run",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/v1/health/cockpit-telegram",
+      "schedule": "30 8 * * *"
     },
     {
       "path": "/api/v1/cron/bimonthly-meso-refresh",

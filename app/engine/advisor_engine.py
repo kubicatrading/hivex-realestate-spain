@@ -407,55 +407,146 @@ class AdvisorEngine:
                 try:
                     parsed = json.loads(gemini_res)
                     if isinstance(parsed, dict):
-                        if parsed.get("province") and not criteria.get("province"):
-                            criteria["province"] = parsed["province"]
-                        if parsed.get("street_or_urbanization") and not criteria.get("street_or_urbanization"):
+                        # Gemini es el motor semántico primario: sus decisiones prevalecen sobre cualquier heurística
+                        if parsed.get("province"):
+                            criteria["province"] = str(parsed["province"]).strip(" ()\n\r•")
+                        if parsed.get("street_or_urbanization"):
                             criteria["street_or_urbanization"] = str(parsed["street_or_urbanization"]).strip(" ()\n\r•")
-                        if parsed.get("district_or_neighborhood") and not criteria.get("district_or_neighborhood"):
+                        if parsed.get("district_or_neighborhood"):
                             criteria["district_or_neighborhood"] = str(parsed["district_or_neighborhood"]).strip(" ()\n\r•")
-                        if parsed.get("municipality") and not criteria.get("municipality"):
+                        if parsed.get("municipality"):
                             criteria["municipality"] = str(parsed["municipality"]).strip(" ()\n\r•")
-                        if parsed.get("postal_code") and not criteria.get("postal_code"):
+                        if parsed.get("postal_code"):
                             criteria["postal_code"] = str(parsed["postal_code"]).strip()
-                        if parsed.get("zone_or_neighborhood") and not criteria.get("zone_or_neighborhood"):
+                        if parsed.get("zone_or_neighborhood"):
                             criteria["zone_or_neighborhood"] = str(parsed["zone_or_neighborhood"]).strip(" ()\n\r•")
-                        # Reconstruir etiqueta compuesta y jerarquía si Gemini aportó algún nivel adicional
                         self._sync_location_hierarchy(criteria)
                         if parsed.get("target_count") and isinstance(parsed["target_count"], int):
                             criteria["target_count"] = parsed["target_count"]
                         if parsed.get("sort_by"):
                             criteria["sort_by"] = parsed["sort_by"]
-                        if parsed.get("property_type") and not criteria.get("property_type"):
-                            criteria["property_type"] = parsed["property_type"]
+                        # En property_type prevalece siempre la clasificación semántica de Gemini (incluso si devuelve null para evitar falsos positivos como 'localidad' -> 'local')
+                        if "property_type" in parsed:
+                            criteria["property_type"] = parsed.get("property_type") or None
                         if parsed.get("query_type"):
-                            # Si el usuario pide activamente enviar/buscar oportunidades ahora, prevalece SEARCH_OPPORTUNITIES sobre SCHEDULED_ALERT
                             if parsed["query_type"] == "SCHEDULED_ALERT" and criteria.get("query_type") == "SEARCH_OPPORTUNITIES":
                                 criteria["query_type"] = "SEARCH_OPPORTUNITIES"
                             else:
                                 criteria["query_type"] = parsed["query_type"]
-                        if parsed.get("strategy") and not criteria.get("strategy"):
+                        if parsed.get("strategy"):
                             criteria["strategy"] = parsed["strategy"]
-                        if parsed.get("max_price") and criteria.get("max_price") is None:
-                            criteria["max_price"] = float(parsed["max_price"])
-                        if parsed.get("min_price") and criteria.get("min_price") is None:
-                            criteria["min_price"] = float(parsed["min_price"])
-                        if parsed.get("min_rooms") and criteria.get("min_rooms") is None:
+                        if parsed.get("max_price") is not None:
+                            try:
+                                criteria["max_price"] = float(parsed["max_price"])
+                            except Exception:
+                                pass
+                        if parsed.get("min_price") is not None:
+                            try:
+                                criteria["min_price"] = float(parsed["min_price"])
+                            except Exception:
+                                pass
+                        if parsed.get("min_rooms") is not None:
                             try:
                                 criteria["min_rooms"] = int(parsed["min_rooms"])
                             except Exception:
                                 pass
-                        if parsed.get("min_discount") and criteria.get("min_discount") is None:
-                            criteria["min_discount"] = float(parsed["min_discount"])
-                        if parsed.get("min_yield") and criteria.get("min_yield") is None:
-                            criteria["min_yield"] = float(parsed["min_yield"])
+                        if parsed.get("min_discount") is not None:
+                            try:
+                                criteria["min_discount"] = float(parsed["min_discount"])
+                            except Exception:
+                                pass
+                        if parsed.get("min_yield") is not None:
+                            try:
+                                criteria["min_yield"] = float(parsed["min_yield"])
+                            except Exception:
+                                pass
                         if "is_alert" in parsed and criteria.get("is_alert"):
                             criteria["is_alert"] = bool(parsed["is_alert"])
                         criteria["gemini_model_used"] = model_used
-                        logger.info(f"Criterios refinados con {model_used}: {criteria}")
+                        logger.info(f"Criterios definidos semánticamente con {model_used}: {criteria}")
                 except Exception as e_json:
                     logger.warning(f"No se pudo parsear JSON de Gemini: {e_json}")
 
         return criteria
+
+    async def semantic_filter_with_gemini(
+        self,
+        candidates: List[Dict[str, Any]],
+        criteria: Dict[str, Any],
+        query_context: str = ""
+    ) -> List[Dict[str, Any]]:
+        """
+        Valida semánticamente mediante Gemini que cada activo candidato corresponda realmente
+        a la tipología, ubicación y estrategia solicitadas por el usuario (descartando falsos
+        positivos léxicos como pisos residenciales cuando se buscan locales comerciales o
+        menciones accidentales de palabras en la descripción).
+        """
+        if not candidates or "PYTEST_CURRENT_TEST" in os.environ:
+            return candidates
+
+        api_key = (
+            self.gemini_key
+            or settings.GEMINI_API_KEY
+            or os.getenv("GEMINI_API_KEY")
+            or settings.GOOGLE_API_KEY
+            or os.getenv("GOOGLE_API_KEY")
+        )
+        if not api_key:
+            return candidates
+
+        compact_items = []
+        for o in candidates[:25]:
+            compact_items.append({
+                "id": str(o.get("id") or ""),
+                "title": str(o.get("title") or "")[:140],
+                "property_type": str(o.get("property_type") or ""),
+                "locality": str(o.get("locality") or ""),
+                "address": str(o.get("address") or "")[:100],
+                "price": o.get("listing_price") or o.get("price"),
+                "surface_m2": o.get("surface_m2"),
+                "description_excerpt": str(o.get("description") or "")[:180],
+            })
+
+        sys_inst = (
+            "Eres el auditor semántico de activos inmobiliarios de HIVEX. "
+            "Recibes los criterios de una consulta guardada y una lista de candidatos. "
+            "Debes devolver EXCLUSIVAMENTE un objeto JSON con la clave 'valid_ids' (lista de IDs que SÍ cumplen semánticamente). "
+            "Reglas estrictas:\n"
+            "1. Si la consulta pide 'Local' o 'Local Comercial', descarta cualquier activo que ya sea un 'Piso en venta', 'Vivienda' o 'Chalet' residencial.\n"
+            "2. Si la consulta pide 'Solar' o 'Terreno', descarta viviendas o pisos ya construidos.\n"
+            "3. Si la consulta pide 'Chalet / Casa', descarta pisos en bloque o solares sin edificar.\n"
+            "4. Respeta la ubicación solicitada en la consulta."
+        )
+        user_prompt = json.dumps({
+            "consultation_query": query_context,
+            "criteria": {
+                "property_type": criteria.get("property_type"),
+                "strategy": criteria.get("strategy"),
+                "zone_or_neighborhood": criteria.get("zone_or_neighborhood"),
+                "municipality": criteria.get("municipality"),
+                "province": criteria.get("province"),
+                "min_price": criteria.get("min_price"),
+                "max_price": criteria.get("max_price"),
+                "min_rooms": criteria.get("min_rooms"),
+            },
+            "candidates": compact_items,
+        }, ensure_ascii=False)
+
+        gemini_res, _ = await self.call_gemini_flash_cascade(
+            user_prompt,
+            system_instruction=sys_inst,
+            response_json=True
+        )
+        if gemini_res:
+            try:
+                parsed = json.loads(gemini_res)
+                if isinstance(parsed, dict) and isinstance(parsed.get("valid_ids"), list):
+                    valid_set = {str(x).strip().upper() for x in parsed["valid_ids"] if x}
+                    return [o for o in candidates if str(o.get("id") or "").strip().upper() in valid_set]
+            except Exception as e_sem:
+                logger.warning(f"[Gemini Semantic Filter] Aviso parseando respuesta: {e_sem}")
+
+        return candidates
 
     @staticmethod
     def _sync_location_hierarchy(criteria: Dict[str, Any]) -> None:
@@ -1431,8 +1522,6 @@ class AdvisorEngine:
                 o["images"] = valid_imgs
             filtered.append(o)
 
-        filtered = MarketScraper.deduplicate_cross_portal_opportunities(filtered)
-
         # Extraer todos los niveles jerárquicos de ubicación solicitados por el usuario
         target_prov_raw = (criteria.get("province") or "").strip()
         target_muni_raw = (criteria.get("municipality") or "").strip()
@@ -1745,11 +1834,19 @@ class AdvisorEngine:
                 ]
             elif ptype in ("local", "comercial") or "local" in ptype or "comercial" in ptype:
                 def _is_commercial_opp(o):
-                    pt_t = (str(o.get("title", "")) + " " + str(o.get("property_type", ""))).lower()
-                    desc_t = str(o.get("description", "")).lower()
+                    raw_pt = str(o.get("property_type", "")).strip().lower()
+                    raw_title = str(o.get("title", "")).strip().lower()
+                    # Si el tipo o el título declaran explícitamente que es una vivienda residencial, no es un local comercial
+                    if raw_pt in ("vivienda", "piso", "apartamento", "chalet", "chalet / casa", "casa", "ático", "dúplex", "estudio"):
+                        if not any(w in raw_title for w in ["local", "comercial", "nave", "oficina"]):
+                            return False
+                    if raw_title.startswith(("piso ", "apartamento ", "chalet ", "casa ", "ático ", "atico ", "dúplex ", "duplex ")):
+                        return False
+                    pt_t = f"{raw_title} {raw_pt}"
                     if any(w in pt_t for w in ["local comercial", "local", "comercial", "nave", "oficina", "loft"]):
                         return True
-                    return bool(re.search(r'\b(?:local\s+comercial|local\s+en\s+planta|local\s+n[uú]mero|cambio\s+de\s+uso|nave\s+industrial|oficina)\b', desc_t))
+                    desc_t = str(o.get("description", "")).lower()
+                    return bool(re.search(r'\b(?:local\s+comercial|local\s+en\s+planta\s+baja|local\s+n[uú]mero|nave\s+industrial)\b', desc_t))
                 filtered = [o for o in filtered if _is_commercial_opp(o)]
 
         # Superficie Mínima (m2)
@@ -1838,6 +1935,9 @@ class AdvisorEngine:
         # Rentabilidad Mínima BTL
         if criteria.get("min_yield"):
             filtered = [o for o in filtered if o.get("rental_yield", 0) >= criteria["min_yield"]]
+
+        # Deduplicación cross-portal al final sobre el subconjunto filtrado (O(k^2) en vez de O(N^2))
+        filtered = MarketScraper.deduplicate_cross_portal_opportunities(filtered)
 
         # Criterio de Ordenación Flexible
         sort_by = criteria.get("sort_by")
@@ -3700,7 +3800,9 @@ class AdvisorEngine:
                         if matched_opps:
                             is_relaxed = True
 
-            # Verificar vigencias y recortar al top solicitado (hasta target_count, máximo 20)
+            # Validación semántica con Gemini Flash y verificación de vigencias antes de recortar al top solicitado
+            if matched_opps:
+                matched_opps = await self.semantic_filter_with_gemini(matched_opps, criteria, final_prompt)
             matched_opps = self.verify_and_filter_active_market_opportunities(matched_opps, target_count=target_count)
             matched_opps = matched_opps[:target_count]
             should_display_cards = is_explicit_listing_request and len(matched_opps) > 0
