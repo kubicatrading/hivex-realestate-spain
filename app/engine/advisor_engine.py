@@ -299,15 +299,16 @@ class AdvisorEngine:
         response_json: bool = True
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Envía el prompt al API de Google Gemini priorizando modelos de la familia Flash
-        de forma estrictamente descendente:
-        1. gemini-3.8-flash (más reciente)
-        2. gemini-3.7-flash (inmediatamente anterior si falla)
-        3. gemini-2.5-flash
-        4. gemini-2.0-flash
-        5. gemini-2.0-flash-lite
-        6. gemini-1.5-flash
-        7. gemini-1.5-flash-8b
+        Envía el prompt al API de Google Gemini priorizando modelos de la familia Gemini
+        de forma estrictamente descendente empezando por Gemini 4:
+        1. gemini-4-argon (más reciente)
+        2. gemini-3.5-flash
+        3. gemini-3.5-flash-lite
+        4. gemini-3.1-flash-lite
+        5. gemini-3-flash-preview
+        6. gemini-2.5-flash
+        7. gemini-flash-latest
+        8. gemini-2.5-pro
         Si alguno falla (404, 400, 429, 500 o timeout), salta inmediatamente al siguiente modelo.
         """
         api_key = (
@@ -508,9 +509,12 @@ class AdvisorEngine:
             })
 
         sys_inst = (
-            "Eres el auditor semántico de activos inmobiliarios de HIVEX. "
+            "Eres el auditor semántico y perito tasador de activos inmobiliarios de HIVEX. "
             "Recibes los criterios de una consulta guardada y una lista de candidatos. "
-            "Debes devolver EXCLUSIVAMENTE un objeto JSON con la clave 'valid_ids' (lista de IDs que SÍ cumplen semánticamente). "
+            "Debes devolver EXCLUSIVAMENTE un objeto JSON con:\n"
+            "- 'valid_ids': lista de IDs que SÍ cumplen semánticamente.\n"
+            "- 'plot_surface_by_id': diccionario {id: <numero_m2_terreno>} con la superficie de parcela/terreno "
+            "(extraída del texto o estimada pericialmente > 0 si es un chalet, casa, unifamiliar, finca o solar; 0 si es un piso o local sin parcela).\n"
             "Reglas estrictas:\n"
             "1. Si la consulta pide 'Local' o 'Local Comercial', descarta cualquier activo que ya sea un 'Piso en venta', 'Vivienda' o 'Chalet' residencial.\n"
             "2. Si la consulta pide 'Solar' o 'Terreno', descarta viviendas o pisos ya construidos.\n"
@@ -542,7 +546,22 @@ class AdvisorEngine:
                 parsed = json.loads(gemini_res)
                 if isinstance(parsed, dict) and isinstance(parsed.get("valid_ids"), list):
                     valid_set = {str(x).strip().upper() for x in parsed["valid_ids"] if x}
-                    return [o for o in candidates if str(o.get("id") or "").strip().upper() in valid_set]
+                    plot_map_raw = parsed.get("plot_surface_by_id") if isinstance(parsed.get("plot_surface_by_id"), dict) else {}
+                    plot_map = {str(k).strip().upper(): v for k, v in plot_map_raw.items()}
+                    from app.services.plot_valuation_backfill import PlotValuationEnricher
+                    filtered_out = []
+                    for o in candidates:
+                        oid_u = str(o.get("id") or "").strip().upper()
+                        if oid_u in valid_set:
+                            g_plot = None
+                            if oid_u in plot_map:
+                                try:
+                                    g_plot = float(plot_map[oid_u] or 0.0)
+                                except Exception:
+                                    g_plot = None
+                            PlotValuationEnricher.apply_2x2_plot_valuation_to_item(o, gemini_plot_m2=g_plot)
+                            filtered_out.append(o)
+                    return filtered_out
             except Exception as e_sem:
                 logger.warning(f"[Gemini Semantic Filter] Aviso parseando respuesta: {e_sem}")
 
@@ -1157,12 +1176,21 @@ class AdvisorEngine:
                         continue
 
                     from app.engine.meso_market_price import calculate_composite_market_value_2x2
-                    auc_surface = float(getattr(auc, "surface_m2", None) or 90.0)
-                    auc_prop_type = getattr(auc, "property_type", "Inmueble") or "Inmueble"
+                    from app.services.plot_valuation_backfill import PlotValuationEnricher
+                    auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
+                    auc_plot_entry = auc_plots_map.get(sub_id) or {}
+                    auc_surface = float(
+                        getattr(auc, "surface_m2", None)
+                        or auc_plot_entry.get("surface_m2")
+                        or 90.0
+                    )
+                    explicit_auc_plot = float(auc_plot_entry.get("plot_surface_m2") or 0.0)
+                    auc_prop_type = auc_plot_entry.get("property_type") or getattr(auc, "property_type", "Inmueble") or "Inmueble"
                     auc_is_solar = any(k in auc_prop_type.lower() for k in ("solar", "terreno", "parcela", "finca", "suelo"))
                     auc_land_type = "RUSTICO" if "rustic" in auc_prop_type.lower() or "rústic" in auc_prop_type.lower() else "URBANO"
                     comp_sub = calculate_composite_market_value_2x2(
                         built_m2=auc_surface,
+                        plot_m2=explicit_auc_plot,
                         province_str=auc.province or "España",
                         locality_str=auc.locality or "España",
                         full_address_str=f"{auc.address or ''} {auc.locality or ''} {auc.province or ''}",
@@ -1241,10 +1269,19 @@ class AdvisorEngine:
                 is_solar_val = bool(item.get("is_solar", False))
                 land_type_val = item.get("land_type", "URBANO")
                 prop_type_val = item.get("property_type") or "Vivienda"
+                raw_plot_val = float(item.get("plot_surface_m2") or item.get("plot_m2") or 0.0)
+                if raw_plot_val <= 0:
+                    try:
+                        from app.services.plot_valuation_backfill import PlotValuationEnricher
+                        raw_plot_val, norm_pt = PlotValuationEnricher.resolve_plot_surface_fallback(item)
+                        if norm_pt and prop_type_val.upper() in ("", "PISO", "VIVIENDA"):
+                            prop_type_val = norm_pt
+                    except Exception:
+                        pass
 
                 comp_mkt = calculate_composite_market_value_2x2(
                     built_m2=sqm_val,
-                    plot_m2=float(item.get("plot_surface_m2") or item.get("plot_m2") or 0.0),
+                    plot_m2=raw_plot_val,
                     province_str=item.get("province", "España"),
                     locality_str=item.get("locality", "España"),
                     full_address_str=f"{item.get('address') or item.get('full_address') or ''} {item.get('locality', '')} {item.get('province', '')}",
@@ -2455,6 +2492,17 @@ class AdvisorEngine:
                 )
             discovered_opps = strict_filtered
 
+        # 3b. ENRIQUECIMIENTO DE PARCELA Y VALORACIÓN F3 CON GEMINI PARA TODAS LAS OPORTUNIDADES NUEVAS
+        if discovered_opps:
+            try:
+                from app.services.plot_valuation_backfill import PlotValuationEnricher
+                await PlotValuationEnricher.async_enrich_items_with_gemini(
+                    discovered_opps,
+                    batch_size=35,
+                    only_candidates_for_gemini=False,
+                )
+            except Exception as e_plot_gem:
+                logger.warning(f"[Advisor Sync] Aviso enriqueciendo parcela con Gemini: {e_plot_gem}")
 
         # 4. PERSISTENCIA EN MEMORIA, EN SUPABASE POSTGRESQL Y EN CATÁLOGO JSON SOLO DE OPORTUNIDADES VERIFICADAS
         if discovered_opps:
@@ -3383,10 +3431,15 @@ class AdvisorEngine:
                         if 0 < disc_val <= 1.0:
                             disc_val = round(disc_val * 100, 1)
 
+                        from app.services.plot_valuation_backfill import PlotValuationEnricher
+                        auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
+                        auc_plot_info = auc_plots_map.get(oid_u) or {}
                         opp_dict = {
                             "id": oid_u,
                             "source_type": "market" if oid_u.startswith("MKT-") else "subastas",
                             "title": (auc.title if auc else getattr(o, "title", None)) or "Inmueble en Subasta Pública",
+                            "property_type": auc_plot_info.get("property_type") or (auc.property_type if auc else getattr(o, "property_type", "Vivienda")) or "Vivienda",
+                            "description": (auc.description if auc else "") or "",
                             "listing_price": list_price,
                             "price": list_price,
                             "estimated_reference_value": ref_price,
@@ -3396,6 +3449,10 @@ class AdvisorEngine:
                             "locality": (auc.locality if auc else getattr(o, "locality", None)) or "España",
                             "province": (auc.province if auc else getattr(o, "province", None)) or "España",
                             "address": (auc.address if auc else getattr(o, "address", None)) or "",
+                            "postal_code": (auc.postal_code if auc else "") or "",
+                            "surface_m2": float(auc_plot_info.get("surface_m2") or 0.0),
+                            "plot_surface_m2": float(auc_plot_info.get("plot_surface_m2") or 0.0),
+                            "solar_m2_price": float(auc_plot_info.get("solar_m2_price") or 0.0),
                             "lat": getattr(auc, "lat", None) if auc else None,
                             "lon": getattr(auc, "lon", None) if auc else None,
                             "overall_score": getattr(o, "overall_score", None) or getattr(o, "hivex_score", None) or 75,
@@ -3407,6 +3464,7 @@ class AdvisorEngine:
                             "url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else f"{self.platform_url}/?opp_id={oid_u}",
                             "portal_url": getattr(o, "portal_url", "") if hasattr(o, "portal_url") else ""
                         }
+                        PlotValuationEnricher.apply_2x2_plot_valuation_to_item(opp_dict)
                         if not oid_u.startswith("MKT-"):
                             PhotosBackfillWorker.ensure_non_market_streetview_photo(opp_dict)
                         else:

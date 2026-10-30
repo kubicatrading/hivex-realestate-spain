@@ -1371,12 +1371,18 @@ _SPANISH_WORD_PLOT_MAP = {
 }
 
 
-def extract_plot_surface_m2(text: str, built_m2: float = 0.0) -> float:
+def extract_plot_surface_m2(
+    text: str,
+    built_m2: float = 0.0,
+    explicit_plot_m2: Optional[float] = None,
+) -> float:
     """
     Extrae la superficie de parcela / terreno / jardín privativo (m²) a partir del título o descripción
     de un anuncio de portal o edicto BOE.
     Garantiza que plot_m2 > built_m2 * 1.05 y 85 <= plot_m2 <= 250000 para no confundir con m² construidos.
     """
+    if explicit_plot_m2 is not None and float(explicit_plot_m2 or 0.0) > 0:
+        return round(float(explicit_plot_m2), 2)
     if not text:
         return 0.0
     t = text.lower()

@@ -1115,16 +1115,26 @@ def get_saved_consultations(
                         if 0 < disc_pct <= 1.0:
                             disc_pct = round(disc_pct * 100, 1)
 
+                        from app.services.plot_valuation_backfill import PlotValuationEnricher
+                        auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
+                        sub_key = str(auc.id_subasta) if auc and auc.id_subasta else str(oid_str)
+                        auc_plot_info = auc_plots_map.get(sub_key) or {}
                         card_dict = {
                             "id": oid_str if oid_str.startswith(("SUB-", "MKT-", "PGOU-")) else (f"SUB-{auc.id_subasta}" if auc else oid_str),
                             "source_type": "market" if str(oid_str).upper().startswith("MKT-") else "subastas",
                             "title": (auc.title if auc else getattr(o, "title", None)) or "Inmueble en Subasta Pública",
+                            "property_type": auc_plot_info.get("property_type") or (auc.property_type if auc else getattr(o, "property_type", "Vivienda")) or "Vivienda",
+                            "description": (auc.description if auc else "") or "",
                             "listing_price": list_price,
                             "estimated_reference_value": ref_val,
                             "discount_percentage": disc_pct,
                             "locality": (auc.locality if auc else getattr(o, "locality", None)) or "España",
                             "province": (auc.province if auc else getattr(o, "province", None)) or "España",
                             "address": (auc.address if auc else getattr(o, "address", None)) or "",
+                            "postal_code": (auc.postal_code if auc else "") or "",
+                            "surface_m2": float(auc_plot_info.get("surface_m2") or 0.0),
+                            "plot_surface_m2": float(auc_plot_info.get("plot_surface_m2") or 0.0),
+                            "solar_m2_price": float(auc_plot_info.get("solar_m2_price") or 0.0),
                             "lat": getattr(auc, "lat", None) if auc else None,
                             "lon": getattr(auc, "lon", None) if auc else None,
                             "overall_score": getattr(o, "overall_score", None) or getattr(o, "hivex_score", None) or 75,
@@ -1132,6 +1142,7 @@ def get_saved_consultations(
                             "rental_yield": getattr(o, "rental_yield", 0) or 0,
                             "portal_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={auc.id_subasta}" if auc else getattr(o, "portal_url", None)
                         }
+                        PlotValuationEnricher.apply_2x2_plot_valuation_to_item(card_dict)
                         if card_dict["source_type"] != "market":
                             PhotosBackfillWorker.ensure_non_market_streetview_photo(card_dict)
                         if card_dict.get("images"):
@@ -1711,13 +1722,42 @@ def get_opportunities(
                 # Priority 4: Strict Investor Accuracy.
                 # If surface cannot be verified via BOE literal, DB parcel, or Catastro SEC/WFS,
                 # we DO NOT invent 90m2 or 500m2. It is flagged as MISSING_REGISTRY_CHECK.
+                from app.services.plot_valuation_backfill import PlotValuationEnricher
+                auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
+                auc_plot_entry = auc_plots_map.get(str(auc.id_subasta) if auc and auc.id_subasta else "") or {}
+                if (not surface_m2 or surface_m2 <= 0) and float(auc_plot_entry.get("surface_m2") or 0.0) > 0:
+                    surface_m2 = float(auc_plot_entry["surface_m2"])
+                    surface_source = "GEMINI_BOE_REGISTRY"
+
                 has_verified_surface = bool(surface_m2 and surface_m2 > 0)
                 is_surface_missing = not has_verified_surface
                 is_surface_estimated = False
 
                 is_solar_subasta = (strategy_val == "LAND_DEVELOPMENT" or ("solar" in resolved_ptype.lower()))
-                plot_surface_m2 = 0.0
-                solar_m2_price = 0.0
+                explicit_auc_plot_m2 = float(auc_plot_entry.get("plot_surface_m2") or 0.0)
+                if explicit_auc_plot_m2 <= 0:
+                    explicit_auc_plot_m2, _ = PlotValuationEnricher.resolve_plot_surface_fallback({
+                        "title": title_text,
+                        "description": desc_text,
+                        "property_type": resolved_ptype,
+                        "locality": locality_str,
+                        "province": province_str,
+                        "address": full_address,
+                        "surface_m2": surface_m2 or 0.0,
+                        "land_type": land_type,
+                        "is_solar": is_solar_subasta,
+                    })
+                plot_surface_m2 = explicit_auc_plot_m2
+                solar_m2_price_default, _, _ = resolve_meso_market_price_2x2(
+                    province_str=province_str,
+                    locality_str=locality_str,
+                    full_address_str=full_address,
+                    desc_text=desc_text,
+                    land_type=land_type,
+                    is_solar=True,
+                    postal_code=getattr(auc, "postal_code", None) if auc else None,
+                )
+                solar_m2_price = round(float(auc_plot_entry.get("solar_m2_price") or solar_m2_price_default or 0.0), 2)
                 base_building_value = 0.0
                 plot_added_value = 0.0
                 has_plot_valuation = False
@@ -1747,6 +1787,7 @@ def get_opportunities(
                                 land_type=land_type,
                                 is_solar=False,
                                 postal_code=getattr(auc, "postal_code", None) if auc else None,
+                                explicit_plot_m2=explicit_auc_plot_m2 if explicit_auc_plot_m2 > 0 else None,
                             )
                             own_factor = (ownership_pct / 100.0) if 0 < ownership_pct < 100.0 else 1.0
                             estimated_market_value = round(comp_val["estimated_market_value"] * own_factor, 2)
@@ -1762,6 +1803,7 @@ def get_opportunities(
                             plot_surface_m2 = effective_surface_m2
                             solar_m2_price = area_m2_price
                             plot_added_value = estimated_market_value
+                            has_plot_valuation = True
                     elif opp.estimated_reference_value and opp.estimated_reference_value > 0:
                         estimated_market_value = opp.estimated_reference_value
                     else:
@@ -1973,6 +2015,17 @@ def get_opportunities(
                 p_item["potential_gross_profit"] = max(0.0, round(est_val - listing_p, 2))
                 p_item["property_m2_price"] = round(listing_p / surf, 2) if surf > 0 else 0.0
                 p_item["area_m2_price"] = area_m2_price
+                p_item["plot_surface_m2"] = round(float(p_item.get("plot_surface_m2") or surf or 0.0), 2)
+                pgou_solar_price, _, _ = resolve_meso_market_price_2x2(
+                    province_str=p_item.get("province", ""),
+                    locality_str=p_item.get("locality", ""),
+                    full_address_str=p_item.get("address", ""),
+                    desc_text=p_item.get("description", ""),
+                    land_type=p_item.get("land_type", "URBANIZABLE"),
+                    is_solar=True,
+                    postal_code=p_item.get("postal_code"),
+                )
+                p_item["solar_m2_price"] = round(float(p_item.get("solar_m2_price") or pgou_solar_price or area_m2_price), 2)
                 p_item["area_m2_price_source"] = "PGOU_MUNICIPAL"
                 p_item["area_m2_price_label"] = p_item.get("gazette_source", "Planeamiento Municipal")
                 p_item["price_ref_level"] = "MESO"
@@ -2013,6 +2066,11 @@ def get_opportunities(
                 e_item["potential_gross_profit"] = max(0.0, round(est_val - listing_p, 2))
                 e_item["property_m2_price"] = round(listing_p / effective_surf, 2) if effective_surf > 0 else 0.0
                 e_item["area_m2_price"] = area_m2_price
+                try:
+                    from app.services.plot_valuation_backfill import PlotValuationEnricher
+                    PlotValuationEnricher.apply_2x2_plot_valuation_to_item(e_item)
+                except Exception:
+                    pass
                 e_item["area_m2_price_source"] = "INE_CATASTRO"
                 e_item["area_m2_price_label"] = f"Ref. Mercado ({e_item.get('locality', '')})"
                 e_item["price_ref_level"] = "MESO"
@@ -2303,11 +2361,40 @@ def get_opportunity_by_id(
             extracted_notarial_val = scraper.extract_notarial_appraisal_value(desc_text)
             notarial_appraisal_val = extracted_notarial_val if extracted_notarial_val else (appraisal_val if appraisal_val > 0 else starting_bid_val)
 
+            from app.services.plot_valuation_backfill import PlotValuationEnricher
+            auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
+            auc_plot_entry = auc_plots_map.get(str(auc.id_subasta) if auc and auc.id_subasta else "") or {}
+            if (not surface_m2 or surface_m2 <= 0) and float(auc_plot_entry.get("surface_m2") or 0.0) > 0:
+                surface_m2 = float(auc_plot_entry["surface_m2"])
+                surface_source = "GEMINI_BOE_REGISTRY"
+
             has_verified_surface = bool(surface_m2 and surface_m2 > 0)
             is_surface_missing = not has_verified_surface
             is_surface_estimated = False
-            plot_surface_m2 = 0.0
-            solar_m2_price = 0.0
+            explicit_auc_plot_m2 = float(auc_plot_entry.get("plot_surface_m2") or 0.0)
+            if explicit_auc_plot_m2 <= 0:
+                explicit_auc_plot_m2, _ = PlotValuationEnricher.resolve_plot_surface_fallback({
+                    "title": title_text,
+                    "description": desc_text,
+                    "property_type": resolved_ptype,
+                    "locality": locality_str,
+                    "province": province_str,
+                    "address": full_address,
+                    "surface_m2": surface_m2 or 0.0,
+                    "land_type": land_type,
+                    "is_solar": is_solar_for_price,
+                })
+            plot_surface_m2 = explicit_auc_plot_m2
+            solar_m2_price_default, _, _ = resolve_meso_market_price_2x2(
+                province_str=province_str,
+                locality_str=locality_str,
+                full_address_str=full_address,
+                desc_text=desc_text,
+                land_type=land_type,
+                is_solar=True,
+                postal_code=getattr(auc, "postal_code", None),
+            )
+            solar_m2_price = round(float(auc_plot_entry.get("solar_m2_price") or solar_m2_price_default or 0.0), 2)
             base_building_value = 0.0
             plot_added_value = 0.0
             has_plot_valuation = False
@@ -2329,6 +2416,7 @@ def get_opportunity_by_id(
                             land_type=land_type,
                             is_solar=False,
                             postal_code=getattr(auc, "postal_code", None),
+                            explicit_plot_m2=explicit_auc_plot_m2 if explicit_auc_plot_m2 > 0 else None,
                         )
                         own_factor = (ownership_pct / 100.0) if 0 < ownership_pct < 100.0 else 1.0
                         estimated_market_value = round(comp_val["estimated_market_value"] * own_factor, 2)
@@ -2344,6 +2432,7 @@ def get_opportunity_by_id(
                         plot_surface_m2 = effective_surface_m2
                         solar_m2_price = area_m2_price
                         plot_added_value = estimated_market_value
+                        has_plot_valuation = True
                 elif opp and opp.estimated_reference_value and opp.estimated_reference_value > 0:
                     estimated_market_value = float(opp.estimated_reference_value)
                 else:
@@ -2484,10 +2573,13 @@ def get_opportunity_by_id(
         try:
             from app.connectors.pgou_scraper import PGOUScraper
             p_items = PGOUScraper().fetch_pgou_opportunities()
+            from app.services.plot_valuation_backfill import PlotValuationEnricher
             for p in p_items:
                 p_id = str(p.get("id", "")).strip().upper()
                 g_code = str(p.get("gazette_code", "")).strip().upper()
                 if any(c.upper() in (p_id, g_code) for c in candidates):
+                    p["is_solar"] = True
+                    PlotValuationEnricher.apply_2x2_plot_valuation_to_item(p)
                     return p
         except Exception as e_p:
             errors.append(f"pgou: {e_p}")
@@ -2496,10 +2588,12 @@ def get_opportunity_by_id(
     if is_edicto_id:
         try:
             from app.connectors.edictos_scraper import EdictosScraper
+            from app.services.plot_valuation_backfill import PlotValuationEnricher
             e_items = EdictosScraper().fetch_edictos_opportunities()
             for e in e_items:
                 e_id = str(e.get("id", "")).strip().upper()
                 if any(e_id == c.upper() for c in candidates):
+                    PlotValuationEnricher.apply_2x2_plot_valuation_to_item(e)
                     return e
         except Exception as e_e:
             errors.append(f"edictos: {e_e}")

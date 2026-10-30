@@ -1141,6 +1141,13 @@ class MarketScraper:
         seen_q_keys = set()
         items = cls.deduplicate_cross_portal_opportunities(items)
         try:
+            from app.services.plot_valuation_backfill import PlotValuationEnricher
+            PlotValuationEnricher.enrich_items_with_gemini(
+                items, batch_size=35, only_candidates_for_gemini=True
+            )
+        except Exception as e_enrich:
+            logger.debug(f"[MarketScraper DB Persist] Aviso enriqueciendo parcela con Gemini: {e_enrich}")
+        try:
             for item in items:
                 opp_id = str(item.get("id") or "").strip().upper()
                 if not opp_id or opp_id in cls.SYNTHETIC_BLACKLIST_IDS:
@@ -1339,6 +1346,28 @@ class MarketScraper:
 
         for oid, db_item in db_items_by_id.items():
             if oid not in purged_ids:
+                base_item = merged_by_id.get(oid)
+                if base_item:
+                    if not db_item.get("plot_surface_m2") and base_item.get("plot_surface_m2"):
+                        db_item["plot_surface_m2"] = base_item["plot_surface_m2"]
+                        db_item["base_building_value"] = base_item.get("base_building_value", 0.0)
+                        db_item["plot_added_value"] = base_item.get("plot_added_value", 0.0)
+                        db_item["has_plot_valuation"] = base_item.get("has_plot_valuation", False)
+                        if (base_item.get("estimated_market_value") or 0) > (db_item.get("estimated_market_value") or 0):
+                            db_item["estimated_market_value"] = base_item["estimated_market_value"]
+                            db_item["estimated_reference_value"] = base_item.get("estimated_reference_value", base_item["estimated_market_value"])
+                            db_item["market_reference_price"] = base_item.get("market_reference_price", base_item["estimated_market_value"])
+                            db_item["discount_vs_market"] = base_item.get("discount_vs_market", db_item.get("discount_vs_market"))
+                            db_item["discount_percentage"] = base_item.get("discount_percentage", db_item.get("discount_percentage"))
+                            db_item["potential_gross_profit"] = base_item.get("potential_gross_profit", db_item.get("potential_gross_profit"))
+                    if not db_item.get("solar_m2_price") and base_item.get("solar_m2_price"):
+                        db_item["solar_m2_price"] = base_item["solar_m2_price"]
+                if db_item.get("solar_m2_price") is None or db_item.get("plot_surface_m2") is None:
+                    try:
+                        from app.services.plot_valuation_backfill import PlotValuationEnricher
+                        PlotValuationEnricher.apply_2x2_plot_valuation_to_item(db_item)
+                    except Exception:
+                        pass
                 merged_by_id[oid] = db_item
 
         return self.deduplicate_cross_portal_opportunities(list(merged_by_id.values()))
@@ -1555,6 +1584,16 @@ class MarketScraper:
 
         # Valoración de mercado compuesta 2x2 (Inmueble + Parcela Libre Orden ECO/805/2003 F3)
         raw_plot_m2 = float(item.get("plot_surface_m2") or item.get("plot_m2") or item.get("parcel_m2") or 0.0)
+        if raw_plot_m2 <= 0:
+            try:
+                from app.services.plot_valuation_backfill import PlotValuationEnricher
+                inferred_plot_m2, norm_pt = PlotValuationEnricher.resolve_plot_surface_fallback(item)
+                if inferred_plot_m2 > 0:
+                    raw_plot_m2 = inferred_plot_m2
+                if norm_pt and str(item.get("property_type") or "").upper() in ("", "PISO", "VIVIENDA"):
+                    item["property_type"] = norm_pt
+            except Exception:
+                pass
         if is_rustic:
             # En fincas rústicas, el suelo cotiza a 10-35 €/m2. Si tiene vivienda construida, se suma el valor de la edificación
             house_sqm = float(item.get("built_area") or item.get("house_m2") or 140.0) if has_house else 0.0
@@ -1565,14 +1604,14 @@ class MarketScraper:
             solar_m2_price = area_m2_price
             base_building_value = round(house_val, 2)
             plot_added_value = round(land_val, 2)
-            has_plot_valuation = False
+            has_plot_valuation = True
         elif is_solar:
             estimated_market_value = round(surface * area_m2_price, 2)
             plot_surface_m2 = surface
             solar_m2_price = area_m2_price
             base_building_value = 0.0
             plot_added_value = estimated_market_value
-            has_plot_valuation = False
+            has_plot_valuation = True
         else:
             comp_val = calculate_composite_market_value_2x2(
                 built_m2=surface,

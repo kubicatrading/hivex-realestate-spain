@@ -352,7 +352,9 @@ class BOESubastasScraper:
             '(Usa "Local Comercial" para locales comerciales, oficinas o naves comerciales; '
             '"Solar" únicamente cuando sea un terreno/solar/finca rústica SIN vivienda ni local construido; '
             '"Vivienda" para pisos, casas, chalets o viviendas unifamiliares construidas sobre parcela).\n'
-            '- "urban_classification": exactamente uno de ["URBANO", "URBANIZABLE", "RÚSTICO"].'
+            '- "urban_classification": exactamente uno de ["URBANO", "URBANIZABLE", "RÚSTICO"].\n'
+            '- "plot_surface_m2": número (m² de parcela, terreno, solar o finca; si viene en hectáreas/áreas/centiáreas conviértelo a m²: 1 ha = 10000 m², 1 a = 100 m², 1 ca = 1 m²; si es un chalet/unifamiliar/casa sin dato explícito estima pericialmente los m² de parcela; si es piso o local sin terreno pon 0).\n'
+            '- "built_surface_m2": número (m² construidos o útiles de la edificación; 0 si es solar sin edificar).'
         )
         payload = {
             "contents": [{"parts": [{"text": f"Clasifica este bien subastado en el BOE:\n{combined}"}]}],
@@ -362,11 +364,20 @@ class BOESubastasScraper:
                 "responseMimeType": "application/json",
             },
         }
-        models = ["gemini-4-argon", "gemini-2.5-flash", "gemini-flash-latest"]
+        models = [
+            "gemini-4-argon",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+            "gemini-2.5-pro",
+        ]
         for model in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                resp = requests.post(url, json=payload, timeout=8.0)
+                resp = httpx.post(url, json=payload, timeout=8.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
@@ -1001,6 +1012,7 @@ class BOESubastasScraper:
                     if sv_url:
                         images.append(sv_url)
 
+                    gem_info = self.classify_auction_with_gemini(desc) or {}
                     ptype = self.classify_property_type(desc)
 
                     item = {
@@ -1028,8 +1040,19 @@ class BOESubastasScraper:
                         "lot_number": lotes_info["lot_number"],
                         "total_lots": lotes_info["total_lots"],
                         "lote_badge": lotes_info["lote_badge"],
-                        "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}"
+                        "boe_url": f"https://subastas.boe.es/detalleSubasta.php?idSub={aid}",
+                        "surface_m2": float(gem_info.get("built_surface_m2") or 0.0),
+                        "plot_surface_m2": float(gem_info.get("plot_surface_m2") or 0.0),
                     }
+                    try:
+                        from app.services.plot_valuation_backfill import PlotValuationEnricher
+                        PlotValuationEnricher.apply_2x2_plot_valuation_to_item(
+                            item,
+                            gemini_plot_m2=float(gem_info.get("plot_surface_m2") or 0.0) or None,
+                            gemini_built_m2=float(gem_info.get("built_surface_m2") or 0.0) or None,
+                        )
+                    except Exception:
+                        pass
                     PhotosBackfillWorker.ensure_non_market_streetview_photo(item)
                     real_auctions.append(item)
 
