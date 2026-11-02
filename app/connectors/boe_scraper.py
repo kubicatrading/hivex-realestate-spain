@@ -357,7 +357,7 @@ class BOESubastasScraper:
             '- "built_surface_m2": número (m² construidos o útiles de la edificación; 0 si es solar sin edificar).'
         )
         payload = {
-            "contents": [{"parts": [{"text": f"Clasifica este bien subastado en el BOE:\n{combined}"}]}],
+            "contents": [{"role": "user", "parts": [{"text": f"Clasifica este bien subastado en el BOE:\n{combined}"}]}],
             "system_instruction": {"parts": [{"text": sys_inst}]},
             "generationConfig": {
                 "temperature": 0.0,
@@ -375,9 +375,12 @@ class BOESubastasScraper:
             "gemini-2.5-pro",
         ]
         for model in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                resp = httpx.post(url, json=payload, timeout=8.0)
+                resp = httpx.post(vertex_url, json=payload, timeout=8.0)
+                if resp.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in resp.text or "PERMISSION_DENIED" in resp.text):
+                    resp = httpx.post(fallback_url, json=payload, timeout=8.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []

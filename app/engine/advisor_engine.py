@@ -323,7 +323,7 @@ class AdvisorEngine:
             return None, None
 
         payload: Dict[str, Any] = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.1,
             }
@@ -334,11 +334,14 @@ class AdvisorEngine:
             payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
 
         for model in self.GEMINI_FLASH_CASCADE:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                logger.info(f"[Gemini Cascade] Evaluando modelo: {model}...")
+                logger.info(f"[Gemini Cascade] Evaluando modelo en Vertex AI Express: {model}...")
                 async with httpx.AsyncClient(timeout=25.0) as client:
-                    resp = await client.post(url, json=payload)
+                    resp = await client.post(vertex_url, json=payload)
+                    if resp.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in resp.text or "PERMISSION_DENIED" in resp.text):
+                        resp = await client.post(fallback_url, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         candidates = data.get("candidates") or []
@@ -2470,7 +2473,11 @@ class AdvisorEngine:
             try:
                 from app.connectors.market_scraper import MarketScraper
                 scraper = MarketScraper()
-                raw_fallback = scraper.fetch_market_opportunities(province=prov, live_scrape=True)
+                raw_fallback = await asyncio.to_thread(
+                    scraper.fetch_market_opportunities,
+                    province=prov,
+                    live_scrape=True,
+                )
                 discovered_opps = [o for o in raw_fallback if MarketScraper.ensure_twenty_images(o)]
             except Exception as e_mkt:
                 logger.warning(f"[Advisor Sync] Fallback MarketScraper: {e_mkt}")

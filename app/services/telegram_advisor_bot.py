@@ -1008,10 +1008,13 @@ class TelegramAdvisorBot:
         ]
         for model in models:
             for key in api_keys:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+                vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={key}"
+                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
                 try:
                     with httpx.Client(timeout=6.0) as client:
-                        resp = client.post(url, json=payload)
+                        resp = client.post(vertex_url, json=payload)
+                        if resp.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in resp.text or "PERMISSION_DENIED" in resp.text):
+                            resp = client.post(fallback_url, json=payload)
                         if resp.status_code == 200:
                             data = resp.json()
                             parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -1765,6 +1768,7 @@ class TelegramAdvisorBot:
             return True
 
         # Disparar workflow en GitHub Actions vía API REST
+        self._ensure_token()
         url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
         headers = {
             "Authorization": f"Bearer {gh_token}",
@@ -1776,13 +1780,25 @@ class TelegramAdvisorBot:
             "inputs": {
                 "task": clean_task,
                 "telegram_chat_id": str(chat_id),
-                "telegram_message_id": str(message_id) if message_id else ""
+                "telegram_message_id": str(message_id) if message_id else "",
+                "telegram_bot_token": self.token or ""
             }
         }
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(url, json=payload, headers=headers)
+                if res.status_code == 422:
+                    # Fallback en caso de que el workflow remoto aún no acepte telegram_bot_token
+                    fallback_payload = {
+                        "ref": "main",
+                        "inputs": {
+                            "task": clean_task,
+                            "telegram_chat_id": str(chat_id),
+                            "telegram_message_id": str(message_id) if message_id else ""
+                        }
+                    }
+                    res = await client.post(url, json=fallback_payload, headers=headers)
                 if res.status_code == 204:
                     confirm_msg = (
                         f"🚀 <b>¡DevAgent activado en GitHub Actions!</b>\n\n"

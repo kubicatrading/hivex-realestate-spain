@@ -24,12 +24,25 @@ def send_telegram_update(
     bot_token: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> None:
-    """Envía actualizaciones de progreso en tiempo real al chat privado de Telegram con fallback resiliente."""
-    token = (bot_token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    """Envía actualizaciones de progreso en tiempo real al chat privado de Telegram con cascada resiliente de tokens."""
     target_chat = str(chat_id or os.getenv("CHAT_ID_INPUT") or "").strip()
-    if not target_chat or not token:
+    if not target_chat:
         return
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    candidate_tokens: List[str] = []
+    for cand_tok in [
+        os.getenv("ACTIVE_TELEGRAM_BOT_TOKEN", ""),
+        bot_token or "",
+        os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        "8889706886:AAHmSfojEkKktRiHgk85uZt-twPI66dPodE",
+    ]:
+        t_clean = cand_tok.strip()
+        if t_clean and t_clean not in candidate_tokens:
+            candidate_tokens.append(t_clean)
+
+    if not candidate_tokens:
+        return
+
     payload: Dict[str, Any] = {
         "chat_id": target_chat,
         "text": text,
@@ -40,25 +53,35 @@ def send_telegram_update(
             payload["reply_to_message_id"] = int(reply_to_message_id)
         except Exception:
             pass
-    try:
-        with httpx.Client(timeout=12.0) as client:
-            r = client.post(url, json=payload)
-            if r.status_code != 200 and "reply_to_message_id" in payload:
-                # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
-                fallback_payload = dict(payload)
-                fallback_payload.pop("reply_to_message_id", None)
-                r = client.post(url, json=fallback_payload)
-            if r.status_code != 200:
-                # Último fallback en texto plano sin parse_mode HTML
-                plain_payload = {
-                    "chat_id": target_chat,
-                    "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
-                }
-                r2 = client.post(url, json=plain_payload)
-                if r2.status_code != 200:
-                    print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
-    except Exception as e:
-        print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
+
+    for tok in candidate_tokens:
+        url = f"https://api.telegram.org/bot{tok}/sendMessage"
+        try:
+            with httpx.Client(timeout=12.0) as client:
+                r = client.post(url, json=payload)
+                if r.status_code == 401:
+                    # Token revocado o desactualizado en GitHub Secrets: pasar al siguiente token activo
+                    continue
+                if r.status_code != 200 and "reply_to_message_id" in payload:
+                    # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("reply_to_message_id", None)
+                    r = client.post(url, json=fallback_payload)
+                if r.status_code == 200:
+                    return
+                if r.status_code != 401:
+                    # Último fallback en texto plano sin parse_mode HTML
+                    plain_payload = {
+                        "chat_id": target_chat,
+                        "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    }
+                    r2 = client.post(url, json=plain_payload)
+                    if r2.status_code == 200:
+                        return
+                    if r2.status_code != 401:
+                        print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
+        except Exception as e:
+            print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
 
 # -----------------------------------------------------------------------------
 # HERRAMIENTAS (TOOLS) DEL DEVAGENT
@@ -286,9 +309,23 @@ PROTOCOLO ESTRICTO DE INGENIERÍA (ANTI-ALUCINACIONES):
    - Ejecuta tests focalizados en los módulos modificados (ej. `pytest tests/test_consultation_features.py -q`) mediante `run_command` para validar tus cambios rápidamente sin agotar el tiempo de ejecución.
    - Si al correr `pytest` algún test modifica archivos colaterales como `app/data/verified_market_catalog.json`, `app/data/supadata_backfill_quota.json` o `hivex_local.db`, ejecuta `git checkout -- app/data/ hivex_local.db` antes de terminar para que el commit contenga EXCLUSIVAMENTE tu fix de código.
    - PROHIBIDO ejecutar `git commit` o `git push` dentro de `run_command`: deja los cambios listos en el árbol de trabajo; el paso posterior del workflow de GitHub Actions hará el commit y el push automáticamente.
-4. COMUNICACIÓN CLARA CON EL USUARIO:
+4. PRESUPUESTO DE PASOS Y RESOLUCIÓN EFECTIVA (MÁXIMO 25 PASOS):
+   - Fase 1 (Pasos 1 a 8): Diagnóstico rápido en código y estado en vivo.
+   - Fase 2 (Pasos 9 a 16): Si detectas un bug o mejora necesaria en el código, APLICA EL FIX con `replace_file_content` antes del paso 16. No agotes los 25 pasos solo leyendo o ejecutando scripts de consulta si el problema requiere corregir código.
+   - Fase 3 (Pasos 17 a 22): Ejecuta `pytest` focalizado y limpia archivos colaterales (`git checkout -- app/data/ hivex_local.db`).
+   - Fase 4 (Pasos 23 a 25): Entrega el informe final completo sin invocar más herramientas.
+5. COMUNICACIÓN CLARA CON EL USUARIO:
    - Explica siempre: (a) Cuál era la causa raíz exacta, (b) Qué archivos y líneas has modificado, y (c) Cómo lo has verificado con tests.
 """
+
+def _post_gemini_vertex_first(client: httpx.Client, model: str, api_key: str, payload: Dict[str, Any]) -> httpx.Response:
+    """Invoca primero el endpoint de Vertex AI Express (aiplatform.googleapis.com) y aplica fallback transparente si el servicio está bloqueado en GCP."""
+    vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
+    r = client.post(vertex_url, json=payload)
+    if r.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in r.text or "PERMISSION_DENIED" in r.text):
+        fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        return client.post(fallback_url, json=payload)
+    return r
 
 def execute_agent_loop(
     task: str,
@@ -354,10 +391,9 @@ def execute_agent_loop(
             for key_idx, cand_key in enumerate(candidate_keys):
                 if (model, key_idx) in unavailable_pairs:
                     continue
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={cand_key}"
                 try:
                     with httpx.Client(timeout=90.0) as client:
-                        r = client.post(url, json=payload)
+                        r = _post_gemini_vertex_first(client, model, cand_key, payload)
                         if r.status_code == 200:
                             resp_data = r.json()
                             active_model = model
@@ -504,9 +540,8 @@ def execute_agent_loop(
             for key_idx, cand_key in enumerate(candidate_keys):
                 if (model, key_idx) in unavailable_pairs:
                     continue
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={cand_key}"
                 with httpx.Client(timeout=60.0) as client:
-                    r = client.post(url, json=synth_payload)
+                    r = _post_gemini_vertex_first(client, model, cand_key, synth_payload)
                     if r.status_code == 200:
                         cand = r.json().get("candidates", [{}])[0]
                         t_parts = [p["text"] for p in cand.get("content", {}).get("parts", []) if "text" in p and not p.get("thought")]

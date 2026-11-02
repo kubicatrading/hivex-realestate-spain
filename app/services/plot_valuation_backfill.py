@@ -487,6 +487,7 @@ class PlotValuationEnricher:
         request_body = {
             "contents": [
                 {
+                    "role": "user",
                     "parts": [
                         {
                             "text": json.dumps({"candidates": compact_payload}, ensure_ascii=False)
@@ -512,9 +513,12 @@ class PlotValuationEnricher:
             "gemini-2.5-pro",
         ]
         for model in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                resp = httpx.post(url, json=request_body, timeout=timeout_sec)
+                resp = httpx.post(vertex_url, json=request_body, timeout=timeout_sec)
+                if resp.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in resp.text or "PERMISSION_DENIED" in resp.text):
+                    resp = httpx.post(fallback_url, json=request_body, timeout=timeout_sec)
                 if resp.status_code == 200:
                     data = resp.json()
                     parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []

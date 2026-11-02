@@ -194,9 +194,28 @@ class ConsultationAlertsWorker:
                     # 1. Evaluar oportunidades nuevas ya presentes en el catálogo interno
                     matching = advisor_engine.filter_opportunities(all_opps, criteria)
                     new_opps = [o for o in matching if not _is_already_delivered_physical(o)]
+                    to_deliver: List[Dict[str, Any]] = []
+                    rejection_reason = "no_new_opportunities"
 
-                    # 2. Si el catálogo interno tiene 0 novedades para esta consulta, sincronizar con portales externos (con timeout seguro de 25s por consulta para evitar timeout de Vercel)
-                    if sync_external_portals and len(new_opps) == 0:
+                    if new_opps:
+                        sem_opps = await advisor_engine.semantic_filter_with_gemini(
+                            new_opps,
+                            criteria,
+                            f"{fresh_c.title or ''} | {fresh_c.description or ''}"
+                        )
+                        if not sem_opps:
+                            rejection_reason = "filtered_by_gemini_semantics"
+                        else:
+                            to_deliver = advisor_engine.verify_and_filter_active_market_opportunities(
+                                sem_opps,
+                                target_count=max_cards_per_consultation
+                            )
+                            if not to_deliver:
+                                rejection_reason = "filtered_by_guardian"
+
+                    # 2. Si el catálogo interno no aporta oportunidades válidas y verificadas para esta consulta,
+                    # sincronizar con portales externos (con timeout seguro de 25s por consulta para evitar timeout de Vercel)
+                    if sync_external_portals and not to_deliver:
                         try:
                             newly_synced = await asyncio.wait_for(
                                 advisor_engine.sync_portal_opportunities_on_demand(
@@ -208,59 +227,46 @@ class ConsultationAlertsWorker:
                                 timeout=25.0
                             )
                             if newly_synced:
-                                all_opps = advisor_engine.get_live_catalog_opportunities(db=db)
                                 seen_urls = {str(o.get("url") or "").strip().rstrip("/").lower() for o in all_opps if o.get("url")}
+                                seen_ids = {str(o.get("id") or "").strip().upper() for o in all_opps if o.get("id")}
                                 for n_item in newly_synced:
                                     nu = str(n_item.get("url") or "").strip().rstrip("/").lower()
-                                    if nu and nu not in seen_urls:
+                                    nid = str(n_item.get("id") or "").strip().upper()
+                                    if (nu and nu not in seen_urls) or (nid and nid not in seen_ids):
                                         all_opps.append(n_item)
-                                        seen_urls.add(nu)
-                                opps_by_id = {}
-                                for o in all_opps:
-                                    if o.get("id"):
-                                        opps_by_id[str(o.get("id")).strip().upper()] = o
-                                    for al in (o.get("alias_ids") or []):
-                                        if al:
-                                            opps_by_id[str(al).strip().upper()] = o
-                                matching = advisor_engine.filter_opportunities(all_opps, criteria)
-                                new_opps = [o for o in matching if not _is_already_delivered_physical(o)]
+                                        if nu:
+                                            seen_urls.add(nu)
+                                        if nid:
+                                            seen_ids.add(nid)
+                                            opps_by_id[nid] = n_item
+                                        for al in (n_item.get("alias_ids") or []):
+                                            if al:
+                                                opps_by_id[str(al).strip().upper()] = n_item
+                                ext_matching = advisor_engine.filter_opportunities(newly_synced, criteria)
+                                ext_new_opps = [o for o in ext_matching if not _is_already_delivered_physical(o)]
+                                if ext_new_opps:
+                                    ext_sem = await advisor_engine.semantic_filter_with_gemini(
+                                        ext_new_opps,
+                                        criteria,
+                                        f"{fresh_c.title or ''} | {fresh_c.description or ''}"
+                                    )
+                                    if not ext_sem:
+                                        rejection_reason = "filtered_by_gemini_semantics"
+                                    else:
+                                        to_deliver = advisor_engine.verify_and_filter_active_market_opportunities(
+                                            ext_sem,
+                                            target_count=max_cards_per_consultation
+                                        )
+                                        if not to_deliver:
+                                            rejection_reason = "filtered_by_guardian"
                         except Exception as e_sync:
                             logger.warning(f"[Alerts Worker 09:00h] Aviso en prospección de portales para consulta #{fresh_c.id}: {e_sync}")
 
-                    if not new_opps:
-                        report["details"].append({
-                            "consultation_id": fresh_c.id,
-                            "title": fresh_c.title,
-                            "status": "no_new_opportunities",
-                            "delivered_count": 0
-                        })
-                        continue
-
-                    # 2.5 Validación semántica con Gemini Flash (descarta falsos positivos de tipología o ubicación)
-                    new_opps = await advisor_engine.semantic_filter_with_gemini(
-                        new_opps,
-                        criteria,
-                        f"{fresh_c.title or ''} | {fresh_c.description or ''}"
-                    )
-                    if not new_opps:
-                        report["details"].append({
-                            "consultation_id": fresh_c.id,
-                            "title": fresh_c.title,
-                            "status": "filtered_by_gemini_semantics",
-                            "delivered_count": 0
-                        })
-                        continue
-
-                    # 3. Verificar vigencia y calidad fotográfica (0 fotos duplicadas, anuncio activo)
-                    to_deliver = advisor_engine.verify_and_filter_active_market_opportunities(
-                        new_opps,
-                        target_count=max_cards_per_consultation
-                    )
                     if not to_deliver:
                         report["details"].append({
                             "consultation_id": fresh_c.id,
                             "title": fresh_c.title,
-                            "status": "filtered_by_guardian",
+                            "status": rejection_reason,
                             "delivered_count": 0
                         })
                         continue
