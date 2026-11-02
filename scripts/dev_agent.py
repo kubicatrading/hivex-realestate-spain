@@ -24,25 +24,12 @@ def send_telegram_update(
     bot_token: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> None:
-    """Envía actualizaciones de progreso en tiempo real al chat privado de Telegram con cascada resiliente de tokens."""
+    """Envía actualizaciones de progreso en tiempo real al chat privado de Telegram usando secrets.TELEGRAM_BOT_TOKEN."""
+    token = (bot_token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     target_chat = str(chat_id or os.getenv("CHAT_ID_INPUT") or "").strip()
-    if not target_chat:
+    if not target_chat or not token:
         return
-
-    candidate_tokens: List[str] = []
-    for cand_tok in [
-        os.getenv("ACTIVE_TELEGRAM_BOT_TOKEN", ""),
-        bot_token or "",
-        os.getenv("TELEGRAM_BOT_TOKEN", ""),
-        "8889706886:AAHmSfojEkKktRiHgk85uZt-twPI66dPodE",
-    ]:
-        t_clean = cand_tok.strip()
-        if t_clean and t_clean not in candidate_tokens:
-            candidate_tokens.append(t_clean)
-
-    if not candidate_tokens:
-        return
-
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload: Dict[str, Any] = {
         "chat_id": target_chat,
         "text": text,
@@ -53,35 +40,25 @@ def send_telegram_update(
             payload["reply_to_message_id"] = int(reply_to_message_id)
         except Exception:
             pass
-
-    for tok in candidate_tokens:
-        url = f"https://api.telegram.org/bot{tok}/sendMessage"
-        try:
-            with httpx.Client(timeout=12.0) as client:
-                r = client.post(url, json=payload)
-                if r.status_code == 401:
-                    # Token revocado o desactualizado en GitHub Secrets: pasar al siguiente token activo
-                    continue
-                if r.status_code != 200 and "reply_to_message_id" in payload:
-                    # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
-                    fallback_payload = dict(payload)
-                    fallback_payload.pop("reply_to_message_id", None)
-                    r = client.post(url, json=fallback_payload)
-                if r.status_code == 200:
-                    return
-                if r.status_code != 401:
-                    # Último fallback en texto plano sin parse_mode HTML
-                    plain_payload = {
-                        "chat_id": target_chat,
-                        "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
-                    }
-                    r2 = client.post(url, json=plain_payload)
-                    if r2.status_code == 200:
-                        return
-                    if r2.status_code != 401:
-                        print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
-        except Exception as e:
-            print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            r = client.post(url, json=payload)
+            if r.status_code != 200 and "reply_to_message_id" in payload:
+                # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
+                fallback_payload = dict(payload)
+                fallback_payload.pop("reply_to_message_id", None)
+                r = client.post(url, json=fallback_payload)
+            if r.status_code != 200:
+                # Último fallback en texto plano sin parse_mode HTML
+                plain_payload = {
+                    "chat_id": target_chat,
+                    "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                }
+                r2 = client.post(url, json=plain_payload)
+                if r2.status_code != 200:
+                    print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
+    except Exception as e:
+        print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
 
 # -----------------------------------------------------------------------------
 # HERRAMIENTAS (TOOLS) DEL DEVAGENT

@@ -1768,7 +1768,6 @@ class TelegramAdvisorBot:
             return True
 
         # Disparar workflow en GitHub Actions vía API REST
-        self._ensure_token()
         url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
         headers = {
             "Authorization": f"Bearer {gh_token}",
@@ -1780,25 +1779,13 @@ class TelegramAdvisorBot:
             "inputs": {
                 "task": clean_task,
                 "telegram_chat_id": str(chat_id),
-                "telegram_message_id": str(message_id) if message_id else "",
-                "telegram_bot_token": self.token or ""
+                "telegram_message_id": str(message_id) if message_id else ""
             }
         }
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(url, json=payload, headers=headers)
-                if res.status_code == 422:
-                    # Fallback en caso de que el workflow remoto aún no acepte telegram_bot_token
-                    fallback_payload = {
-                        "ref": "main",
-                        "inputs": {
-                            "task": clean_task,
-                            "telegram_chat_id": str(chat_id),
-                            "telegram_message_id": str(message_id) if message_id else ""
-                        }
-                    }
-                    res = await client.post(url, json=fallback_payload, headers=headers)
                 if res.status_code == 204:
                     confirm_msg = (
                         f"🚀 <b>¡DevAgent activado en GitHub Actions!</b>\n\n"

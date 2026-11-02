@@ -16,10 +16,6 @@ on:
         description: 'Message ID para hacer reply en Telegram'
         required: false
         type: string
-      telegram_bot_token:
-        description: 'Token activo del bot de Telegram'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -53,20 +49,19 @@ jobs:
         if: ${{ inputs.telegram_chat_id != '' }}
         env:
           PYTHONPATH: .
-          ACTIVE_TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
         run: |
           python - << 'PYEOF'
           import httpx, os, html
-          token = os.getenv('ACTIVE_TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
           chat_id = os.getenv('CHAT_ID_INPUT', '')
           msg_id = os.getenv('MSG_ID_INPUT', '')
           task = html.escape(os.getenv('TASK_INPUT', ''))
           text = f'⚙️ <b>DevAgent iniciado en GitHub Actions</b>\n\n🎯 <b>Tarea:</b> <i>{task}</i>\n\nAnalizando repositorio y preparando solución...'
-          if chat_id:
+          if token and chat_id:
               from scripts.dev_agent import send_telegram_update
               send_telegram_update(text, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF
@@ -78,8 +73,7 @@ jobs:
           PAID_GEMINI_API_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ACTIVE_TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -133,8 +127,7 @@ jobs:
         if: success() && inputs.telegram_chat_id != ''
         env:
           PYTHONPATH: .
-          ACTIVE_TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -145,7 +138,7 @@ jobs:
           python - << 'PYEOF'
           import httpx, os, html
           from pathlib import Path
-          token = os.getenv('ACTIVE_TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
           chat_id = os.getenv('CHAT_ID_INPUT', '')
           msg_id = os.getenv('MSG_ID_INPUT', '')
           task = html.escape(os.getenv('TASK_INPUT', ''))
@@ -175,7 +168,7 @@ jobs:
                       f'El agente concluyó la tarea sin requerir modificaciones de código.'
                   )
           
-          if chat_id:
+          if token and chat_id:
               from scripts.dev_agent import send_telegram_update
               send_telegram_update(msg, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF
@@ -184,8 +177,7 @@ jobs:
         if: failure() && inputs.telegram_chat_id != ''
         env:
           PYTHONPATH: .
-          ACTIVE_TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token || vars.ACTIVE_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_INPUT: ${{ inputs.task }}
           CHAT_ID_INPUT: ${{ inputs.telegram_chat_id }}
           MSG_ID_INPUT: ${{ inputs.telegram_message_id }}
@@ -193,7 +185,7 @@ jobs:
           python - << 'PYEOF'
           import httpx, os, html
           from pathlib import Path
-          token = os.getenv('ACTIVE_TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+          token = os.getenv('TELEGRAM_BOT_TOKEN')
           chat_id = os.getenv('CHAT_ID_INPUT', '')
           msg_id = os.getenv('MSG_ID_INPUT', '')
           task = html.escape(os.getenv('TASK_INPUT', ''))
@@ -207,7 +199,7 @@ jobs:
               f'🎯 <b>Tarea:</b> <i>{task}</i>\n\n'
               f'La tarea no pudo completarse o los tests fallaron.{log_snippet}'
           )
-          if chat_id:
+          if token and chat_id:
               from scripts.dev_agent import send_telegram_update
               send_telegram_update(msg, chat_id, token, int(msg_id) if msg_id and msg_id.isdigit() else None)
           PYEOF
