@@ -207,6 +207,8 @@ class AdvisorEngine:
 
     GEMINI_FLASH_CASCADE = [
         "gemini-4-argon",
+        "gemini-3.8-flash",
+        "gemini-3.8-flash-lite",
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
@@ -215,6 +217,41 @@ class AdvisorEngine:
         "gemini-flash-latest",
         "gemini-2.5-pro",
     ]
+
+    # Caché en memoria de modelos que devolvieron 404/400 en el endpoint actual para evitar latencia en llamadas sucesivas
+    _UNAVAILABLE_MODELS_CACHE: set = set()
+
+    # Enrutamiento inteligente de modelos por nivel de complejidad de tarea (Task-Tier Smart Routing)
+    GEMINI_TASK_TIER_CASCADES = {
+        # 1. Razonamiento Financiero Profundo, Estrategia de Distrito, Síntesis Comparativa y Tasación Compleja
+        "deep_reasoning": [
+            "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+        ],
+        # 2. Extracción Estructurada JSON de Baja Latencia (Intent Parsing, Filtrado Semántico, Construcción de URLs)
+        "fast_structured": [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+            "gemini-4-argon",
+            "gemini-2.5-pro",
+        ],
+        # 3. Micro-tareas de Alta Frecuencia / Lotes Rápidos (Cohesión Sintáctica, Clasificación Rápida)
+        "micro_batch": [
+            "gemini-3.8-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+        ],
+    }
 
     def __init__(self):
         self.ine_client = INEClient()
@@ -290,26 +327,31 @@ class AdvisorEngine:
         return "[Audio recibido: Para habilitar transcripción automática de voz con Whisper, configure OPENAI_API_KEY o GROQ_API_KEY en .env]"
 
     # --------------------------------------------------------------------------
-    # 2. CASCADA DESCENDENTE DE MODELOS GEMINI FLASH
+    # 2. CASCADA DESCENDENTE DE MODELOS GEMINI FLASH + ENRUTAMIENTO POR TAREA
     # --------------------------------------------------------------------------
     async def call_gemini_flash_cascade(
         self,
         prompt: str,
         system_instruction: str = "",
-        response_json: bool = True
+        response_json: bool = True,
+        task_tier: str = "default"
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Envía el prompt al API de Google Gemini priorizando modelos de la familia Gemini
-        de forma estrictamente descendente empezando por Gemini 4:
+        Envía el prompt al API de Google Gemini (Vertex AI Express -> Generative Language fallback)
+        priorizando modelos de la familia Gemini en cascada descendente empezando por Gemini 4.0 Argon
+        y 3.8 Flash, o adaptando el orden según `task_tier` ('deep_reasoning', 'fast_structured', 'micro_batch'):
         1. gemini-4-argon (más reciente)
-        2. gemini-3.5-flash
-        3. gemini-3.5-flash-lite
-        4. gemini-3.1-flash-lite
-        5. gemini-3-flash-preview
-        6. gemini-2.5-flash
-        7. gemini-flash-latest
-        8. gemini-2.5-pro
-        Si alguno falla (404, 400, 429, 500 o timeout), salta inmediatamente al siguiente modelo.
+        2. gemini-3.8-flash
+        3. gemini-3.8-flash-lite
+        4. gemini-3.5-flash
+        5. gemini-3.5-flash-lite
+        6. gemini-3.1-flash-lite
+        7. gemini-3-flash-preview
+        8. gemini-2.5-flash
+        9. gemini-flash-latest
+        10. gemini-2.5-pro
+        Si alguno devuelve 404/400 (no publicado aún en la región/endpoint), se memoriza en
+        `_UNAVAILABLE_MODELS_CACHE` para no añadir latencia en las siguientes peticiones.
         """
         api_key = (
             self.gemini_key or
@@ -333,12 +375,18 @@ class AdvisorEngine:
         if system_instruction:
             payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
 
-        for model in self.GEMINI_FLASH_CASCADE:
+        base_cascade = self.GEMINI_TASK_TIER_CASCADES.get(task_tier, self.GEMINI_FLASH_CASCADE)
+        # Poner primero los modelos que no han dado 404/400 previamente, manteniendo el resto como último recurso
+        active_models = [m for m in base_cascade if m not in self._UNAVAILABLE_MODELS_CACHE]
+        if not active_models:
+            active_models = list(base_cascade)
+
+        for model in active_models:
             vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
             fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                logger.info(f"[Gemini Cascade] Evaluando modelo en Vertex AI Express: {model}...")
-                async with httpx.AsyncClient(timeout=25.0) as client:
+                logger.info(f"[Gemini Cascade ({task_tier})] Evaluando modelo en Vertex AI Express: {model}...")
+                async with httpx.AsyncClient(timeout=20.0) as client:
                     resp = await client.post(vertex_url, json=payload)
                     if resp.status_code == 403 and ("API_KEY_SERVICE_BLOCKED" in resp.text or "PERMISSION_DENIED" in resp.text):
                         resp = await client.post(fallback_url, json=payload)
@@ -349,9 +397,11 @@ class AdvisorEngine:
                             parts = candidates[0].get("content", {}).get("parts", [])
                             if parts and "text" in parts[0]:
                                 text_res = parts[0]["text"].strip()
-                                logger.info(f"[Gemini Cascade] ✅ Respuesta exitosa con modelo {model}")
+                                logger.info(f"[Gemini Cascade ({task_tier})] ✅ Respuesta exitosa con modelo {model}")
                                 return text_res, model
                     else:
+                        if resp.status_code in (404, 400):
+                            self._UNAVAILABLE_MODELS_CACHE.add(model)
                         logger.warning(
                             f"[Gemini Cascade] Modelo {model} no respondió exitosamente ({resp.status_code}): {resp.text[:120]}. Descendiendo al siguiente..."
                         )
@@ -406,7 +456,12 @@ class AdvisorEngine:
                 "min_discount (float o null), min_yield (float o null), is_alert (bool)."
             )
             prompt = f"Analiza esta consulta inmobiliaria respetando toda la jerarquía geográfica (AND). Si hay '[Contexto conversacional: ...]', usa el contexto SOLO para heredar la ubicación cuando el usuario diga 'en la misma zona' o no repita la zona, pero extrae el tipo de inmueble, precios y filtros ÚNICAMENTE de la pregunta actual del usuario: '{text_input}'"
-            gemini_res, model_used = await self.call_gemini_flash_cascade(prompt, system_instruction=sys_inst, response_json=True)
+            gemini_res, model_used = await self.call_gemini_flash_cascade(
+                prompt,
+                system_instruction=sys_inst,
+                response_json=True,
+                task_tier="fast_structured"
+            )
             if gemini_res:
                 try:
                     parsed = json.loads(gemini_res)
@@ -542,7 +597,8 @@ class AdvisorEngine:
         gemini_res, _ = await self.call_gemini_flash_cascade(
             user_prompt,
             system_instruction=sys_inst,
-            response_json=True
+            response_json=True,
+            task_tier="fast_structured"
         )
         if gemini_res:
             try:
@@ -1116,6 +1172,11 @@ class AdvisorEngine:
         if db:
             try:
                 from sqlalchemy.orm import joinedload
+                from app.engine.meso_market_price import calculate_composite_market_value_2x2
+                from app.services.plot_valuation_backfill import PlotValuationEnricher
+                from app.services.photos_backfill import PhotosBackfillWorker
+
+                auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
                 db_opps = db.query(Opportunity).options(
                     joinedload(Opportunity.auction).joinedload(Auction.parcel)
                 ).outerjoin(Auction).all()
@@ -1133,8 +1194,6 @@ class AdvisorEngine:
 
                     disc_pct = round(opp.discount_percentage * 100, 1)
                     profit = max(0.0, round(opp.estimated_reference_value - opp.listing_price, 2))
-
-                    from app.services.photos_backfill import PhotosBackfillWorker
 
                     sub_id = auc.id_subasta if auc.id_subasta.startswith("SUB-") else f"SUB-{auc.id_subasta}"
                     raw_imgs = []
@@ -1178,9 +1237,6 @@ class AdvisorEngine:
                         # REGLA DE ORO: Si no dispone de ninguna fotografía válida, no debe estar en plataforma ni enviarse
                         continue
 
-                    from app.engine.meso_market_price import calculate_composite_market_value_2x2
-                    from app.services.plot_valuation_backfill import PlotValuationEnricher
-                    auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
                     auc_plot_entry = auc_plots_map.get(sub_id) or {}
                     auc_surface = float(
                         getattr(auc, "surface_m2", None)
@@ -1812,6 +1868,33 @@ class AdvisorEngine:
                     if not o_cp.startswith(expected_prefix):
                         return False
 
+                # Desambiguación anti-colisión interprovincial (ej. "Av. de Madrid, Delicias, Zaragoza" o "Delicias, Valladolid" cuando se busca Madrid)
+                raw_title_addr_url = " ".join([
+                    str(o.get("title") or ""),
+                    str(o.get("address") or ""),
+                    str(o.get("locality") or ""),
+                    str(o.get("province") or ""),
+                    str(o.get("url") or ""),
+                    str(o.get("portal_url") or ""),
+                ]).lower()
+                conflicting_cities = {
+                    "zaragoza": ("zaragoza", "50"),
+                    "casetas": ("zaragoza", "50"),
+                    "utebo": ("zaragoza", "50"),
+                    "calatayud": ("zaragoza", "50"),
+                    "valladolid": ("valladolid", "47"),
+                    "sevilla": ("sevilla", "41"),
+                    "valencia": ("valencia", "46"),
+                    "malaga": ("malaga", "29"),
+                    "málaga": ("malaga", "29"),
+                    "barcelona": ("barcelona", "08"),
+                }
+                for c_city, (c_prov, _c_pref) in conflicting_cities.items():
+                    if c_prov not in prov_aliases:
+                        if re.search(rf'(?:,\s*{c_city}\b|\ben\s+{c_city}\b|/{c_city}-|-{c_city}\b|\({c_city}\))', raw_title_addr_url):
+                            if not re.search(rf'\b(?:calle|c/|av\.?|avenida|paseo|plaza|carretera|ctra\.?)\s+(?:de\s+)?{c_city}\b', raw_title_addr_url):
+                                return False
+
             # ------------------------------------------------------------------
             # NIVEL 2 (AND): CÓDIGO POSTAL EXPLÍCITO
             # ------------------------------------------------------------------
@@ -1828,21 +1911,34 @@ class AdvisorEngine:
             # NIVEL 3 (AND): MUNICIPIO / LOCALIDAD ESPECÍFICA
             # ------------------------------------------------------------------
             if target_muni_norm and not is_rustic_axis:
-                title_url_addr_norm = normalize_text(" ".join([
+                raw_title_url_addr = " ".join([
                     str(o.get("title") or ""),
                     str(o.get("address") or ""),
                     str(o.get("url") or ""),
                     str(o.get("portal_url") or ""),
-                ]))
+                ])
+                # Limpiar menciones donde el nombre del municipio buscado es en realidad el nombre de una calle en otra ciudad (ej. "Av. de Madrid, Delicias, Zaragoza")
+                cleaned_title_url_addr = re.sub(
+                    rf'\b(?:calle|c/|av\.?|avenida|paseo|plaza|carretera|ctra\.?|ronda|camino)\s+(?:de\s+)?{re.escape(target_muni_norm)}\b',
+                    ' ',
+                    normalize_text(raw_title_url_addr),
+                    flags=re.IGNORECASE
+                )
+                cleaned_portal_text = re.sub(
+                    rf'\b(?:calle|c/|av\.?|avenida|paseo|plaza|carretera|ctra\.?|ronda|camino)\s+(?:de\s+)?{re.escape(target_muni_norm)}\b',
+                    ' ',
+                    portal_text_norm,
+                    flags=re.IGNORECASE
+                )
                 if o_loc_norm and o_loc_norm not in (target_prov_norm, "espana") and target_muni_norm not in o_loc_norm:
                     muni_matched = (
                         target_muni_norm in structured_loc_norm
-                        or target_muni_norm in title_url_addr_norm
+                        or target_muni_norm in cleaned_title_url_addr
                     )
                 else:
                     muni_matched = (
                         target_muni_norm in structured_loc_norm
-                        or target_muni_norm in portal_text_norm
+                        or target_muni_norm in cleaned_portal_text
                     )
                 if not muni_matched:
                     return False
@@ -2966,7 +3062,12 @@ class AdvisorEngine:
                 f"incluyendo precio medio compraventa (€/m²), rentas medias (€/m²), yield BTL y comparativa directa si se mencionan múltiples zonas."
             )
 
-        gemini_res, model_used = await self.call_gemini_flash_cascade(prompt, system_instruction=sys_inst, response_json=False)
+        gemini_res, model_used = await self.call_gemini_flash_cascade(
+            prompt,
+            system_instruction=sys_inst,
+            response_json=False,
+            task_tier="deep_reasoning"
+        )
 
         if gemini_res and len(gemini_res.strip()) > 50:
             text = gemini_res.strip()
@@ -4079,6 +4180,14 @@ class AdvisorEngine:
                                     existing_consultation = cand
                                     break
 
+                    # Normalizar el chat_id de la alerta para que SIEMPRE apunte al supergrupo corporativo (-1003904392737)
+                    # y nunca al chat privado del DevAgent (1450113787)
+                    alert_target_chat_id = str(telegram_chat_id or "-1003904392737").strip()
+                    if not alert_target_chat_id.startswith("-"):
+                        alert_target_chat_id = "-1003904392737"
+                    elif not alert_target_chat_id.startswith("-100"):
+                        alert_target_chat_id = f"-100{alert_target_chat_id[1:]}"
+
                     if existing_consultation:
                         # Actualizar la consulta existente en lugar de crear un duplicado redundante
                         logger.info(
@@ -4086,6 +4195,7 @@ class AdvisorEngine:
                             f"para usuario '{user_name}' con prompt «{clean_description[:60]}...» (evitando duplicado redundante)."
                         )
                         ai_summary = self.clean_ai_summary_text(ai_summary, max_len=240)
+                        existing_consultation.telegram_chat_id = alert_target_chat_id
                         existing_consultation.title = title
                         existing_consultation.description = clean_description
                         existing_consultation.query_type = criteria.get("query_type", "SEARCH_OPPORTUNITIES")
@@ -4111,7 +4221,7 @@ class AdvisorEngine:
                         consultation = SavedConsultation(
                             user_id=db_user.id if db_user else None,
                             user_name=user_name,
-                            telegram_chat_id=str(telegram_chat_id),
+                            telegram_chat_id=alert_target_chat_id,
                             title=title,
                             description=clean_description,
                             query_type=criteria.get("query_type", "SEARCH_OPPORTUNITIES"),

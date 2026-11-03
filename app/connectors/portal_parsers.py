@@ -1064,6 +1064,37 @@ class IdealistaMarkdownParser:
         t_lower = (title or "").lower()
         prov_lower = (default_province or "Madrid").lower().strip()
 
+        # Desambiguación geográfica explícita en título/dirección antes de asumir default_province:
+        # Evita que inmuebles como "Piso en Av. de Madrid, Delicias, Zaragoza" o "Delicias, Valladolid"
+        # se asignen por error a Madrid (CP 28045) cuando default_province="Madrid".
+        explicit_city_prov_map = {
+            "zaragoza": ("Zaragoza", "Zaragoza", "50"),
+            "casetas": ("Casetas", "Zaragoza", "50"),
+            "utebo": ("Utebo", "Zaragoza", "50"),
+            "calatayud": ("Calatayud", "Zaragoza", "50"),
+            "valladolid": ("Valladolid", "Valladolid", "47"),
+            "sevilla": ("Sevilla", "Sevilla", "41"),
+            "valencia": ("Valencia", "Valencia", "46"),
+            "malaga": ("Málaga", "Málaga", "29"),
+            "málaga": ("Málaga", "Málaga", "29"),
+            "barcelona": ("Barcelona", "Barcelona", "08"),
+            "alicante": ("Alicante", "Alicante", "03"),
+            "cordoba": ("Córdoba", "Córdoba", "14"),
+            "córdoba": ("Córdoba", "Córdoba", "14"),
+            "granada": ("Granada", "Granada", "18"),
+            "murcia": ("Murcia", "Murcia", "30"),
+            "bilbao": ("Bilbao", "Vizcaya", "48"),
+        }
+        explicit_override_loc = None
+        for city_token, (formal_loc, formal_prov, cp_pref) in explicit_city_prov_map.items():
+            if re.search(rf'(?:,\s*|\ben\s+|\bprovincia\s+de\s+|\({re.escape(city_token)}\)|/\s*){re.escape(city_token)}\b', t_lower):
+                # Asegurar que no sea el nombre de una vía ("Av. de Madrid", "Calle Zaragoza", etc.)
+                if not re.search(rf'\b(?:calle|c/|av\.?|avenida|paseo|plaza|carretera|ctra\.?|camino|ronda)\s+(?:de\s+)?{re.escape(city_token)}\b', t_lower):
+                    default_province = formal_prov
+                    prov_lower = formal_prov.lower()
+                    explicit_override_loc = formal_loc
+                    break
+
         # Determinar prefijo provincial de CP para evitar cruces entre provincias (ej. Delicias Madrid vs Zaragoza)
         target_cp_prefix = None
         for prov_name, pref in SPAIN_PROV_CP_PREFIX.items():

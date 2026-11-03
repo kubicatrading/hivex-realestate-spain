@@ -366,6 +366,8 @@ class BOESubastasScraper:
         }
         models = [
             "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
@@ -374,7 +376,9 @@ class BOESubastasScraper:
             "gemini-flash-latest",
             "gemini-2.5-pro",
         ]
-        for model in models:
+        unavailable = getattr(self.__class__, "_UNAVAILABLE_MODELS", set())
+        ordered_models = [m for m in models if m not in unavailable] or models
+        for model in ordered_models:
             vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
             fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
@@ -389,6 +393,9 @@ class BOESubastasScraper:
                         if isinstance(parsed, dict) and parsed.get("property_type") in ("Local Comercial", "Solar", "Vivienda"):
                             self._GEMINI_BOE_CACHE[cache_key] = parsed
                             return parsed
+                elif resp.status_code in (404, 400):
+                    unavailable.add(model)
+                    setattr(self.__class__, "_UNAVAILABLE_MODELS", unavailable)
             except Exception as e_gem:
                 logger.debug(f"[BOE Gemini Classifier] Aviso con {model}: {e_gem}")
         return None

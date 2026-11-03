@@ -997,16 +997,20 @@ class TelegramAdvisorBot:
         }
 
         models = [
-            "gemini-4-argon",
-            "gemini-3.5-flash",
+            "gemini-3.8-flash-lite",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
             "gemini-3-flash-preview",
             "gemini-2.5-flash",
             "gemini-flash-latest",
+            "gemini-4-argon",
             "gemini-2.5-pro",
         ]
-        for model in models:
+        unavailable = getattr(self.__class__, "_UNAVAILABLE_MODELS", set())
+        ordered_models = [m for m in models if m not in unavailable] or models
+        for model in ordered_models:
             for key in api_keys:
                 vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={key}"
                 fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
@@ -1030,7 +1034,11 @@ class TelegramAdvisorBot:
                                         f"reason={parsed.get('reasoning')}"
                                     )
                                     return parsed
-                        elif resp.status_code in (400, 403, 404):
+                        elif resp.status_code in (400, 404):
+                            unavailable.add(model)
+                            setattr(self.__class__, "_UNAVAILABLE_MODELS", unavailable)
+                            break
+                        elif resp.status_code == 403:
                             break
                 except Exception as e_ai:
                     logger.debug(f"Aviso en análisis sintáctico-semántico IA ({model}): {e_ai}")
@@ -1456,7 +1464,18 @@ class TelegramAdvisorBot:
                     except Exception as e_idem:
                         logger.debug(f"Aviso verificando mensaje previo del usuario en BD: {e_idem}")
 
-                # Comprobar si es comando para el DevAgent (/dev, /agent, /desarrollo)
+                # Comprobar si estamos en el chat privado exclusivo del Administrador para DevAgent (chat_id positivo 1450113787)
+                # En este canal privado se conversa directamente con el DevAgent de programación sin necesidad de prefijo /dev,
+                # mientras que las oportunidades e interacciones del Asesor Inmobiliario van siempre al supergrupo (-1003904392737).
+                is_private_dev_channel = (
+                    str(chat_id) == "1450113787"
+                    or (
+                        chat.get("type") == "private"
+                        and (str(user_id) == "1450113787" or user_display_name.lower() in ["juanma_oms", "jsaavedra"])
+                    )
+                )
+
+                # Comprobar si es comando explícito para el DevAgent (/dev, /agent, /desarrollo)
                 if text_content.lower().startswith(("/dev", "/agent", "/desarrollo")):
                     dev_handled = await self.handle_dev_agent_command(
                         chat_id=chat_id,
@@ -1478,6 +1497,19 @@ class TelegramAdvisorBot:
                 )
                 if alert_handled:
                     return {"status": "alert_toggled", "user": user_display_name}
+
+                # Si escribe por el canal privado del administrador (1450113787) y no es /start, /help ni /vincular,
+                # enrutar directamente la instrucción al DevAgent autónomo sin exigir el prefijo /dev
+                if is_private_dev_channel and text_content not in ("/start", "/help", "/ayuda") and not text_content.lower().startswith("/vincular"):
+                    dev_handled = await self.handle_dev_agent_command(
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        user_display_name=user_display_name,
+                        task_text=text_content,
+                        message_id=message_id
+                    )
+                    if dev_handled:
+                        return {"status": "dev_agent_triggered", "user": user_display_name}
 
             audio_bytes = None
             audio_duration = None
@@ -1526,12 +1558,19 @@ class TelegramAdvisorBot:
                     await self.send_message(chat_id, "❌ No se pudo descargar el audio. Por favor intenta enviarlo nuevamente.")
                     return {"status": "audio_download_failed"}
 
-                # Comprobar si la nota de voz es una instrucción para el DevAgent
+                # Comprobar si la nota de voz es una instrucción para el DevAgent (o si se envía desde el canal privado 1450113787)
+                is_private_voice_dev = (
+                    str(chat_id) == "1450113787"
+                    or (
+                        chat.get("type") == "private"
+                        and (str(user_id) == "1450113787" or user_display_name.lower() in ["juanma_oms", "jsaavedra"])
+                    )
+                )
                 try:
                     voice_transcription = await advisor_engine.transcribe_audio(audio_bytes)
                     if voice_transcription:
                         clean_vt = voice_transcription.strip().lower()
-                        if clean_vt.startswith(("/dev", "dev", "desarrollo", "modo dev", "código", "programar")):
+                        if is_private_voice_dev or clean_vt.startswith(("/dev", "dev", "desarrollo", "modo dev", "código", "programar")):
                             dev_handled = await self.handle_dev_agent_command(
                                 chat_id=chat_id,
                                 user_id=user_id,
@@ -1609,9 +1648,24 @@ class TelegramAdvisorBot:
                     logger.debug(f"Aviso registrando turno de usuario en curso: {e_pre_msg}")
 
             # Ejecutar consulta en el Motor Asesor (process_user_query abre su propia sesión corta al persistir)
+            # REGLA CORPORATIVA: Las consultas de asesoría y el envío de fichas de oportunidades se dirigen SIEMPRE
+            # al supergrupo oficial (-1003904392737), nunca a un chat privado individual.
+            advisor_target_chat_id = str(chat_id)
+            if not advisor_target_chat_id.startswith("-"):
+                advisor_target_chat_id = (
+                    getattr(settings, "TELEGRAM_CHAT_ID", None)
+                    or os.getenv("TELEGRAM_CHAT_ID")
+                    or "-1003904392737"
+                ).strip()
+                if not advisor_target_chat_id.startswith("-"):
+                    advisor_target_chat_id = "-1003904392737"
+                elif not advisor_target_chat_id.startswith("-100"):
+                    advisor_target_chat_id = f"-100{advisor_target_chat_id[1:]}"
+            target_reply_msg_id = message_id if str(chat_id) == str(advisor_target_chat_id) else None
+
             res = await advisor_engine.process_user_query(
                 user_name=user_display_name,
-                telegram_chat_id=str(chat_id),
+                telegram_chat_id=str(advisor_target_chat_id),
                 telegram_user_id=str(user_id),
                 prompt_text=prompt_to_process,
                 audio_bytes=audio_bytes,
@@ -1619,7 +1673,7 @@ class TelegramAdvisorBot:
                 db=None
             )
 
-            # Enviar la respuesta del Asesor a Telegram con fichas visuales
+            # Enviar la respuesta del Asesor a Telegram con fichas visuales (siempre en el supergrupo)
             matched_opps = res.get("matched_opportunities") or []
             should_display_cards = res.get("should_display_cards", False)
             intro_text = res.get("intro_text")
@@ -1666,19 +1720,19 @@ class TelegramAdvisorBot:
                                 f"Para completar tu solicitud con las <b>{len(rendered_cards)} mejores opciones</b> del mercado, hemos añadido las más rentables de la corona metropolitana de <b>{prov_label}</b>.\n\n"
                                 f"<i>A continuación volcamos las {len(rendered_cards)} fichas interactivas (las {exact_count} primeras corresponden a la micro-zona exacta):</i>"
                             )
-                        await self.send_message(chat_id, warning_msg, parse_mode="HTML", reply_to_message_id=message_id)
+                        await self.send_message(advisor_target_chat_id, warning_msg, parse_mode="HTML", reply_to_message_id=target_reply_msg_id)
                         await asyncio.sleep(0.5)
                     elif intro_text:
-                        await self.send_message(chat_id, intro_text, parse_mode="HTML", reply_to_message_id=message_id)
+                        await self.send_message(advisor_target_chat_id, intro_text, parse_mode="HTML", reply_to_message_id=target_reply_msg_id)
                         await asyncio.sleep(0.35)
                     else:
-                        await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
+                        await self.send_message(advisor_target_chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=target_reply_msg_id)
                         await asyncio.sleep(0.35)
 
                     # 2. Despachar exactamente las oportunidades pre-renderizadas garantizando la entrega íntegra dentro del timeout de webhook
                     for idx, (opp, c_bytes) in enumerate(rendered_cards):
                         sent = await self.send_photo_card(
-                            chat_id=chat_id,
+                            chat_id=advisor_target_chat_id,
                             opp=opp,
                             pre_rendered_card_bytes=c_bytes
                         )
@@ -1686,17 +1740,17 @@ class TelegramAdvisorBot:
                             logger.warning(f"[Advisor Bot] Tarjeta {idx+1}/{len(rendered_cards)} ({opp.get('id')}) falló en primer intento. Reintentando...")
                             await asyncio.sleep(0.8)
                             await self.send_photo_card(
-                                chat_id=chat_id,
+                                chat_id=advisor_target_chat_id,
                                 opp=opp,
                                 pre_rendered_card_bytes=c_bytes
                             )
                         await asyncio.sleep(0.35)
                 else:
-                    await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
+                    await self.send_message(advisor_target_chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=target_reply_msg_id)
 
             else:
                 # Si no hubo petición explícita de fichas o es reporte cuantitativo, despachar el texto analítico
-                await self.send_message(chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=message_id)
+                await self.send_message(advisor_target_chat_id, res["response_text"], parse_mode="HTML", reply_to_message_id=target_reply_msg_id)
 
             return {
                 "status": "success",

@@ -52,8 +52,14 @@ class RealEstateAlertEngine:
 
     @staticmethod
     def _normalize_chat_id(chat_id: str) -> str:
-        """Normaliza el ID de supergrupo para la API de Telegram anteponiendo -100 si es necesario."""
-        cid = str(chat_id).strip()
+        """
+        Normaliza el ID de supergrupo para la API de Telegram anteponiendo -100 si es necesario.
+        REGLA CORPORATIVA: Las alertas de oportunidades nunca se envían a chats privados (IDs positivos
+        como 1450113787 reservados para DevAgent), sino siempre al supergrupo corporativo (-1003904392737).
+        """
+        cid = str(chat_id or "").strip()
+        if not cid or not cid.lstrip("-").isdigit() or not cid.startswith("-"):
+            return "-1003904392737"
         if cid.startswith("-") and not cid.startswith("-100"):
             return f"-100{cid[1:]}"
         return cid

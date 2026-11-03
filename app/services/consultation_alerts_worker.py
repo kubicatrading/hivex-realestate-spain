@@ -33,16 +33,28 @@ class ConsultationAlertsWorker:
     def _resolve_telegram_chat_id(raw_chat_id: Optional[str]) -> str:
         """
         Resuelve el chat_id de Telegram de una consulta guardada.
-        Si la consulta se creó desde simulación web ('web-simulation', 'web-refresh', etc.),
-        redirige al supergrupo principal configurado en TELEGRAM_CHAT_ID (-1003904392737).
+        REGLA CORPORATIVA: Todas las alertas y fichas de oportunidades deben enviarse SIEMPRE
+        al supergrupo oficial de HIVEX (-1003904392737). El chat privado del administrador (1450113787,
+        ID positivo sin '-') está reservado exclusivamente para el DevAgent de programación.
         """
         default_cid = (
             getattr(settings, "TELEGRAM_CHAT_ID", None)
             or os.environ.get("TELEGRAM_CHAT_ID")
             or "-1003904392737"
         ).strip()
+        if not default_cid.startswith("-"):
+            default_cid = "-1003904392737"
+        elif not default_cid.startswith("-100"):
+            default_cid = f"-100{default_cid[1:]}"
+
         cid = str(raw_chat_id or "").strip()
-        if not cid or cid in ("web-simulation", "web-refresh", "default_chat") or not (cid.lstrip("-").isdigit()):
+        # Si está vacío, es etiqueta web o es un ID positivo (chat privado individual como 1450113787), forzar supergrupo
+        if (
+            not cid
+            or cid in ("web-simulation", "web-refresh", "default_chat")
+            or not (cid.lstrip("-").isdigit())
+            or not cid.startswith("-")
+        ):
             cid = default_cid
         if cid.startswith("-") and not cid.startswith("-100"):
             cid = f"-100{cid[1:]}"

@@ -126,79 +126,78 @@ document.addEventListener('DOMContentLoaded', () => {
         const showTargetOpportunity = (targetOpp) => {
             if (!targetOpp) return;
             window._deepLinkedOpp = targetOpp;
+            window._openedDeepLinkOpp = true;
             const loginOverlay = document.getElementById('login-overlay');
             const dashboardApp = document.getElementById('dashboard-app');
             if (loginOverlay) loginOverlay.classList.add('hidden');
             if (dashboardApp) dashboardApp.classList.remove('hidden');
 
+            // 1. Abrir la ficha completa detallada del inmueble de forma INMEDIATA (<10ms)
+            // para evitar cualquier espera mientras se renderizan el feed o los marcadores del mapa
+            if (typeof window.openPropertyDetailModal === 'function') {
+                window.openPropertyDetailModal(targetOpp);
+            }
+
             const targetSource = targetOpp.source_type || (cleanId.startsWith('MKT-') ? 'market' : (cleanId.startsWith('PGOU-') ? 'pgou' : (cleanId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
 
-            // 1. Conmutar a la pestaña adecuada (market / subastas / pgou / edictos)
-            if (typeof window.switchOpportunitySource === 'function') {
-                window.switchOpportunitySource(targetSource);
-            } else {
-                state.activeSource = targetSource;
-                document.querySelectorAll('.source-tab').forEach(b => {
-                    b.classList.toggle('active', b.id === `tab-${targetSource}`);
-                });
-            }
-
-            // 2. Asegurar que está en memoria y en la cabecera de la lista
-            if (!state.allOpportunities.some(o => String(o.id || '').toUpperCase() === String(targetOpp.id || '').toUpperCase())) {
-                state.allOpportunities.unshift(targetOpp);
-            }
-            state.filteredOpportunities = [
-                targetOpp,
-                ...state.allOpportunities.filter(o => {
-                    const oId = String(o.id || '').toUpperCase();
-                    if (oId === String(targetOpp.id || '').toUpperCase()) return false;
-                    const s = o.source_type || (oId.startsWith('MKT-') ? 'market' : (oId.startsWith('PGOU-') ? 'pgou' : (oId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
-                    return s === targetSource;
-                })
-            ];
-            
-            renderDeals(state.filteredOpportunities);
-            if (typeof updateKPIs === 'function') updateKPIs(state.filteredOpportunities);
-
-            // 3. Resaltar tarjeta en el feed
+            // 2. Renderizar pestaña, feed y mapa en segundo plano no bloqueante
             setTimeout(() => {
-                document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
-                const cardEl = document.querySelector(`.deal-card[data-opp-id="${targetOpp.id}"]`);
-                if (cardEl) {
-                    cardEl.classList.add('card-highlight');
-                    cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                if (typeof window.switchOpportunitySource === 'function') {
+                    window.switchOpportunitySource(targetSource);
+                } else {
+                    state.activeSource = targetSource;
+                    document.querySelectorAll('.source-tab').forEach(b => {
+                        b.classList.toggle('active', b.id === `tab-${targetSource}`);
+                    });
                 }
-            }, 100);
 
-            // 4. Centrar mapa en la ubicación del activo y abrir chincheta con su ficha previa (popup)
-            renderMapMarkers(state.filteredOpportunities);
-            const rawLat = parseFloat(targetOpp.lat);
-            const rawLon = parseFloat(targetOpp.lon);
-            if (!isNaN(rawLat) && !isNaN(rawLon) && rawLat !== 0 && rawLon !== 0) {
+                if (!state.allOpportunities.some(o => String(o.id || '').toUpperCase() === String(targetOpp.id || '').toUpperCase())) {
+                    state.allOpportunities.unshift(targetOpp);
+                }
+                state.filteredOpportunities = [
+                    targetOpp,
+                    ...state.allOpportunities.filter(o => {
+                        const oId = String(o.id || '').toUpperCase();
+                        if (oId === String(targetOpp.id || '').toUpperCase()) return false;
+                        const s = o.source_type || (oId.startsWith('MKT-') ? 'market' : (oId.startsWith('PGOU-') ? 'pgou' : (oId.startsWith('EDICTO-') ? 'edictos' : 'subastas')));
+                        return s === targetSource;
+                    })
+                ];
+                
+                renderDeals(state.filteredOpportunities);
+                if (typeof updateKPIs === 'function') updateKPIs(state.filteredOpportunities);
+
                 setTimeout(() => {
-                    if (map && typeof map.setView === 'function') {
-                        try {
-                            map.invalidateSize();
-                            map.setView([rawLat, rawLon], 14, { animate: true });
-                            setTimeout(() => {
-                                const marker = markersMap && markersMap[targetOpp.id];
-                                if (marker && typeof marker.openPopup === 'function') {
-                                    marker.openPopup();
-                                }
-                            }, 250);
-                        } catch(e) {
-                            console.warn('Error centrando mapa en oportunidad:', e);
-                        }
+                    document.querySelectorAll('.deal-card').forEach(c => c.classList.remove('card-highlight'));
+                    const cardEl = document.querySelector(`.deal-card[data-opp-id="${targetOpp.id}"]`);
+                    if (cardEl) {
+                        cardEl.classList.add('card-highlight');
+                        cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
-                }, 150);
-            }
+                }, 60);
 
-            // 5. Abrir la ficha completa detallada del inmueble
-            setTimeout(() => {
-                if (typeof window.openPropertyDetailModal === 'function') {
-                    window.openPropertyDetailModal(targetOpp);
+                renderMapMarkers(state.filteredOpportunities);
+                const rawLat = parseFloat(targetOpp.lat);
+                const rawLon = parseFloat(targetOpp.lon);
+                if (!isNaN(rawLat) && !isNaN(rawLon) && rawLat !== 0 && rawLon !== 0) {
+                    setTimeout(() => {
+                        if (map && typeof map.setView === 'function') {
+                            try {
+                                map.invalidateSize();
+                                map.setView([rawLat, rawLon], 14, { animate: true });
+                                setTimeout(() => {
+                                    const marker = markersMap && markersMap[targetOpp.id];
+                                    if (marker && typeof marker.openPopup === 'function') {
+                                        marker.openPopup();
+                                    }
+                                }, 200);
+                            } catch(e) {
+                                console.warn('Error centrando mapa en oportunidad:', e);
+                            }
+                        }
+                    }, 100);
                 }
-            }, 350);
+            }, 30);
         };
 
         try {
@@ -248,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (directOppId) {
+            window._loadingDirectOpp = true;
             loadAndDisplayDirectOpportunity(directOppId);
         }
 
@@ -263,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof syncFavoritesWithBackend === 'function') {
                     syncFavoritesWithBackend();
                 }
-                if (directOppId && !window._openedDeepLinkOpp) {
+                if (directOppId && !window._openedDeepLinkOpp && !window._loadingDirectOpp) {
                     loadAndDisplayDirectOpportunity(directOppId);
                 }
             } else {
@@ -368,7 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { map.invalidateSize(); } catch(e) {}
             }
             if (hasDirectOpp) {
-                setTimeout(() => fetchOpportunities(true), 850);
+                setTimeout(() => fetchOpportunities(true), 1500);
             } else {
                 fetchOpportunities();
             }

@@ -503,16 +503,20 @@ class PlotValuationEnricher:
         }
 
         models = [
-            "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
             "gemini-3-flash-preview",
             "gemini-2.5-flash",
             "gemini-flash-latest",
+            "gemini-4-argon",
             "gemini-2.5-pro",
         ]
-        for model in models:
+        unavailable = getattr(cls, "_UNAVAILABLE_MODELS", set())
+        ordered_models = [m for m in models if m not in unavailable] or models
+        for model in ordered_models:
             vertex_url = f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{model}:generateContent?key={api_key}"
             fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:

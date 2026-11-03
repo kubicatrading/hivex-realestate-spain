@@ -1346,6 +1346,28 @@ def get_opportunities(
     current_user: dict = Depends(get_current_user)
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
+    import time as _time
+    cache_key = f"{strategy}:{min_discount}:{province}:{source_type}:{only_new}:{only_synergy_pgou}:{bbox}"
+    now_ts = _time.time()
+    if (
+        _OPPORTUNITIES_LIST_CACHE.get("results") is not None
+        and _OPPORTUNITIES_LIST_CACHE.get("key") == cache_key
+        and (now_ts - float(_OPPORTUNITIES_LIST_CACHE.get("ts") or 0.0)) < 45.0
+    ):
+        cached_results = _OPPORTUNITIES_LIST_CACHE["results"]
+        total_count = len(cached_results)
+        if limit is not None:
+            start_idx = offset if offset is not None else ((page - 1) * limit)
+            paginated_results = cached_results[start_idx : start_idx + limit]
+        else:
+            paginated_results = cached_results
+        return {
+            "total": total_count,
+            "page": page if limit is not None else 1,
+            "limit": limit if limit is not None else total_count,
+            "opportunities": paginated_results
+        }
+
     results = []
     try:
         # Si la petición es solo de PGOU, Edictos o Market, omitimos el procesamiento de subastas
@@ -1378,7 +1400,10 @@ def get_opportunities(
         ine_client = INEClient()
         from app.engine.kpi_calculator import KPICalculator
         from app.core.geo_utils import get_spanish_province_coords, normalize_text
+        from app.services.plot_valuation_backfill import PlotValuationEnricher
         import json
+
+        auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
 
         # Obtener IDs de nuevas oportunidades del lote de sincronización activo
         # Si no hay estado en memoria (por ejemplo, reinicio del servicio), recuperar el último registro de sincronización
@@ -1722,8 +1747,6 @@ def get_opportunities(
                 # Priority 4: Strict Investor Accuracy.
                 # If surface cannot be verified via BOE literal, DB parcel, or Catastro SEC/WFS,
                 # we DO NOT invent 90m2 or 500m2. It is flagged as MISSING_REGISTRY_CHECK.
-                from app.services.plot_valuation_backfill import PlotValuationEnricher
-                auc_plots_map = PlotValuationEnricher.load_auction_plots_map()
                 auc_plot_entry = auc_plots_map.get(str(auc.id_subasta) if auc and auc.id_subasta else "") or {}
                 if (not surface_m2 or surface_m2 <= 0) and float(auc_plot_entry.get("surface_m2") or 0.0) > 0:
                     surface_m2 = float(auc_plot_entry["surface_m2"])
@@ -2177,6 +2200,19 @@ def get_opportunities(
 
     total_count = len(results)
 
+    # Actualizar cachés en memoria O(1) para carga ultrarrápida y Deep-Links (<5ms)
+    _OPPORTUNITIES_LIST_CACHE["ts"] = _time.time()
+    _OPPORTUNITIES_LIST_CACHE["key"] = cache_key
+    _OPPORTUNITIES_LIST_CACHE["results"] = results
+    for _item in results:
+        _oid = str(_item.get("id") or "").strip().upper()
+        if _oid:
+            _OPPORTUNITIES_BY_ID_CACHE[_oid] = _item
+        _subid = str(_item.get("id_subasta") or "").strip().upper()
+        if _subid:
+            _OPPORTUNITIES_BY_ID_CACHE[_subid] = _item
+            _OPPORTUNITIES_BY_ID_CACHE[f"SUB-{_subid}"] = _item
+
     # Server-side pagination (LIMIT / OFFSET / PAGE)
     if limit is not None:
         start_idx = offset if offset is not None else ((page - 1) * limit)
@@ -2190,6 +2226,9 @@ def get_opportunities(
         "limit": limit if limit is not None else total_count,
         "opportunities": paginated_results
     }
+
+_OPPORTUNITIES_BY_ID_CACHE: Dict[str, Dict[str, Any]] = {}
+_OPPORTUNITIES_LIST_CACHE: Dict[str, Any] = {"ts": 0.0, "key": None, "results": None}
 
 @app.get("/api/v1/opportunities/{opp_id}")
 def get_opportunity_by_id(
@@ -2220,6 +2259,12 @@ def get_opportunity_by_id(
         candidates.add(upper_c.replace("PISOSCOM", "PISOS"))
     elif "PISOS" in upper_c:
         candidates.add(upper_c.replace("PISOS", "PISOSCOM"))
+
+    # 0. Búsqueda O(1) instantánea (<1ms) en caché en memoria de oportunidades precomputadas
+    for c in candidates:
+        c_up = c.upper()
+        if c_up in _OPPORTUNITIES_BY_ID_CACHE:
+            return _OPPORTUNITIES_BY_ID_CACHE[c_up]
 
     is_subasta_id = clean_id.isdigit() or upper_c.startswith("SUB-")
     is_pgou_id = upper_c.startswith("PGOU-")
