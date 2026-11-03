@@ -70,6 +70,7 @@ jobs:
         id: dev_agent
         env:
           PYTHONPATH: .
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PAID_GEMINI_API_KEY: ${{ vars.PAID_GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -85,6 +86,7 @@ jobs:
 
       - name: Ejecutar Tests de Verificación
         run: |
+          set -o pipefail
           git checkout -- hivex_local.db app/data/verified_market_catalog.json app/data/supadata_backfill_quota.json 2>/dev/null || true
           git add -A
           pytest tests/test_consultation_features.py tests/test_db_models.py tests/test_scoring.py -q 2>&1 | tee /tmp/pytest_run.log

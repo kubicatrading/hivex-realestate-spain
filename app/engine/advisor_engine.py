@@ -412,19 +412,91 @@ class AdvisorEngine:
         return None, None
 
     # --------------------------------------------------------------------------
-    # 3. PARSING DE INTENCIÓN Y CRITERIOS
+    # 3. PARSING DE INTENCIÓN Y CRITERIOS (100% GEMINI-FIRST; PYTHON HEURÍSTICO SOLO COMO FALLBACK)
     # --------------------------------------------------------------------------
+    def _build_criteria_from_gemini_dict(self, parsed: Dict[str, Any], text_input: str, model_used: Optional[str]) -> Dict[str, Any]:
+        """
+        Construye el diccionario de criterios directamente a partir de la respuesta estructurada de Gemini,
+        sin pasar por parseadores de keywords en Python (que quedan relegados exclusivamente a fallback).
+        """
+        def _clean_str(val: Any) -> Optional[str]:
+            if val is None:
+                return None
+            s = str(val).strip(" ()\n\r•")
+            return s if s and s.lower() not in ("null", "none", "n/a") else None
+
+        def _safe_float(val: Any) -> Optional[float]:
+            if val is None or val == "":
+                return None
+            try:
+                return float(val)
+            except Exception:
+                return None
+
+        def _safe_int(val: Any, default: Optional[int] = None) -> Optional[int]:
+            if val is None or val == "":
+                return default
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        province = _clean_str(parsed.get("province"))
+        street_or_urb = _clean_str(parsed.get("street_or_urbanization"))
+        district_or_neigh = _clean_str(parsed.get("district_or_neighborhood"))
+        municipality = _clean_str(parsed.get("municipality"))
+        postal_code = _clean_str(parsed.get("postal_code"))
+        zone_or_neigh = _clean_str(parsed.get("zone_or_neighborhood"))
+
+        q_type = _clean_str(parsed.get("query_type")) or "SEARCH_OPPORTUNITIES"
+        txt_low = (text_input or "").lower()
+        if q_type == "SCHEDULED_ALERT" and any(
+            w in txt_low for w in ["envíame", "enviame", "búscame", "buscame", "muéstrame", "muestrame", "detectes", "detectas", "oportunidades"]
+        ):
+            q_type = "SEARCH_OPPORTUNITIES"
+
+        criteria: Dict[str, Any] = {
+            "raw_query": text_input,
+            "query_type": q_type,
+            "province": province,
+            "zone_or_neighborhood": zone_or_neigh,
+            "street_or_urbanization": street_or_urb,
+            "district_or_neighborhood": district_or_neigh,
+            "municipality": municipality,
+            "postal_code": postal_code,
+            "location_hierarchy": {
+                "street_or_urbanization": street_or_urb,
+                "district_or_neighborhood": district_or_neigh,
+                "municipality": municipality,
+                "postal_code": postal_code,
+                "province": province,
+            },
+            "full_location_query": None,
+            "property_type": _clean_str(parsed.get("property_type")),
+            "strategy": _clean_str(parsed.get("strategy")),
+            "min_price": _safe_float(parsed.get("min_price")),
+            "max_price": _safe_float(parsed.get("max_price")),
+            "min_rooms": _safe_int(parsed.get("min_rooms")),
+            "min_discount": _safe_float(parsed.get("min_discount")),
+            "min_yield": _safe_float(parsed.get("min_yield")),
+            "target_count": _safe_int(parsed.get("target_count"), 20) or 20,
+            "sort_by": _clean_str(parsed.get("sort_by")) or "overall_score",
+            "is_alert": bool(parsed.get("is_alert", False)),
+            "gemini_model_used": model_used,
+            "parser_engine": "gemini_primary",
+        }
+        self._sync_location_hierarchy(criteria)
+        return criteria
+
     async def parse_query_intent(self, text_input: str) -> Dict[str, Any]:
         """
         Extrae intención, jerarquía completa de ubicación (calle/urbanización + barrio/distrito +
         municipio/localidad + código postal + provincia), rangos de precio, tipos de activo,
         descuentos mínimos, rendimiento BTL, target de fichas y solicitud de alertas.
-        Prioriza Gemini Flash en cascada descendente y fusiona de forma conjuntiva (AND) con heurística experta.
+        REGLA DE ARQUITECTURA HIVEX: Todo el peso del parseo recae PRIMERO en Gemini (100% IA).
+        El parseador por keywords en Python (`_parse_query_intent_heuristics`) actúa ÚNICAMENTE
+        como opción de fallback si Gemini no está disponible o falla la red.
         """
-        # 1. Base heurística inicial robusta (jerarquía geográfica completa)
-        criteria = self._parse_query_intent_heuristics(text_input)
-
-        # 2. Enriquecimiento mediante Gemini Flash Cascade si hay clave
         api_key = (
             self.gemini_key or
             settings.GEMINI_API_KEY or
@@ -434,28 +506,40 @@ class AdvisorEngine:
         )
         if api_key:
             sys_inst = (
-                "Eres el analizador de consultas inmobiliarias de HIVEX en España. "
+                "Eres el analizador semántico principal de consultas inmobiliarias de HIVEX en España. "
+                "Todo el peso del parseo recae en ti: analiza la intención sintáctica y semántica completa del usuario. "
                 "Es VITAL que extraigas el CONJUNTO JERÁRQUICO COMPLETO de la zona indicada por el usuario "
                 "(calle/urbanización + barrio/distrito + municipio/ciudad + código postal + provincia) para aplicar un filtro AND estricto. "
-                "Extrae los parámetros en formato JSON con las siguientes claves: "
-                "query_type (SEARCH_OPPORTUNITIES, ROI_BTL_CALC, DISTRICT_ANALYSIS, SCORING_CROSSREF, SCHEDULED_ALERT; "
-                "IMPORTANTE: si el usuario pide 'envíame oportunidades', 'búscame oportunidades', 'muéstrame oportunidades', 'qué oportunidades detectas' o similar, "
-                "query_type DEBE ser 'SEARCH_OPPORTUNITIES' para que el motor busque ahora mismo en HIVEX y Out-of-HIVEX, nunca solo 'SCHEDULED_ALERT'), "
-                "street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Las Vegas', o null), "
-                "district_or_neighborhood (barrio, distrito, PAU o ensanche si se menciona, ej: 'Chamberí', 'PAU de Vallecas', o null), "
-                "municipality (municipio, localidad o ciudad específica dentro de la provincia si se menciona, ej: 'Villanueva del Pardillo', 'Alcobendas', 'Anglet', o null; ATENCIÓN: si el usuario dice 'misma consulta que en X pero en Y', el municipio y zona objetivo es SIEMPRE 'Y', NUNCA 'X'), "
-                "zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, ej: 'Urbanización Las Vegas - Villanueva del Pardillo', 'Anglet', o null; si dice 'misma consulta que en X pero en Y', pon SIEMPRE 'Y'), "
-                "postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null), "
-                "province (nombre de la provincia, ej: 'Madrid', o null), "
-                "target_count (número entero de activos solicitados si el usuario pide una cantidad concreta, ej: 5 para 'top 5', 10 para '10 mejores'. Si el usuario NO especifica ningún límite numérico, el valor por defecto debe ser 20), "
-                "sort_by ('rental_yield', 'overall_score', 'discount' o 'price'), "
-                "property_type ('Solar', 'Chalet / Casa', 'Vivienda', 'Rústico / Terreno', 'Rústico y Chalet', 'Local' o null; extrae SIEMPRE el tipo de inmueble de la pregunta actual del usuario, NUNCA del mensaje anterior citado), "
-                "strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD', 'LAND_DEVELOPMENT' o null), "
-                "min_price (float o null; si el usuario dice 'en el entorno de X', 'alrededor de X' o 'sobre X', pon min_price=X*0.65 y max_price=X*1.20), max_price (float o null), "
-                "min_rooms (int o null; ej: 2 si pide '2 hab', '2 habitaciones' o '2 dormitorios'), "
-                "min_discount (float o null), min_yield (float o null), is_alert (bool)."
+                "Extrae los parámetros en formato JSON con las siguientes claves:\n"
+                "- query_type ('SEARCH_OPPORTUNITIES', 'ROI_BTL_CALC', 'DISTRICT_ANALYSIS', 'SCORING_CROSSREF', 'SCHEDULED_ALERT', "
+                "'DELETE_CONSULTATION', 'TOGGLE_CONSULTATION', 'SYSTEM_META'; "
+                "usa 'DELETE_CONSULTATION' si el usuario pide borrar/eliminar/quitar una consulta o alerta como 'elimina la consulta 62'; "
+                "usa 'TOGGLE_CONSULTATION' si pide pausar/activar/listar alertas; "
+                "usa 'SYSTEM_META' si es una queja o pregunta sobre el bot como '¿por qué no dices nada?'; "
+                "si pide 'envíame oportunidades', 'búscame oportunidades', 'muéstrame oportunidades' o similar, DEBE ser 'SEARCH_OPPORTUNITIES'),\n"
+                "- street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Las Vegas', o null),\n"
+                "- district_or_neighborhood (barrio, distrito, PAU o ensanche si se menciona, ej: 'Chamberí', 'Carabanchel', 'PAU de Vallecas', o null),\n"
+                "- municipality (municipio, localidad o ciudad específica si se menciona, ej: 'Villanueva del Pardillo', 'Pinto', 'Alcobendas', 'Anglet', o null; "
+                "ATENCIÓN: si el usuario dice 'misma consulta que en X pero en Y', el municipio y zona objetivo es SIEMPRE 'Y', NUNCA 'X'),\n"
+                "- zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, "
+                "ej: 'Urbanización Las Vegas - Villanueva del Pardillo', 'Carabanchel', 'Pinto', o null),\n"
+                "- postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null),\n"
+                "- province (nombre de la provincia, ej: 'Madrid', 'Vizcaya', 'Málaga', 'Francia (Pirineos Atlánticos)', o null; infiérela si el municipio/barrio pertenece inequívocamente a una provincia española, ej: Carabanchel -> Madrid, Pinto -> Madrid),\n"
+                "- target_count (entero si pide cantidad concreta, o 20 por defecto),\n"
+                "- sort_by ('rental_yield', 'overall_score', 'discount' o 'price'),\n"
+                "- property_type ('Solar', 'Chalet / Casa', 'Vivienda', 'Rústico / Terreno', 'Rústico y Chalet', 'Local' o null; "
+                "extrae SIEMPRE el tipo de inmueble de la oración actual del usuario, NUNCA confundas sustantivos como 'localidad' con 'Local'),\n"
+                "- strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD', 'LAND_DEVELOPMENT' o null),\n"
+                "- min_price (float o null; si dice 'en el entorno de X', 'alrededor de X' o 'sobre X', pon min_price=X*0.65 y max_price=X*1.20),\n"
+                "- max_price (float o null),\n"
+                "- min_rooms (int o null; ej: 2 si pide '2 hab', '2 habitaciones' o '2 dormitorios'),\n"
+                "- min_discount (float o null), min_yield (float o null), is_alert (bool)."
             )
-            prompt = f"Analiza esta consulta inmobiliaria respetando toda la jerarquía geográfica (AND). Si hay '[Contexto conversacional: ...]', usa el contexto SOLO para heredar la ubicación cuando el usuario diga 'en la misma zona' o no repita la zona, pero extrae el tipo de inmueble, precios y filtros ÚNICAMENTE de la pregunta actual del usuario: '{text_input}'"
+            prompt = (
+                "Analiza esta consulta inmobiliaria respetando toda la jerarquía geográfica (AND). "
+                "Si hay '[Contexto conversacional: ...]', usa el contexto SOLO para heredar la ubicación cuando el usuario diga 'en la misma zona' "
+                f"o no repita la zona, pero extrae el tipo de inmueble, precios y filtros ÚNICAMENTE de la pregunta actual del usuario: '{text_input}'"
+            )
             gemini_res, model_used = await self.call_gemini_flash_cascade(
                 prompt,
                 system_instruction=sys_inst,
@@ -465,67 +549,17 @@ class AdvisorEngine:
             if gemini_res:
                 try:
                     parsed = json.loads(gemini_res)
-                    if isinstance(parsed, dict):
-                        # Gemini es el motor semántico primario: sus decisiones prevalecen sobre cualquier heurística
-                        if parsed.get("province"):
-                            criteria["province"] = str(parsed["province"]).strip(" ()\n\r•")
-                        if parsed.get("street_or_urbanization"):
-                            criteria["street_or_urbanization"] = str(parsed["street_or_urbanization"]).strip(" ()\n\r•")
-                        if parsed.get("district_or_neighborhood"):
-                            criteria["district_or_neighborhood"] = str(parsed["district_or_neighborhood"]).strip(" ()\n\r•")
-                        if parsed.get("municipality"):
-                            criteria["municipality"] = str(parsed["municipality"]).strip(" ()\n\r•")
-                        if parsed.get("postal_code"):
-                            criteria["postal_code"] = str(parsed["postal_code"]).strip()
-                        if parsed.get("zone_or_neighborhood"):
-                            criteria["zone_or_neighborhood"] = str(parsed["zone_or_neighborhood"]).strip(" ()\n\r•")
-                        self._sync_location_hierarchy(criteria)
-                        if parsed.get("target_count") and isinstance(parsed["target_count"], int):
-                            criteria["target_count"] = parsed["target_count"]
-                        if parsed.get("sort_by"):
-                            criteria["sort_by"] = parsed["sort_by"]
-                        # En property_type prevalece siempre la clasificación semántica de Gemini (incluso si devuelve null para evitar falsos positivos como 'localidad' -> 'local')
-                        if "property_type" in parsed:
-                            criteria["property_type"] = parsed.get("property_type") or None
-                        if parsed.get("query_type"):
-                            if parsed["query_type"] == "SCHEDULED_ALERT" and criteria.get("query_type") == "SEARCH_OPPORTUNITIES":
-                                criteria["query_type"] = "SEARCH_OPPORTUNITIES"
-                            else:
-                                criteria["query_type"] = parsed["query_type"]
-                        if parsed.get("strategy"):
-                            criteria["strategy"] = parsed["strategy"]
-                        if parsed.get("max_price") is not None:
-                            try:
-                                criteria["max_price"] = float(parsed["max_price"])
-                            except Exception:
-                                pass
-                        if parsed.get("min_price") is not None:
-                            try:
-                                criteria["min_price"] = float(parsed["min_price"])
-                            except Exception:
-                                pass
-                        if parsed.get("min_rooms") is not None:
-                            try:
-                                criteria["min_rooms"] = int(parsed["min_rooms"])
-                            except Exception:
-                                pass
-                        if parsed.get("min_discount") is not None:
-                            try:
-                                criteria["min_discount"] = float(parsed["min_discount"])
-                            except Exception:
-                                pass
-                        if parsed.get("min_yield") is not None:
-                            try:
-                                criteria["min_yield"] = float(parsed["min_yield"])
-                            except Exception:
-                                pass
-                        if "is_alert" in parsed and criteria.get("is_alert"):
-                            criteria["is_alert"] = bool(parsed["is_alert"])
-                        criteria["gemini_model_used"] = model_used
-                        logger.info(f"Criterios definidos semánticamente con {model_used}: {criteria}")
+                    if isinstance(parsed, dict) and parsed:
+                        criteria = self._build_criteria_from_gemini_dict(parsed, text_input, model_used)
+                        logger.info(f"[Gemini Primary Parser] Criterios extraídos 100% con {model_used}: {criteria}")
+                        return criteria
                 except Exception as e_json:
-                    logger.warning(f"No se pudo parsear JSON de Gemini: {e_json}")
+                    logger.warning(f"No se pudo parsear JSON de Gemini, activando fallback heurístico: {e_json}")
 
+        # FALLBACK EXCLUSIVO: Solo se ejecuta si Gemini no está disponible o no devolvió JSON válido
+        criteria = self._parse_query_intent_heuristics(text_input)
+        criteria["parser_engine"] = "python_fallback"
+        logger.info(f"[Python Fallback Parser] Criterios extraídos por fallback: {criteria}")
         return criteria
 
     async def semantic_filter_with_gemini(
@@ -535,10 +569,11 @@ class AdvisorEngine:
         query_context: str = ""
     ) -> List[Dict[str, Any]]:
         """
-        Valida semánticamente mediante Gemini que cada activo candidato corresponda realmente
-        a la tipología, ubicación y estrategia solicitadas por el usuario (descartando falsos
-        positivos léxicos como pisos residenciales cuando se buscan locales comerciales o
-        menciones accidentales de palabras en la descripción).
+        Motor de análisis semántico y pericial en portales mediante Gemini (100% primario).
+        Valida semánticamente que cada activo de portal corresponda realmente a la tipología,
+        ubicación geográfica exacta (desambiguando calles/barrios homónimos en otras provincias,
+        como Barrio Delicias o Av. de Madrid en Zaragoza cuando se busca en Madrid), rango de precios
+        y estrategia solicitados, y normaliza tipología y superficie de parcela.
         """
         if not candidates or "PYTEST_CURRENT_TEST" in os.environ:
             return candidates
@@ -554,38 +589,48 @@ class AdvisorEngine:
             return candidates
 
         compact_items = []
-        for o in candidates[:25]:
+        for o in candidates[:30]:
             compact_items.append({
                 "id": str(o.get("id") or ""),
-                "title": str(o.get("title") or "")[:140],
+                "title": str(o.get("title") or "")[:150],
                 "property_type": str(o.get("property_type") or ""),
                 "locality": str(o.get("locality") or ""),
-                "address": str(o.get("address") or "")[:100],
+                "province": str(o.get("province") or ""),
+                "address": str(o.get("address") or "")[:120],
+                "url": str(o.get("url") or "")[:140],
                 "price": o.get("listing_price") or o.get("price"),
                 "surface_m2": o.get("surface_m2"),
-                "description_excerpt": str(o.get("description") or "")[:180],
+                "description_excerpt": str(o.get("description") or "")[:200],
             })
 
         sys_inst = (
-            "Eres el auditor semántico y perito tasador de activos inmobiliarios de HIVEX. "
-            "Recibes los criterios de una consulta guardada y una lista de candidatos. "
+            "Eres el auditor semántico y analista de portales inmobiliarios de HIVEX. "
+            "Todo el peso del análisis y filtrado de anuncios de portales recae en ti. "
+            "Recibes los criterios de una consulta y una lista de anuncios candidatos extraídos de portales. "
             "Debes devolver EXCLUSIVAMENTE un objeto JSON con:\n"
-            "- 'valid_ids': lista de IDs que SÍ cumplen semánticamente.\n"
+            "- 'valid_ids': lista de IDs que SÍ cumplen rigurosa y semánticamente la consulta.\n"
+            "- 'normalized_property_type_by_id': diccionario opcional {id: <tipo_real>} corrigiendo la tipología real del anuncio "
+            "('Local', 'Vivienda', 'Chalet / Casa', 'Solar', 'Rústico / Terreno') según título y descripción.\n"
             "- 'plot_surface_by_id': diccionario {id: <numero_m2_terreno>} con la superficie de parcela/terreno "
-            "(extraída del texto o estimada pericialmente > 0 si es un chalet, casa, unifamiliar, finca o solar; 0 si es un piso o local sin parcela).\n"
-            "Reglas estrictas:\n"
-            "1. Si la consulta pide 'Local' o 'Local Comercial', descarta cualquier activo que ya sea un 'Piso en venta', 'Vivienda' o 'Chalet' residencial.\n"
-            "2. Si la consulta pide 'Solar' o 'Terreno', descarta viviendas o pisos ya construidos.\n"
-            "3. Si la consulta pide 'Chalet / Casa', descarta pisos en bloque o solares sin edificar.\n"
-            "4. Respeta la ubicación solicitada en la consulta."
+            "(extraída del texto o estimada pericialmente > 0 si es chalet, casa, unifamiliar, finca o solar; 0 si es piso o local sin parcela).\n"
+            "Reglas estrictas de validación:\n"
+            "1. TIPOLOGÍA: Si la consulta pide 'Local' o 'Local Comercial', descarta pisos, viviendas o chalets. "
+            "Si pide 'Solar' o 'Terreno', descarta inmuebles ya construidos. Si pide 'Chalet / Casa', descarta pisos en bloque.\n"
+            "2. DESAMBIGUACIÓN GEOGRÁFICA ESTRICTA: Verifica por título, dirección, URL y descripción que el anuncio esté REALMENTE "
+            "en el municipio, barrio y provincia solicitados. Descarta falsos positivos por homonimia (ej. anuncios en el barrio 'Delicias' "
+            "o 'Avenida de Madrid' de Zaragoza o Valladolid cuando se busca en Madrid; o municipios de otra provincia).\n"
+            "3. PRECIO Y HABITACIONES: Respeta los límites de precio (min_price, max_price) y habitaciones si están definidos."
         )
         user_prompt = json.dumps({
             "consultation_query": query_context,
             "criteria": {
                 "property_type": criteria.get("property_type"),
                 "strategy": criteria.get("strategy"),
+                "street_or_urbanization": criteria.get("street_or_urbanization"),
+                "district_or_neighborhood": criteria.get("district_or_neighborhood"),
                 "zone_or_neighborhood": criteria.get("zone_or_neighborhood"),
                 "municipality": criteria.get("municipality"),
+                "postal_code": criteria.get("postal_code"),
                 "province": criteria.get("province"),
                 "min_price": criteria.get("min_price"),
                 "max_price": criteria.get("max_price"),
@@ -607,11 +652,15 @@ class AdvisorEngine:
                     valid_set = {str(x).strip().upper() for x in parsed["valid_ids"] if x}
                     plot_map_raw = parsed.get("plot_surface_by_id") if isinstance(parsed.get("plot_surface_by_id"), dict) else {}
                     plot_map = {str(k).strip().upper(): v for k, v in plot_map_raw.items()}
+                    type_map_raw = parsed.get("normalized_property_type_by_id") if isinstance(parsed.get("normalized_property_type_by_id"), dict) else {}
+                    type_map = {str(k).strip().upper(): str(v).strip() for k, v in type_map_raw.items() if v}
                     from app.services.plot_valuation_backfill import PlotValuationEnricher
                     filtered_out = []
                     for o in candidates:
                         oid_u = str(o.get("id") or "").strip().upper()
                         if oid_u in valid_set:
+                            if oid_u in type_map:
+                                o["property_type"] = type_map[oid_u]
                             g_plot = None
                             if oid_u in plot_map:
                                 try:
@@ -2578,7 +2627,7 @@ class AdvisorEngine:
             except Exception as e_mkt:
                 logger.warning(f"[Advisor Sync] Fallback MarketScraper: {e_mkt}")
 
-        # 3. FILTRADO ESTRICTO (GUARDIAN DE FOTOS + JERARQUÍA GEOGRÁFICA AND) ANTES DE PERSISTIR O DEVOLVER
+        # 3. FILTRADO ESTRICTO (GUARDIAN DE FOTOS + GEMINI PORTAL ANALYZER + JERARQUÍA GEOGRÁFICA AND)
         if discovered_opps:
             from app.connectors.market_scraper import MarketScraper
             discovered_opps = [o for o in discovered_opps if MarketScraper.ensure_twenty_images(o)]
@@ -2589,6 +2638,10 @@ class AdvisorEngine:
                 relaxed_muni_criteria["zone_or_neighborhood"] = municipality or f"CP {postal_code}"
                 self._sync_location_hierarchy(relaxed_muni_criteria)
                 strict_filtered = self.filter_opportunities(discovered_opps, relaxed_muni_criteria)
+            if strict_filtered:
+                strict_filtered = await self.semantic_filter_with_gemini(
+                    strict_filtered, criteria, query_context=prompt_text or full_loc_label
+                )
             if strict_filtered:
                 strict_filtered = self.verify_and_filter_active_market_opportunities(
                     strict_filtered, target_count=max(target_count, 50)
@@ -3870,7 +3923,31 @@ class AdvisorEngine:
         is_relaxed = False
         exact_zone_count = 0
 
-        if is_quantitative_query:
+        # Guardarraíl contra comandos administrativos de borrado/gestión de consultas o mensajes meta
+        import re as _re_meta
+        is_admin_or_meta_command = (
+            criteria.get("query_type") in ("DELETE_CONSULTATION", "TOGGLE_CONSULTATION", "SYSTEM_META")
+            or bool(
+                _re_meta.search(
+                    r'\b(borra|borrar|elimina|eliminar|quita|quitar|suprime|suprimir|pausa|pausar|desactiva|desactivar|activa|activar)\b'
+                    r'.*\b(consulta|consultas|alerta|alertas|búsqueda|busqueda)\b',
+                    prompt_lower
+                )
+            )
+            or bool(_re_meta.search(r'\b(por\s+qu[eé]\s+no\s+(?:dices|respondes|contestas))\b', prompt_lower))
+        )
+
+        if is_admin_or_meta_command:
+            title = "⚙️ Gestión de Consultas HIVEX"
+            response_text = (
+                "ℹ️ Este mensaje corresponde a una instrucción administrativa o de gestión de consultas/alertas "
+                "y no se registra como una nueva búsqueda inmobiliaria."
+            )
+            ai_summary = response_text
+            matched_opps = []
+            should_display_cards = False
+
+        elif is_quantitative_query:
             # 2A. Consulta Cuantitativa: Responder con datos y números exactos SIN enviar fichas
             all_opps = self.get_live_catalog_opportunities(db=db)
             matched_opps = self.filter_opportunities(all_opps, criteria)
@@ -4121,9 +4198,13 @@ class AdvisorEngine:
                         "creame una consulta", "añadir una búsqueda", "añadir búsqueda"
                     ]
                 ) or bool(criteria.get("is_alert"))
-                is_kpi_or_quantitative_without_cards = (is_quantitative_query or is_advisory_inquiry) and not should_display_cards
+                is_kpi_or_quantitative_without_cards = (
+                    is_admin_or_meta_command
+                    or ((is_quantitative_query or is_advisory_inquiry) and not should_display_cards)
+                )
                 should_save_to_visual_module = (
-                    not is_kpi_or_quantitative_without_cards
+                    not is_admin_or_meta_command
+                    and not is_kpi_or_quantitative_without_cards
                     and (
                         (should_display_cards and matched_opps and len(matched_opps) > 0)
                         or (is_explicit_listing_request and is_explicit_consultation_registration)

@@ -997,15 +997,15 @@ class TelegramAdvisorBot:
         }
 
         models = [
+            "gemini-4.0-argon",
             "gemini-3.8-flash-lite",
+            "gemini-3.8-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
-            "gemini-3.8-flash",
             "gemini-3.5-flash",
             "gemini-3-flash-preview",
             "gemini-2.5-flash",
             "gemini-flash-latest",
-            "gemini-4-argon",
             "gemini-2.5-pro",
         ]
         unavailable = getattr(self.__class__, "_UNAVAILABLE_MODELS", set())
@@ -1868,22 +1868,37 @@ class TelegramAdvisorBot:
         message_id: Optional[int] = None
     ) -> bool:
         """
-        Interpreta comandos conversacionales en el grupo de Telegram para activar,
-        pausar o listar búsquedas/alertas del módulo visual de oportunidades.
-        Retorna True si el mensaje fue un comando de alerta y se procesó.
+        Interpreta comandos conversacionales en Telegram para eliminar/borrar, activar,
+        pausar o listar búsquedas/consultas/alertas del módulo visual de oportunidades.
+        Retorna True si el mensaje fue un comando de gestión de consulta/alerta y se procesó.
         """
         import re
         txt = text_content.strip().lower()
 
+        del_verbs = r'(borra|borrar|bórrame|borrame|elimina|eliminar|elimíname|eliminame|quita|quitar|quítame|quitame|suprime|suprimir)'
         deact_verbs = r'(desactiva|desactivar|pausa|pausar|inactiva|inactivar|deten|detén|detener|cancela|cancelar|apaga|apagar|silencia|silenciar)'
         act_verbs = r'(activa|activar|reanuda|reanudar|reactiva|reactivar|enciende|encender|habilita|habilitar)'
-        alert_nouns = r'(?:la\s+|las\s+|mi\s+|mis\s+)?(?:alerta|alertas|búsqueda|busqueda|búsquedas|busquedas|radar)'
+        alert_nouns = r'(?:la\s+|las\s+|mi\s+|mis\s+|el\s+|los\s+)?(?:alerta|alertas|búsqueda|busqueda|búsquedas|busquedas|consulta|consultas|radar)'
+        target_words = ["alerta", "alertas", "busqueda", "búsqueda", "busquedas", "búsquedas", "consulta", "consultas", "radar"]
 
-        is_deactivate = bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/pausar") or txt.startswith("/desactivar")
-        is_activate = bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in ["alerta", "busqueda", "búsqueda", "radar"])) or txt.startswith("/activar") or txt.startswith("/reanudar")
+        is_delete = (
+            bool(re.search(rf'\b{del_verbs}\b', txt) and any(w in txt for w in target_words))
+            or txt.startswith("/borrar")
+            or txt.startswith("/eliminar")
+        )
+        is_deactivate = (not is_delete) and (
+            bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
+            or txt.startswith("/pausar")
+            or txt.startswith("/desactivar")
+        )
+        is_activate = (not is_delete and not is_deactivate) and (
+            bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
+            or txt.startswith("/activar")
+            or txt.startswith("/reanudar")
+        )
 
         # Regex para detectar intenciones de listar alertas/búsquedas o verificar novedades de alertas en plataforma
-        list_match = (not is_deactivate and not is_activate) and bool(
+        list_match = (not is_delete and not is_deactivate and not is_activate) and bool(
             re.search(
                 r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas|alertas configuradas|consultas configuradas|consultas activas)\b',
                 txt
@@ -1894,15 +1909,78 @@ class TelegramAdvisorBot:
             )
         )
 
-        if not (list_match or is_deactivate or is_activate):
+        if not (list_match or is_delete or is_deactivate or is_activate):
             return False
 
         with SessionLocal() as db:
             from app.db.models import SavedConsultation
             from sqlalchemy import or_
 
-            # Recuperar consultas para este chat o usuario
-            user_conds = [SavedConsultation.telegram_chat_id == str(chat_id)]
+            id_match = re.search(r'(?:consulta|alerta|búsqueda|busqueda|id|#)\s*#?(\d+)|#(\d+)', txt)
+            explicit_id: Optional[int] = None
+            if id_match:
+                explicit_id = int(id_match.group(1) or id_match.group(2))
+            else:
+                any_num = re.search(r'\b(\d+)\b', txt)
+                if any_num and (is_delete or is_deactivate or is_activate):
+                    explicit_id = int(any_num.group(1))
+
+            # Caso 0: Borrado / Eliminación definitiva de una consulta de BD
+            if is_delete:
+                target_to_delete = None
+                if explicit_id is not None:
+                    target_to_delete = db.query(SavedConsultation).filter(SavedConsultation.id == explicit_id).first()
+                    if not target_to_delete:
+                        msg_not_found = (
+                            f"ℹ️ La consulta/alerta <b>#{explicit_id}</b> ya no existe en la base de datos de HIVEX "
+                            f"(o ya fue eliminada previamente)."
+                        )
+                        await self.send_message(chat_id, msg_not_found, parse_mode="HTML", reply_to_message_id=message_id)
+                        return True
+                else:
+                    user_conds = [
+                        SavedConsultation.telegram_chat_id == str(chat_id),
+                        SavedConsultation.telegram_chat_id == "-1003904392737",
+                    ]
+                    if user_display_name:
+                        user_conds.append(SavedConsultation.user_name.ilike(user_display_name.strip()))
+                    cand_list = db.query(SavedConsultation).filter(or_(*user_conds)).order_by(SavedConsultation.id.desc()).all()
+                    clean_term = re.sub(rf'\b({del_verbs}|{alert_nouns}|por|favor|es|un|error|de|en|para|la|el|los|las)\b', ' ', txt).strip()
+                    if len(clean_term) >= 3:
+                        for c in cand_list:
+                            if clean_term in f"{c.title} {c.description}".lower():
+                                target_to_delete = c
+                                break
+                    if not target_to_delete and cand_list:
+                        target_to_delete = cand_list[0]
+
+                if not target_to_delete:
+                    await self.send_message(
+                        chat_id,
+                        "ℹ️ No he encontrado ninguna consulta o alerta que coincida para eliminar.",
+                        parse_mode="HTML",
+                        reply_to_message_id=message_id,
+                    )
+                    return True
+
+                del_id = target_to_delete.id
+                del_title = target_to_delete.title or "Búsqueda"
+                del_desc = (target_to_delete.description or "")[:100]
+                db.delete(target_to_delete)
+                db.commit()
+                reply_del = (
+                    f"🗑️ <b>Consulta #{del_id} eliminada definitivamente</b>\n\n"
+                    f"He borrado de la plataforma la consulta <b>«{html.escape(del_title)}»</b> (ID #{del_id}).\n"
+                    f"Criterio: <i>«{html.escape(del_desc)}»</i>"
+                )
+                await self.send_message(chat_id, reply_del, parse_mode="HTML", reply_to_message_id=message_id)
+                return True
+
+            # Recuperar consultas para este chat, supergrupo corporativo o usuario
+            user_conds = [
+                SavedConsultation.telegram_chat_id == str(chat_id),
+                SavedConsultation.telegram_chat_id == "-1003904392737",
+            ]
             if user_display_name:
                 user_conds.append(SavedConsultation.user_name.ilike(user_display_name.strip()))
 
@@ -1912,6 +1990,11 @@ class TelegramAdvisorBot:
                 SavedConsultation.matched_opportunity_ids_json != "[]",
                 SavedConsultation.matched_count > 0
             ).order_by(SavedConsultation.id.desc()).all()
+
+            if not consultations and explicit_id is not None:
+                by_id = db.query(SavedConsultation).filter(SavedConsultation.id == explicit_id).first()
+                if by_id:
+                    consultations = [by_id]
 
             if not consultations:
                 msg = (
@@ -1932,7 +2015,7 @@ class TelegramAdvisorBot:
                         f"  (Total oportunidades vinculadas: {c.matched_count})"
                     )
                 lines.append(
-                    f"\n💡 <i>Para pausar o activar una búsqueda di: «pausar alerta #ID» o «activar alerta #ID».</i>"
+                    f"\n💡 <i>Para pausar, activar o eliminar una búsqueda di: «pausar alerta #ID», «activar alerta #ID» o «eliminar consulta #ID».</i>"
                 )
                 await self.send_message(chat_id, "\n".join(lines), parse_mode="HTML", reply_to_message_id=message_id)
                 return True
@@ -1942,12 +2025,11 @@ class TelegramAdvisorBot:
             action_word = "activada" if target_status else "pausada"
             icon = "▶️" if target_status else "⏸️"
 
-            # Intentar identificar consulta específica por ID numérico (#12, 12)
-            id_match = re.search(r'#?(\d+)', txt)
             target_consultation = None
-            if id_match:
-                cand_id = int(id_match.group(1))
-                target_consultation = next((c for c in consultations if c.id == cand_id), None)
+            if explicit_id is not None:
+                target_consultation = next((c for c in consultations if c.id == explicit_id), None)
+                if not target_consultation:
+                    target_consultation = db.query(SavedConsultation).filter(SavedConsultation.id == explicit_id).first()
 
             # Si no hay ID, buscar por coincidencia en texto o título (ej. "fincas", "guadalix", "madrid")
             if not target_consultation:

@@ -964,6 +964,97 @@ def test_ai_syntactic_and_semantic_cohesion_evaluation(monkeypatch):
     assert len(captured_prompts) == 2
 
 
+@pytest.mark.asyncio
+async def test_delete_consultation_command_and_gemini_primary_parser(in_memory_db, monkeypatch):
+    """
+    1. Verifica que al pedir 'Por favor elimina la consulta 62. Es un error', handle_toggle_alert_command
+       elimine la consulta #62 de SavedConsultation y devuelva True (sin crear una consulta #63).
+    2. Verifica que incluso si llegara a advisor_engine.process_user_query, el guardarraíl administrativo
+       impida crear una nueva SavedConsultation.
+    3. Verifica que parse_query_intent use Gemini 100% como motor primario (parser_engine == 'gemini_primary')
+       y no mezcle falsos positivos del fallback de Python.
+    """
+    from app.engine.advisor_engine import advisor_engine
+    import app.services.telegram_advisor_bot as bot_mod
+
+    in_memory_db.query(SavedConsultation).delete()
+    in_memory_db.commit()
+
+    c62 = SavedConsultation(
+        id=62,
+        user_name="jsaavedra",
+        telegram_chat_id="-1003904392737",
+        title="#62 - Madrid",
+        description="por qué no dices nada?",
+        query_type="SEARCH_OPPORTUNITIES",
+        criteria_json="{}",
+        matched_opportunity_ids_json='["HIVEX-MKT-1"]',
+        matched_count=1,
+        is_active=True,
+    )
+    in_memory_db.add(c62)
+    in_memory_db.commit()
+
+    class _DummySessionCtx:
+        def __enter__(self):
+            return in_memory_db
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    monkeypatch.setattr(bot_mod, "SessionLocal", lambda: _DummySessionCtx())
+    bot = TelegramAdvisorBot()
+    sent_messages = []
+
+    async def fake_send_message(chat_id, text, **kwargs):
+        sent_messages.append((chat_id, text))
+        return True
+
+    monkeypatch.setattr(bot, "send_message", fake_send_message)
+
+    handled = await bot.handle_toggle_alert_command(
+        chat_id="1450113787",
+        user_id="1450113787",
+        user_display_name="jsaavedra",
+        text_content="Por favor elimina la consulta 62. Es un error",
+        message_id=101,
+    )
+    assert handled is True
+    assert in_memory_db.query(SavedConsultation).filter(SavedConsultation.id == 62).first() is None
+    assert in_memory_db.query(SavedConsultation).count() == 0
+    assert any("Consulta #62 eliminada definitivamente" in m[1] for m in sent_messages)
+
+    # Verificar que process_user_query tampoco cree una consulta ante un comando de borrado o queja meta
+    res_meta = await advisor_engine.process_user_query(
+        user_name="jsaavedra",
+        prompt_text="Por favor elimina la consulta 62. Es un error",
+        telegram_chat_id="-1003904392737",
+        db=in_memory_db,
+    )
+    assert res_meta.get("should_display_cards") is False
+    assert res_meta.get("saved_consultation_id") is None
+    assert in_memory_db.query(SavedConsultation).count() == 0
+
+    # Verificar que parse_query_intent usa Gemini 100% como motor primario cuando responde JSON válido
+    async def fake_gemini_cascade(prompt, system_instruction="", response_json=False, task_tier="fast_structured"):
+        return json.dumps({
+            "query_type": "SEARCH_OPPORTUNITIES",
+            "province": "Madrid",
+            "municipality": "Pinto",
+            "zone_or_neighborhood": "Pinto",
+            "property_type": None,
+            "target_count": 20,
+            "is_alert": False,
+        }), "gemini-3.8-flash"
+
+    monkeypatch.setattr(advisor_engine, "call_gemini_flash_cascade", fake_gemini_cascade)
+    monkeypatch.setattr(advisor_engine, "gemini_key", "fake_key_for_test")
+    parsed_crit = await advisor_engine.parse_query_intent("Envíame oportunidades en la localidad de Pinto")
+    assert parsed_crit["parser_engine"] == "gemini_primary"
+    assert parsed_crit["municipality"] == "Pinto"
+    assert parsed_crit["property_type"] is None  # 'localidad' jamás se contamina como 'Local'
+
+
+
 
 
 
