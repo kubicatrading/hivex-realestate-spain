@@ -30,35 +30,48 @@ def send_telegram_update(
     if not target_chat or not token:
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload: Dict[str, Any] = {
-        "chat_id": target_chat,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    if reply_to_message_id:
+    max_len = 3800
+    chunks = []
+    remaining = text
+    while len(remaining) > max_len:
+        split_at = remaining.rfind("\n", 0, max_len)
+        if split_at <= 0:
+            split_at = max_len
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip("\n")
+    if remaining:
+        chunks.append(remaining)
+
+    for idx, chunk in enumerate(chunks):
+        payload: Dict[str, Any] = {
+            "chat_id": target_chat,
+            "text": chunk,
+            "parse_mode": "HTML"
+        }
+        if reply_to_message_id and idx == 0:
+            try:
+                payload["reply_to_message_id"] = int(reply_to_message_id)
+            except Exception:
+                pass
         try:
-            payload["reply_to_message_id"] = int(reply_to_message_id)
-        except Exception:
-            pass
-    try:
-        with httpx.Client(timeout=12.0) as client:
-            r = client.post(url, json=payload)
-            if r.status_code != 200 and "reply_to_message_id" in payload:
-                # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
-                fallback_payload = dict(payload)
-                fallback_payload.pop("reply_to_message_id", None)
-                r = client.post(url, json=fallback_payload)
-            if r.status_code != 200:
-                # Último fallback en texto plano sin parse_mode HTML
-                plain_payload = {
-                    "chat_id": target_chat,
-                    "text": text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
-                }
-                r2 = client.post(url, json=plain_payload)
-                if r2.status_code != 200:
-                    print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
-    except Exception as e:
-        print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
+            with httpx.Client(timeout=12.0) as client:
+                r = client.post(url, json=payload)
+                if r.status_code != 200 and "reply_to_message_id" in payload:
+                    # Reintentar sin reply_to_message_id si el mensaje original no existe o pertenece a otro hilo
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("reply_to_message_id", None)
+                    r = client.post(url, json=fallback_payload)
+                if r.status_code != 200:
+                    # Último fallback en texto plano sin parse_mode HTML
+                    plain_payload = {
+                        "chat_id": target_chat,
+                        "text": chunk.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    }
+                    r2 = client.post(url, json=plain_payload)
+                    if r2.status_code != 200:
+                        print(f"Aviso Telegram API ({r2.status_code}): {r2.text[:150]}")
+        except Exception as e:
+            print(f"Aviso: No se pudo enviar actualización a Telegram: {e}")
 
 # -----------------------------------------------------------------------------
 # HERRAMIENTAS (TOOLS) DEL DEVAGENT
@@ -433,7 +446,7 @@ def execute_agent_loop(
                 except Exception:
                     pass
                 send_telegram_update(
-                    f"📋 <b>Informe Técnico de DevAgent ({html.escape(active_model)}):</b>\n\n{html.escape(final_summary[:3500])}",
+                    f"📋 <b>Informe Técnico de DevAgent ({html.escape(active_model)}):</b>\n\n{html.escape(final_summary)}",
                     chat_id, bot_token, reply_to_message_id
                 )
             return final_summary
@@ -530,7 +543,7 @@ def execute_agent_loop(
                         if final_summary:
                             Path("/tmp/dev_agent_summary.txt").write_text(final_summary, encoding="utf-8")
                             send_telegram_update(
-                                f"📋 <b>Informe Técnico de DevAgent ({html.escape(model)}):</b>\n\n{html.escape(final_summary[:3500])}",
+                                f"📋 <b>Informe Técnico de DevAgent ({html.escape(model)}):</b>\n\n{html.escape(final_summary)}",
                                 chat_id, bot_token, reply_to_message_id
                             )
                             return final_summary

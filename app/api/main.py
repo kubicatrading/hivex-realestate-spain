@@ -1347,7 +1347,7 @@ def get_opportunities(
 ):
     """Consulta la lista de oportunidades filtradas por estrategia, descuento y provincia."""
     import time as _time
-    cache_key = f"{strategy}:{min_discount}:{province}:{source_type}:{only_new}:{only_synergy_pgou}:{bbox}"
+    cache_key = f"{strategy}:{min_discount}:{province}:{source_type}:{only_synergy_pgou}:{bbox}"
     now_ts = _time.time()
     if (
         _OPPORTUNITIES_LIST_CACHE.get("results") is not None

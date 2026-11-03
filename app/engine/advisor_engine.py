@@ -528,8 +528,9 @@ class AdvisorEngine:
                 "  * 'DELETE_CONSULTATION': el usuario pide borrar, eliminar, quitar, descartar o dar de baja una consulta/búsqueda/alerta guardada (ej: 'elimina la consulta 62', 'la 62 bórrala que es un error').\n"
                 "  * 'TOGGLE_CONSULTATION': el usuario pide pausar, desactivar, activar o reanudar una consulta/alerta.\n"
                 "  * 'LIST_CONSULTATIONS': el usuario pregunta qué alertas o consultas están activas/configuradas en plataforma.\n"
+                "  * 'CONTEXTUAL_FOLLOWUP': el usuario está respondiendo a un mensaje anterior (existe '[Contexto conversacional...' o referencia a un punto/apartado previo) y hace una pregunta o pide profundizar en un punto concreto de dicho mensaje anterior (ej: 'qué implicaciones técnicas tiene el punto 3', 'explícame el segundo punto', '¿por qué dices eso en el apartado 2?'), sin solicitar un nuevo listado de fichas de inmuebles.\n"
                 "  * 'SYSTEM_META': queja, saludo o pregunta meta sobre el funcionamiento del propio bot (ej: '¿por qué no dices nada?').\n"
-                "- wants_property_cards (bool): true si sintáctica y semánticamente el usuario quiere ver/recibir fichas de oportunidades inmobiliarias; false si es una pregunta analítica de KPIs/conteo o una orden administrativa de gestión de consultas.\n"
+                "- wants_property_cards (bool): true si sintáctica y semánticamente el usuario quiere ver/recibir fichas de oportunidades inmobiliarias; false si es una pregunta sobre un mensaje anterior ('CONTEXTUAL_FOLLOWUP'), una pregunta analítica de KPIs/conteo o una orden administrativa de gestión de consultas.\n"
                 "- wants_external_portals (bool): true si el usuario pide buscar fuera de HIVEX o en portales externos (Idealista, Fotocasa, etc.); false en caso contrario.\n"
                 "- target_consultation_id (int o null): número de ID de la consulta/alerta si el usuario menciona una específica (ej: 62 en 'elimina la consulta 62' o 'bórrala #62').\n"
                 "- clone_from_zone (string o null): si el usuario pide clonar o hacer 'la misma consulta que tenemos en la zona X pero en la zona Y', pon aquí la zona origen 'X' (ej: 'Biarritz') y en municipality/zone_or_neighborhood pon la zona destino 'Y' (ej: 'Anglet').\n"
@@ -1165,7 +1166,20 @@ class AdvisorEngine:
             "frente a", "respecto a", "diferencia entre"
         ])
 
-        if has_explicit_search_verb:
+        is_contextual_followup = bool(context_q_lower) and any(
+            w in user_q_lower for w in [
+                "punto ", "apartado ", "sección ", "seccion ", "implicaciones", "implicación", "implicacion",
+                "qué significa", "que significa", "qué quiere decir", "que quiere decir",
+                "explícame", "explicame", "explica ", "aclárame", "aclarame", "detalla",
+                "a qué te refieres", "a que te refieres", "por qué dices", "por que dices",
+                "sobre lo que", "de lo que has dicho", "del mensaje anterior", "de ese mensaje",
+                "ese hallazgo", "esa línea", "esa linea", "ese código", "ese codigo", "ese error"
+            ]
+        ) and not has_explicit_search_verb
+
+        if is_contextual_followup:
+            query_type = "CONTEXTUAL_FOLLOWUP"
+        elif has_explicit_search_verb:
             query_type = "SEARCH_OPPORTUNITIES"
         elif is_alert:
             query_type = "SCHEDULED_ALERT"
@@ -3497,6 +3511,40 @@ class AdvisorEngine:
 
         return response_text, title, ai_summary, intro_text
 
+    async def generate_contextual_followup_response(
+        self,
+        prompt_text: str,
+        user_name: str
+    ) -> str:
+        """
+        Responde directamente a preguntas de seguimiento contextual donde el usuario cita o responde a un mensaje
+        anterior del bot (o hace alusión a un punto/hallazgo concreto del historial reciente).
+        """
+        sys_inst = (
+            "Eres el Asesor Senior y Arquitecto Técnico de HIVEX Real Estate Intelligence.\n"
+            "El usuario está haciendo una pregunta o seguimiento sobre un mensaje anterior de la conversación "
+            "(por ejemplo, preguntando por un punto concreto, pidiendo explicar las implicaciones técnicas o de negocio "
+            "de un hallazgo, o pidiendo ampliar un apartado previo).\n"
+            "Lee atentamente el bloque [MENSAJE ESPECÍFICO AL QUE RESPONDE EL USUARIO] o [HISTORIAL DE CONVERSACIÓN RECIENTE] "
+            "y responde de forma directa, rigurosa y exhaustiva a la [PETICIÓN ACTUAL DEL USUARIO] en español, "
+            "usando formato HTML compatible con Telegram (<b>, <i>, <code>, <pre>) sin bloques markdown ```."
+        )
+        ai_answer, used_model = await self.call_gemini_flash_cascade(
+            prompt=prompt_text,
+            system_instruction=sys_inst,
+            temperature=0.2,
+            max_output_tokens=2500,
+            response_mime_type="text/plain",
+            task_tier="deep_reasoning"
+        )
+        if ai_answer and ai_answer.strip():
+            clean_ans = ai_answer.strip().replace("```html", "").replace("```", "").strip()
+            return f"💬 <b>Análisis Contextual HIVEX ({html.escape(used_model or 'Gemini')}):</b>\n\n{clean_ans}"
+        return (
+            f"💬 Hola <b>{html.escape(user_name)}</b>, he revisado el mensaje anterior al que haces referencia, "
+            "pero en este instante el motor de IA no pudo sintetizar la ampliación. Por favor, inténtalo de nuevo en unos segundos."
+        )
+
     # --------------------------------------------------------------------------
     # 8. MÉTODO PRINCIPAL DE PROCESAMIENTO
     # --------------------------------------------------------------------------
@@ -3876,14 +3924,16 @@ class AdvisorEngine:
             is_admin_or_meta_command = q_type in (
                 "DELETE_CONSULTATION", "TOGGLE_CONSULTATION", "LIST_CONSULTATIONS", "SYSTEM_META"
             )
+            is_contextual_followup = (q_type == "CONTEXTUAL_FOLLOWUP") and not wants_cards
             is_deviation_query = (q_type == "PRICE_DEVIATION")
             is_quantitative_query = (q_type in ("QUANTITATIVE_COUNT", "PRICE_DEVIATION")) and not wants_cards
             is_advisory_inquiry = (
                 q_type in ("DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF")
                 and not wants_cards
                 and not is_quantitative_query
+                and not is_contextual_followup
             )
-            is_explicit_listing_request = wants_cards and not is_admin_or_meta_command
+            is_explicit_listing_request = wants_cards and not is_admin_or_meta_command and not is_contextual_followup
             is_explicit_external = bool(criteria.get("wants_external_portals", False))
         else:
             # FALLBACK EXCLUSIVO EN PYTHON: Solo se ejecuta si Gemini no estuvo disponible
@@ -3935,17 +3985,21 @@ class AdvisorEngine:
                 "son interesantes", "merece la pena", "vale la pena", "qué opinas", "que opinas", "cómo ves", "como ves"
             ]) and not has_explicit_show_verb
 
-            is_explicit_listing_request = has_explicit_show_verb or (
-                criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
-                and not (is_count_query or is_deviation_query or is_kpi_market_query or is_zone_recommendation_query)
+            is_contextual_followup = (criteria.get("query_type") == "CONTEXTUAL_FOLLOWUP") and not has_explicit_show_verb
+            is_explicit_listing_request = (
+                has_explicit_show_verb or (
+                    criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
+                    and not (is_count_query or is_deviation_query or is_kpi_market_query or is_zone_recommendation_query or is_contextual_followup)
+                )
             )
-            is_quantitative_query = (is_count_query or is_deviation_query) and not has_explicit_show_verb
+            is_quantitative_query = (is_count_query or is_deviation_query) and not has_explicit_show_verb and not is_contextual_followup
             is_advisory_inquiry = (
                 (criteria.get("query_type") in [
                     "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
                 ] or is_zone_recommendation_query or is_kpi_market_query)
                 and not has_explicit_show_verb
                 and not is_quantitative_query
+                and not is_contextual_followup
             )
             is_explicit_external = any(w in prompt_lower for w in [
                 "busca fuera", "fuera de hivex", "idealista", "fotocasa", "pisos.com", "portales",
@@ -3976,6 +4030,17 @@ class AdvisorEngine:
                 "y no se registra como una nueva búsqueda inmobiliaria."
             )
             ai_summary = response_text
+            matched_opps = []
+            should_display_cards = False
+
+        elif is_contextual_followup:
+            # 2.0 Seguimiento Contextual Directo: Responder directamente a la pregunta del usuario sobre el mensaje anterior
+            response_text = await self.generate_contextual_followup_response(
+                prompt_text=final_prompt,
+                user_name=user_name
+            )
+            title = "💬 Respuesta Contextual HIVEX"
+            ai_summary = self.clean_ai_summary_text(response_text, max_len=240)
             matched_opps = []
             should_display_cards = False
 
@@ -4225,6 +4290,7 @@ class AdvisorEngine:
                 ) or bool(criteria.get("is_alert"))
                 is_kpi_or_quantitative_without_cards = (
                     is_admin_or_meta_command
+                    or is_contextual_followup
                     or ((is_quantitative_query or is_advisory_inquiry) and not should_display_cards)
                 )
                 should_save_to_visual_module = (

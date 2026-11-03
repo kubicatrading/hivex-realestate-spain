@@ -40,6 +40,7 @@ class TelegramAdvisorBot:
         self._polling_task: Optional[asyncio.Task] = None
         self._is_polling = False
         self._processed_message_ids = set()
+        self._recent_sent_messages_by_chat: Dict[str, list] = {}
         self._cached_opportunities: Dict[str, Dict[str, Any]] = {}
         self._load_catalog_cache()
 
@@ -202,6 +203,19 @@ class TelegramAdvisorBot:
         clean_text = text
         if parse_mode == "HTML":
             clean_text = re.sub(r'<(?!(?:/?(?:b|i|u|s|code|pre|a)\b))', '&lt;', clean_text)
+
+        # Registrar en memoria reciente del chat el texto íntegro enviado por el bot para que cualquier
+        # respuesta posterior del usuario (con o sin Reply nativo) disponga del contenido completo sin truncar
+        try:
+            str_cid = str(chat_id)
+            plain_sent = re.sub(r'<[^>]+>', '', text or "").strip()
+            if plain_sent and not plain_sent.startswith("🎙️"):
+                chat_hist = self._recent_sent_messages_by_chat.setdefault(str_cid, [])
+                chat_hist.append({"text": plain_sent, "ts": datetime.utcnow().isoformat()})
+                if len(chat_hist) > 25:
+                    del chat_hist[:-25]
+        except Exception:
+            pass
 
         url = f"{self.api_base}/sendMessage"
         payload = {
@@ -1193,16 +1207,102 @@ class TelegramAdvisorBot:
         ]
         return any(p in t_low for p in continuation_phrases)
 
+    def _extract_replied_message_context(
+        self,
+        chat_id: Any,
+        current_text: str,
+        reply_to: Optional[Dict[str, Any]] = None,
+        quote: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """
+        Extrae el contexto íntegro del mensaje anterior al que el usuario está respondiendo:
+        1. Si el usuario usó la función nativa 'Reply' (o citó un fragmento con 'quote') en Telegram,
+           captura el texto completo del mensaje respondido (hasta 6.000 caracteres, sin truncar a 600)
+           y, si el mensaje respondido fue un informe multiparte o truncado en Telegram (ej. DevAgent),
+           lo complementa con los últimos mensajes del asistente en memoria/BD.
+        2. Si el usuario NO pulsó 'Reply' nativo pero su mensaje hace alusión directa a un punto o apartado
+           de un mensaje anterior (ej. «¿qué implicaciones tiene el punto 3?», «explícame el segundo apartado»,
+           «sobre lo que acabas de decir»), recupera automáticamente el último mensaje del asistente en ese chat.
+        """
+        str_cid = str(chat_id)
+        replied_parts = []
+
+        if quote and isinstance(quote, dict):
+            q_text = re.sub(r'<[^>]+>', '', str(quote.get("text") or "")).strip()
+            if q_text:
+                replied_parts.append(f"[Fragmento exacto citado por el usuario]: «{q_text}»")
+
+        raw_reply_text = ""
+        if reply_to and isinstance(reply_to, dict):
+            raw_reply_text = str(reply_to.get("text") or reply_to.get("caption") or "").strip()
+            if raw_reply_text:
+                clean_reply = re.sub(r'<[^>]+>', '', raw_reply_text).strip()
+                if clean_reply:
+                    replied_parts.append(clean_reply[:6000])
+
+        # Detectar si el mensaje del usuario alude a un punto/sección concreta de un mensaje previo
+        t_low = (current_text or "").strip().lower()
+        references_previous_point = bool(
+            re.search(
+                r'\b(punto\s+\d+|apartado\s+\d+|secci[oó]n\s+\d+|hallazgo\s+\d+|'
+                r'el\s+primero|el\s+segundo|el\s+tercero|el\s+cuarto|'
+                r'primer\s+punto|segundo\s+punto|tercer\s+punto|cuarto\s+punto|'
+                r'mensaje\s+anterior|informe\s+anterior|lo\s+que\s+acabas\s+de\s+decir|'
+                r'lo\s+que\s+dices|ese\s+punto|ese\s+hallazgo|esa\s+incidencia)\b',
+                t_low
+            )
+        )
+
+        # Si el mensaje respondido estaba dividido en fragmentos (ej. informe largo de DevAgent)
+        # o si el usuario alude a un punto previo sin haber pulsado Reply nativo, consultar memoria reciente y BD
+        need_supplement = (
+            (not replied_parts and references_previous_point)
+            or (raw_reply_text and references_previous_point and len(raw_reply_text) >= 3000)
+            or ("Informe Técnico de DevAgent" in raw_reply_text)
+        )
+        if need_supplement:
+            extra_texts = []
+            # Primero buscar en memoria en vivo del proceso
+            mem_msgs = self._recent_sent_messages_by_chat.get(str_cid) or []
+            for m in mem_msgs[-3:]:
+                m_txt = (m.get("text") or "").strip()
+                if m_txt and m_txt not in raw_reply_text:
+                    extra_texts.append(m_txt)
+            # Buscar también en BD (TelegramConversationMessage role='assistant')
+            try:
+                with SessionLocal() as db_ctx:
+                    recent_asst = db_ctx.query(TelegramConversationMessage).filter(
+                        TelegramConversationMessage.telegram_chat_id == str_cid,
+                        TelegramConversationMessage.role == "assistant"
+                    ).order_by(TelegramConversationMessage.id.desc()).limit(2).all()
+                    for r_msg in reversed(recent_asst):
+                        c_txt = re.sub(r'<[^>]+>', '', (r_msg.content or "")).strip()
+                        if c_txt and c_txt not in raw_reply_text and c_txt not in extra_texts:
+                            extra_texts.append(c_txt)
+            except Exception as e_ctx:
+                logger.debug(f"Aviso consultando historial assistant para contexto de respuesta: {e_ctx}")
+
+            for et in extra_texts[-2:]:
+                replied_parts.append(et[:6000])
+
+        if not replied_parts:
+            return None
+
+        combined_ctx = "\n---\n".join(replied_parts)
+        return combined_ctx[:8000]
+
     def synthesize_conversation_prompt(
         self,
         chat_id: Any,
         user_id: Any,
         current_text: str,
-        reply_to: Optional[Dict[str, Any]] = None
+        reply_to: Optional[Dict[str, Any]] = None,
+        quote: Optional[Dict[str, Any]] = None,
+        reply_context: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
         """
         Sintetiza de forma inteligente el prompt contextualizado del usuario:
-        1. Si responde a un mensaje específico con Reply nativo de Telegram.
+        1. Si responde a un mensaje específico con Reply nativo de Telegram (o alude a un punto de un mensaje previo).
         2. Si hace referencia a 'misma zona' o 'misma búsqueda': busca en el banco de memoria la última búsqueda activa.
            Si no encuentra nada, activa fallback conversacional para solicitar confirmación de zona de forma natural.
         3. Si el mensaje anterior (sin respuesta del bot en medio) es del mismo usuario, evalúa semánticamente:
@@ -1214,18 +1314,21 @@ class TelegramAdvisorBot:
         if not clean_text:
             return clean_text, None
 
-        # 1. Si el usuario utilizó la función nativa 'Reply' de Telegram
-        if reply_to:
-            prev_text = reply_to.get("text") or reply_to.get("caption") or ""
-            if prev_text:
-                clean_prev = re.sub(r'<[^>]+>', '', prev_text).strip()
-                logger.info(f"Incorporando contexto de mensaje respondido nativamente ({len(clean_prev)} caracteres)")
-                return (
-                    f"[Contexto conversacional: El usuario está respondiendo específicamente a este mensaje previo de HIVEX:\n"
-                    f"'''{clean_prev[:600]}'''\n]\n"
-                    f"Pregunta del usuario sobre el mensaje anterior: {clean_text}",
-                    None
-                )
+        # 1. Si el usuario utilizó la función nativa 'Reply' de Telegram o hace alusión a un punto de un mensaje previo
+        effective_reply_ctx = reply_context or self._extract_replied_message_context(
+            chat_id=chat_id,
+            current_text=clean_text,
+            reply_to=reply_to,
+            quote=quote
+        )
+        if effective_reply_ctx:
+            logger.info(f"Incorporando contexto íntegro de mensaje anterior respondido ({len(effective_reply_ctx)} caracteres)")
+            return (
+                f"[Contexto conversacional: El usuario está respondiendo específicamente a este mensaje previo de HIVEX:\n"
+                f"'''{effective_reply_ctx}'''\n]\n"
+                f"Pregunta o petición del usuario sobre el mensaje anterior: {clean_text}",
+                None
+            )
 
         clean_lower = clean_text.lower()
         anaphora_triggers = [
@@ -1475,6 +1578,17 @@ class TelegramAdvisorBot:
                     )
                 )
 
+                # Extraer SIEMPRE el contexto del mensaje al que responde el usuario (reply_to_message / quote / referencia a punto previo)
+                # ANTES de enrutar a DevAgent, Alertas o Asesor Inmobiliario para que todos los canales comprendan el mensaje anterior.
+                reply_to = message.get("reply_to_message")
+                quote = message.get("quote")
+                reply_context = self._extract_replied_message_context(
+                    chat_id=chat_id,
+                    current_text=text_content,
+                    reply_to=reply_to,
+                    quote=quote
+                )
+
                 # Comprobar si es comando explícito para el DevAgent (/dev, /agent, /desarrollo)
                 if text_content.lower().startswith(("/dev", "/agent", "/desarrollo")):
                     dev_handled = await self.handle_dev_agent_command(
@@ -1482,7 +1596,8 @@ class TelegramAdvisorBot:
                         user_id=user_id,
                         user_display_name=user_display_name,
                         task_text=text_content,
-                        message_id=message_id
+                        message_id=message_id,
+                        reply_context=reply_context
                     )
                     if dev_handled:
                         return {"status": "dev_agent_triggered", "user": user_display_name}
@@ -1493,7 +1608,8 @@ class TelegramAdvisorBot:
                     user_id=user_id,
                     user_display_name=user_display_name,
                     text_content=text_content,
-                    message_id=message_id
+                    message_id=message_id,
+                    reply_context=reply_context
                 )
                 if alert_handled:
                     return {"status": "alert_toggled", "user": user_display_name}
@@ -1506,7 +1622,8 @@ class TelegramAdvisorBot:
                         user_id=user_id,
                         user_display_name=user_display_name,
                         task_text=text_content,
-                        message_id=message_id
+                        message_id=message_id,
+                        reply_context=reply_context
                     )
                     if dev_handled:
                         return {"status": "dev_agent_triggered", "user": user_display_name}
@@ -1515,11 +1632,13 @@ class TelegramAdvisorBot:
             audio_duration = None
             # Sintetizar prompt contextualizado si hay encadenamiento de mensajes o respuesta previa
             reply_to = message.get("reply_to_message")
+            quote = message.get("quote")
             prompt_to_process, clarification_question = self.synthesize_conversation_prompt(
                 chat_id=chat_id,
                 user_id=user_id,
                 current_text=text_content or "",
-                reply_to=reply_to
+                reply_to=reply_to,
+                quote=quote
             )
 
             # Si se requiere aclaración conversacional (ej: fallback cuando no se encuentra la zona en memoria)
@@ -1571,12 +1690,19 @@ class TelegramAdvisorBot:
                     if voice_transcription:
                         clean_vt = voice_transcription.strip().lower()
                         if is_private_voice_dev or clean_vt.startswith(("/dev", "dev", "desarrollo", "modo dev", "código", "programar")):
+                            voice_reply_context = self._extract_replied_message_context(
+                                chat_id=chat_id,
+                                current_text=voice_transcription,
+                                reply_to=reply_to,
+                                quote=quote
+                            )
                             dev_handled = await self.handle_dev_agent_command(
                                 chat_id=chat_id,
                                 user_id=user_id,
                                 user_display_name=user_display_name,
                                 task_text=voice_transcription,
-                                message_id=message_id
+                                message_id=message_id,
+                                reply_context=voice_reply_context
                             )
                             if dev_handled:
                                 return {"status": "dev_agent_triggered", "user": user_display_name}
@@ -1770,11 +1896,16 @@ class TelegramAdvisorBot:
         user_id: Any,
         user_display_name: str,
         task_text: str,
-        message_id: Optional[int] = None
+        message_id: Optional[int] = None,
+        reply_context: Optional[str] = None
     ) -> bool:
         """
-        Dispara el DevAgent autónomo en GitHub Actions para el administrador.
-        Permite programar, corregir bugs, ejecutar tests y desplegar cambios desde Telegram.
+        Gestiona las interacciones en el canal de administración/DevAgent y comandos /dev.
+        - Si el usuario responde a un mensaje previo (reply_context) haciendo una pregunta, consulta analítica
+          o pidiendo explicaciones sobre un punto concreto de dicho mensaje (ej: 'qué implicaciones técnicas tiene el punto 3'),
+          responde INMEDIATAMENTE en Telegram analizando el mensaje previo completo con la cascada de modelos de Gemini.
+        - Si el usuario solicita modificar código, corregir un bug, tocar base de datos o correr tests en el repositorio,
+          dispara el DevAgent autónomo en GitHub Actions inyectándole el contexto íntegro del mensaje respondido + la tarea actual.
         """
         str_user_id = str(user_id) if user_id is not None else ""
         str_chat_id = str(chat_id)
@@ -1788,6 +1919,7 @@ class TelegramAdvisorBot:
             )
             return True
 
+        has_explicit_dev_prefix = bool(re.match(r'^/(dev|agent|desarrollo)(@\w+)?\b', (task_text or "").strip(), flags=re.IGNORECASE))
         clean_task = task_text
         clean_task = re.sub(r'^/(dev|agent|desarrollo)(@\w+)?\s*', '', clean_task, flags=re.IGNORECASE).strip()
         clean_task = re.sub(r'^(dev|desarrollo):\s*', '', clean_task, flags=re.IGNORECASE).strip()
@@ -1806,6 +1938,99 @@ class TelegramAdvisorBot:
             await self.send_message(chat_id, help_msg, parse_mode="HTML", reply_to_message_id=message_id)
             return True
 
+        # Si el usuario está respondiendo a un mensaje anterior o haciendo alusión a un punto de un mensaje previo
+        # y no forzó explícitamente /dev, evaluar con Gemini si es una pregunta sobre el mensaje anterior
+        # (para responder al instante con el contexto del mensaje citado) o una orden de ejecución de código en GitHub Actions.
+        if reply_context and not has_explicit_dev_prefix:
+            from app.engine.advisor_engine import advisor_engine
+            api_key = (
+                advisor_engine.gemini_key
+                or settings.GEMINI_API_KEY
+                or os.getenv("GEMINI_API_KEY")
+                or settings.GOOGLE_API_KEY
+                or os.getenv("GOOGLE_API_KEY")
+            )
+            if api_key:
+                try:
+                    router_sys = (
+                        "Eres el analizador sintáctico y semántico contextual de HIVEX DevAgent. "
+                        "El usuario ha respondido a un mensaje anterior del bot en Telegram. "
+                        "Analiza conjuntamente el MENSAJE ANTERIOR y la PETICIÓN ACTUAL DEL USUARIO y devuelve EXCLUSIVAMENTE un JSON:\n"
+                        "- 'mode': UNO de estos dos valores:\n"
+                        "  * 'ANSWER_FROM_CONTEXT': cuando el usuario hace una pregunta, pide aclarar, profundizar, explicar "
+                        "las implicaciones técnicas, el porqué o el detalle de un punto concreto del mensaje anterior "
+                        "(ej: 'qué implicaciones técnicas tiene el punto 3', 'explícame mejor el apartado 2', '¿qué significa eso?', '¿estás seguro de ese punto?'), "
+                        "sin ordenar editar archivos ni hacer commit/push en el repositorio.\n"
+                        "  * 'RUN_DEV_AGENT': cuando el usuario ordena modificar código, arreglar el bug, aplicar el cambio en el repositorio, "
+                        "ejecutar tests o hacer una operación activa sobre el servidor/BD (ej: 'corrige el punto 3', 'aplícalo y sube a producción', 'elimina ese registro')."
+                    )
+                    router_prompt = (
+                        f"MENSAJE ANTERIOR AL QUE RESPONDE EL USUARIO:\n\"\"\"\n{reply_context}\n\"\"\"\n\n"
+                        f"PETICIÓN ACTUAL DEL USUARIO:\n\"\"\"\n{clean_task}\n\"\"\""
+                    )
+                    route_res, _ = await advisor_engine.call_gemini_flash_cascade(
+                        router_prompt,
+                        system_instruction=router_sys,
+                        response_json=True,
+                        task_tier="fast_structured"
+                    )
+                    route_mode = None
+                    if route_res:
+                        parsed_route = json.loads(route_res)
+                        if isinstance(parsed_route, dict):
+                            route_mode = parsed_route.get("mode") or parsed_route.get("intent")
+
+                    if route_mode == "ANSWER_FROM_CONTEXT":
+                        await self.send_chat_action(chat_id, "typing")
+                        ans_sys = (
+                            "Eres HIVEX DevAgent, Ingeniero Principal de Software y Arquitectura de HIVEX Real Estate Spain. "
+                            "El usuario está respondiendo a un mensaje o informe técnico anterior tuyo y hace alusión a su contenido "
+                            "(por ejemplo, a un punto numerado, hallazgo técnico, fragmento de código o conclusión). "
+                            "Toma en cuenta ÍNTEGRAMENTE el mensaje anterior que se te adjunta y responde de forma directa, rigurosa, "
+                            "precisa y en español a la pregunta concreta del usuario sobre ese mensaje.\n"
+                            "Usa formato HTML compatible con Telegram (<b>negrita</b>, <i>cursiva</i>, <code>código</code>) y NO uses etiquetas Markdown como ** ni ```."
+                        )
+                        ans_prompt = (
+                            f"MENSAJE ANTERIOR COMPLETO (CONTEXTO DE LA RESPUESTA):\n\"\"\"\n{reply_context}\n\"\"\"\n\n"
+                            f"PREGUNTA O PETICIÓN DEL USUARIO SOBRE ESE MENSAJE:\n\"\"\"\n{clean_task}\n\"\"\"\n\n"
+                            "Responde directamente al usuario resolviendo su duda con precisión técnica basada en el mensaje anterior:"
+                        )
+                        ans_text, ans_model = await advisor_engine.call_gemini_flash_cascade(
+                            ans_prompt,
+                            system_instruction=ans_sys,
+                            response_json=False,
+                            task_tier="deep_reasoning"
+                        )
+                        if ans_text and ans_text.strip():
+                            clean_html = ans_text.strip()
+                            # Convertir posibles **residuales** a <b> si el modelo los incluyó
+                            clean_html = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', clean_html)
+                            header = f"💡 <b>Respuesta Contextual · DevAgent ({html.escape(ans_model or 'Gemini')}):</b>\n\n"
+                            full_reply = header + clean_html
+                            await self.send_message(chat_id, full_reply, parse_mode="HTML", reply_to_message_id=message_id)
+                            try:
+                                with SessionLocal() as db_ctx:
+                                    db_ctx.add(TelegramConversationMessage(
+                                        telegram_chat_id=str(chat_id),
+                                        telegram_user_id=str(user_id) if user_id else None,
+                                        role="user",
+                                        content_type="text",
+                                        content=clean_task
+                                    ))
+                                    db_ctx.add(TelegramConversationMessage(
+                                        telegram_chat_id=str(chat_id),
+                                        telegram_user_id=str(user_id) if user_id else None,
+                                        role="assistant",
+                                        content_type="text",
+                                        content=full_reply
+                                    ))
+                                    db_ctx.commit()
+                            except Exception as e_db_ctx:
+                                logger.debug(f"Aviso guardando respuesta contextual de DevAgent en BD: {e_db_ctx}")
+                            return True
+                except Exception as e_ctx_dev:
+                    logger.warning(f"Aviso evaluando respuesta contextual en handle_dev_agent_command: {e_ctx_dev}")
+
         gh_token = getattr(settings, "GITHUB_TOKEN", "") or os.getenv("GITHUB_TOKEN", "")
         repo = getattr(settings, "GITHUB_REPO", "") or os.getenv("GITHUB_REPO", "kubicatrading/hivex-realestate-spain")
 
@@ -1821,6 +2046,13 @@ class TelegramAdvisorBot:
             await self.send_message(chat_id, missing_msg, parse_mode="HTML", reply_to_message_id=message_id)
             return True
 
+        # Si hay contexto del mensaje respondido, incluirlo íntegramente junto con la petición actual en el input de GitHub Actions
+        task_for_dispatch = (
+            f"[CONTEXTO DEL MENSAJE ANTERIOR AL QUE RESPONDE EL USUARIO]:\n"
+            f"\"\"\"\n{reply_context}\n\"\"\"\n\n"
+            f"[PETICIÓN ACTUAL DEL USUARIO]:\n{clean_task}"
+        ) if reply_context else clean_task
+
         # Disparar workflow en GitHub Actions vía API REST
         url = f"https://api.github.com/repos/{repo}/actions/workflows/dev_agent.yml/dispatches"
         headers = {
@@ -1831,7 +2063,7 @@ class TelegramAdvisorBot:
         payload = {
             "ref": "main",
             "inputs": {
-                "task": clean_task,
+                "task": task_for_dispatch[:60000],
                 "telegram_chat_id": str(chat_id),
                 "telegram_message_id": str(message_id) if message_id else ""
             }
@@ -1841,9 +2073,10 @@ class TelegramAdvisorBot:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(url, json=payload, headers=headers)
                 if res.status_code == 204:
+                    ctx_badge = "\n📎 <b>Contexto vinculado:</b> <i>Incluye el mensaje anterior al que respondes</i>" if reply_context else ""
                     confirm_msg = (
                         f"🚀 <b>¡DevAgent activado en GitHub Actions!</b>\n\n"
-                        f"🎯 <b>Tarea:</b> <i>{html.escape(clean_task)}</i>\n\n"
+                        f"🎯 <b>Tarea:</b> <i>{html.escape(clean_task)}</i>{ctx_badge}\n\n"
                         f"📦 <b>Entorno:</b> GitHub Actions (Ubuntu Cloud Runner)\n"
                         f"⏳ El agente está clonando el repositorio, analizando el código y preparando los cambios...\n\n"
                         f"📲 <i>Te notificaré por este mismo chat en cuanto termine la ejecución y los tests pasen.</i>"
@@ -1859,10 +2092,14 @@ class TelegramAdvisorBot:
             await self.send_message(chat_id, f"❌ Error disparando DevAgent: {html.escape(str(e_gh))}", parse_mode="HTML", reply_to_message_id=message_id)
             return True
 
-    async def _classify_consultation_command_with_ai(self, text_content: str) -> Optional[Dict[str, Any]]:
+    async def _classify_consultation_command_with_ai(
+        self,
+        text_content: str,
+        reply_context: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Analiza sintáctica y semánticamente el mensaje de Telegram como un prompt ante la cascada
-        de modelos de Gemini definida en plataforma (`advisor_engine.call_gemini_flash_cascade`).
+        Analiza sintáctica y semánticamente el mensaje de Telegram (junto con el contexto del mensaje al que responde,
+        si existe) como un prompt ante la cascada de modelos de Gemini definida en plataforma (`advisor_engine.call_gemini_flash_cascade`).
         Determina si el usuario pide eliminar, pausar, activar o listar consultas/alertas, o si es otro tipo de consulta.
         """
         clean_msg = (text_content or "").strip()
@@ -1882,21 +2119,29 @@ class TelegramAdvisorBot:
 
         sys_inst = (
             "Eres el analizador sintáctico y semántico de mensajes de Telegram de HIVEX. "
-            "Recibes un mensaje del usuario y debes determinar mediante análisis sintáctico y semántico "
-            "(sin depender de palabras clave rígidas) si el usuario está dando una orden sobre el estado o gestión "
-            "de sus consultas/búsquedas/alertas guardadas en plataforma, o si por el contrario está haciendo una búsqueda "
-            "inmobiliaria nueva o una pregunta de mercado.\n"
+            "Recibes un mensaje del usuario (y opcionalmente el mensaje anterior al que está respondiendo) y debes determinar "
+            "mediante análisis sintáctico y semántico (sin depender de palabras clave rígidas) si el usuario está dando una orden "
+            "sobre el estado o gestión de sus consultas/búsquedas/alertas guardadas en plataforma, o si por el contrario está haciendo "
+            "una búsqueda inmobiliaria nueva o una pregunta sobre un mensaje anterior.\n"
+            "Si el usuario responde a un mensaje anterior diciendo por ejemplo 'elimínala', 'páusala' o 'borra esa consulta', "
+            "extrae el ID (`target_consultation_id`) o la zona (`search_term`) del mensaje anterior al que responde.\n"
             "Devuelve EXCLUSIVAMENTE un objeto JSON con:\n"
             "- 'action': UNO de estos valores:\n"
-            "  * 'DELETE': si pide borrar, eliminar, quitar, descartar o dar de baja una consulta, búsqueda o alerta (ej: 'Por favor elimina la consulta 62', 'Oye, la 62 quítala del panel que fue un error').\n"
+            "  * 'DELETE': si pide borrar, eliminar, quitar, descartar o dar de baja una consulta, búsqueda o alerta (ej: 'Por favor elimina la consulta 62', 'Oye, la 62 quítala del panel que fue un error', o responder 'bórrala' a una consulta).\n"
             "  * 'PAUSE': si pide pausar, desactivar, silenciar o detener una consulta o alerta.\n"
             "  * 'ACTIVATE': si pide activar, reactivar o reanudar una consulta o alerta.\n"
             "  * 'LIST': si pide ver qué alertas o consultas están activas/configuradas en la plataforma, o pregunta por qué no han saltado alertas nuevas de las ya configuradas.\n"
-            "  * 'NONE': si es una búsqueda de oportunidades inmobiliarias (incluso si dice 'dame de alta una nueva consulta en X' o 'haz la misma consulta que en X pero en Y'), una pregunta de mercado/KPIs, o una instrucción de código para el DevAgent.\n"
-            "- 'target_consultation_id': número entero del ID de la consulta/alerta si se menciona (ej: 62), o null.\n"
+            "  * 'NONE': si es una búsqueda de oportunidades inmobiliarias (incluso si dice 'dame de alta una nueva consulta en X' o 'haz la misma consulta que en X pero en Y'), una pregunta sobre un punto de un mensaje anterior, una pregunta de mercado/KPIs, o una instrucción de código para el DevAgent.\n"
+            "- 'target_consultation_id': número entero del ID de la consulta/alerta si se menciona en la petición o en el mensaje al que responde (ej: 62), o null.\n"
             "- 'search_term': texto breve de la zona o tema de la consulta a gestionar si no dio ID numérico (ej: 'guadalix'), o null."
         )
-        prompt = f"Mensaje del usuario en Telegram: «{clean_msg}»"
+        if reply_context:
+            prompt = (
+                f"Mensaje anterior al que responde el usuario:\n\"\"\"\n{reply_context[:2500]}\n\"\"\"\n\n"
+                f"Mensaje actual del usuario en Telegram: «{clean_msg}»"
+            )
+        else:
+            prompt = f"Mensaje del usuario en Telegram: «{clean_msg}»"
         gemini_res, model_used = await advisor_engine.call_gemini_flash_cascade(
             prompt,
             system_instruction=sys_inst,
@@ -1921,14 +2166,16 @@ class TelegramAdvisorBot:
         user_display_name: str,
         text_content: str,
         message_id: Optional[int] = None,
-        force_ai: bool = False
+        force_ai: bool = False,
+        reply_context: Optional[str] = None
     ) -> bool:
         """
         Interpreta mensajes en Telegram para eliminar/borrar, activar, pausar o listar
         búsquedas/consultas/alertas del módulo visual de oportunidades.
         REGLA DE ARQUITECTURA HIVEX:
         1. Primero analiza el mensaje sintáctica y semánticamente como un prompt con la cascada de modelos
-           de Gemini definida en plataforma (`_classify_consultation_command_with_ai`).
+           de Gemini definida en plataforma (`_classify_consultation_command_with_ai`), incluyendo el contexto
+           del mensaje al que responde (`reply_context`) si existe.
         2. Las expresiones regulares en Python actúan EXCLUSIVAMENTE como fallback cuando Gemini no está disponible.
         """
         import re
@@ -1944,7 +2191,10 @@ class TelegramAdvisorBot:
 
         # 1. MOTOR PRIMARIO (100% IA SINTÁCTICO Y SEMÁNTICO EN CASCADA GEMINI)
         if force_ai or "PYTEST_CURRENT_TEST" not in os.environ:
-            ai_decision = await self._classify_consultation_command_with_ai(text_content)
+            ai_decision = await self._classify_consultation_command_with_ai(
+                text_content,
+                reply_context=reply_context
+            )
             if ai_decision is not None:
                 used_ai_primary = True
                 act = ai_decision.get("action")
@@ -2010,6 +2260,10 @@ class TelegramAdvisorBot:
                     any_num = re.search(r'\b(\d+)\b', txt)
                     if any_num and (is_delete or is_deactivate or is_activate):
                         explicit_id = int(any_num.group(1))
+                    elif reply_context and (is_delete or is_deactivate or is_activate):
+                        ctx_id_match = re.search(r'(?:consulta|alerta|búsqueda|busqueda|id|#)\s*#?(\d+)|#(\d+)', reply_context.lower())
+                        if ctx_id_match:
+                            explicit_id = int(ctx_id_match.group(1) or ctx_id_match.group(2))
 
             # Caso 0: Borrado / Eliminación definitiva de una consulta de BD
             if is_delete:

@@ -1075,6 +1075,7 @@ async def test_delete_consultation_command_and_gemini_primary_parser(in_memory_d
 
     monkeypatch.setattr(advisor_engine, "call_gemini_flash_cascade", fake_gemini_cascade)
     monkeypatch.setattr(advisor_engine, "gemini_key", "fake_key_for_test")
+    monkeypatch.setattr(advisor_engine, "gemini_key", "fake_key_for_test")
 
     handled_ai = await bot.handle_toggle_alert_command(
         chat_id="1450113787",
@@ -1092,6 +1093,86 @@ async def test_delete_consultation_command_and_gemini_primary_parser(in_memory_d
     assert parsed_crit["municipality"] == "Pinto"
     assert parsed_crit["property_type"] is None  # 'localidad' jamás se contamina como 'Local'
     assert parsed_crit["wants_property_cards"] is True
+
+
+@pytest.mark.asyncio
+async def test_reply_to_message_context_understanding_in_dev_agent_and_advisor(in_memory_db, monkeypatch):
+    """
+    Verifica que cuando el usuario responde a un mensaje anterior del bot en Telegram
+    (por ejemplo: 'qué implicaciones técnicas tiene el punto 3'), el bot extrae el
+    mensaje citado/respondido completo, comprende la referencia al punto concreto
+    y responde en contexto sin lanzar un workflow a ciegas ni crear una consulta falsa.
+    """
+    from app.services.telegram_advisor_bot import TelegramAdvisorBot
+
+    bot = TelegramAdvisorBot()
+    bot.token = "fake_token"
+    sent_messages = []
+
+    async def fake_send_message(chat_id, text, reply_to_message_id=None, parse_mode="HTML", reply_markup=None):
+        sent_messages.append({"chat_id": chat_id, "text": text, "reply_to": reply_to_message_id})
+        return True
+
+    monkeypatch.setattr(bot, "send_message", fake_send_message)
+    monkeypatch.setattr("app.services.telegram_advisor_bot.SessionLocal", lambda: in_memory_db)
+    monkeypatch.setattr(in_memory_db, "close", lambda: None)
+
+    replied_report = (
+        "📋 Informe Técnico de DevAgent (gemini-3.8-flash):\n"
+        "### 1. Diagnóstico del Estado Actual\n"
+        "El filtro funciona en AdvisorEngine.\n"
+        "### 3. Hallazgo Técnico en el Código (app/api/main.py)\n"
+        "En la línea 1350 de app/api/main.py, la clave de caché incluía la variable only_new "
+        "que ya no estaba definida en la firma del endpoint, pudiendo provocar un NameError."
+    )
+
+    msg_payload = {
+        "message_id": 200,
+        "text": "qué implicaciones técnicas tiene el punto 3",
+        "reply_to_message": {
+            "message_id": 199,
+            "from": {"is_bot": True, "first_name": "HIVEX Advisor"},
+            "text": replied_report
+        }
+    }
+
+    extracted_ctx = bot._extract_replied_message_context(
+        chat_id="1450113787",
+        current_text=msg_payload["text"],
+        reply_to=msg_payload["reply_to_message"]
+    )
+    assert "### 3. Hallazgo Técnico en el Código (app/api/main.py)" in extracted_ctx
+    assert "NameError" in extracted_ctx
+
+    captured_prompts = []
+
+    async def fake_gemini_cascade(prompt, system_instruction="", temperature=0.1, max_output_tokens=1024, response_json=False, response_mime_type=None, task_tier="fast_structured"):
+        captured_prompts.append(prompt)
+        if response_json and "ANSWER_FROM_CONTEXT" in system_instruction:
+            return json.dumps({
+                "intent": "ANSWER_FROM_CONTEXT",
+                "reasoning": "El usuario pregunta por las implicaciones técnicas del punto 3 del informe anterior."
+            }), "gemini-3.8-flash"
+        return (
+            "<b>Implicaciones técnicas del Punto 3 (<code>only_new</code> en <code>app/api/main.py:1350</code>):</b>\n"
+            "1. Provocaba un <code>NameError: name 'only_new' is not defined</code> al construir <code>cache_key</code>.\n"
+            "2. Ese fallo era capturado por el bloque <code>except Exception</code> devolviendo un 500 o impidiendo cachear la respuesta."
+        ), "gemini-3.8-flash"
+
+    monkeypatch.setattr(advisor_engine, "call_gemini_flash_cascade", fake_gemini_cascade)
+    monkeypatch.setattr(advisor_engine, "gemini_key", "fake_key_for_test")
+
+    ok = await bot.handle_dev_agent_command(
+        chat_id="1450113787",
+        user_id="1450113787",
+        user_display_name="jsaavedra",
+        task_text="qué implicaciones técnicas tiene el punto 3",
+        message_id=200,
+        reply_context=extracted_ctx
+    )
+    assert ok is True
+    assert any("Implicaciones técnicas del Punto 3" in m["text"] for m in sent_messages)
+    assert any("### 3. Hallazgo Técnico en el Código" in p for p in captured_prompts)
 
 
 
