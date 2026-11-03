@@ -1859,55 +1859,141 @@ class TelegramAdvisorBot:
             await self.send_message(chat_id, f"❌ Error disparando DevAgent: {html.escape(str(e_gh))}", parse_mode="HTML", reply_to_message_id=message_id)
             return True
 
+    async def _classify_consultation_command_with_ai(self, text_content: str) -> Optional[Dict[str, Any]]:
+        """
+        Analiza sintáctica y semánticamente el mensaje de Telegram como un prompt ante la cascada
+        de modelos de Gemini definida en plataforma (`advisor_engine.call_gemini_flash_cascade`).
+        Determina si el usuario pide eliminar, pausar, activar o listar consultas/alertas, o si es otro tipo de consulta.
+        """
+        clean_msg = (text_content or "").strip()
+        if not clean_msg:
+            return None
+
+        from app.engine.advisor_engine import advisor_engine
+        api_key = (
+            advisor_engine.gemini_key
+            or settings.GEMINI_API_KEY
+            or os.getenv("GEMINI_API_KEY")
+            or settings.GOOGLE_API_KEY
+            or os.getenv("GOOGLE_API_KEY")
+        )
+        if not api_key:
+            return None
+
+        sys_inst = (
+            "Eres el analizador sintáctico y semántico de mensajes de Telegram de HIVEX. "
+            "Recibes un mensaje del usuario y debes determinar mediante análisis sintáctico y semántico "
+            "(sin depender de palabras clave rígidas) si el usuario está dando una orden sobre el estado o gestión "
+            "de sus consultas/búsquedas/alertas guardadas en plataforma, o si por el contrario está haciendo una búsqueda "
+            "inmobiliaria nueva o una pregunta de mercado.\n"
+            "Devuelve EXCLUSIVAMENTE un objeto JSON con:\n"
+            "- 'action': UNO de estos valores:\n"
+            "  * 'DELETE': si pide borrar, eliminar, quitar, descartar o dar de baja una consulta, búsqueda o alerta (ej: 'Por favor elimina la consulta 62', 'Oye, la 62 quítala del panel que fue un error').\n"
+            "  * 'PAUSE': si pide pausar, desactivar, silenciar o detener una consulta o alerta.\n"
+            "  * 'ACTIVATE': si pide activar, reactivar o reanudar una consulta o alerta.\n"
+            "  * 'LIST': si pide ver qué alertas o consultas están activas/configuradas en la plataforma, o pregunta por qué no han saltado alertas nuevas de las ya configuradas.\n"
+            "  * 'NONE': si es una búsqueda de oportunidades inmobiliarias (incluso si dice 'dame de alta una nueva consulta en X' o 'haz la misma consulta que en X pero en Y'), una pregunta de mercado/KPIs, o una instrucción de código para el DevAgent.\n"
+            "- 'target_consultation_id': número entero del ID de la consulta/alerta si se menciona (ej: 62), o null.\n"
+            "- 'search_term': texto breve de la zona o tema de la consulta a gestionar si no dio ID numérico (ej: 'guadalix'), o null."
+        )
+        prompt = f"Mensaje del usuario en Telegram: «{clean_msg}»"
+        gemini_res, model_used = await advisor_engine.call_gemini_flash_cascade(
+            prompt,
+            system_instruction=sys_inst,
+            response_json=True,
+            task_tier="fast_structured"
+        )
+        if gemini_res:
+            try:
+                parsed = json.loads(gemini_res)
+                if isinstance(parsed, dict) and parsed.get("action") in ("DELETE", "PAUSE", "ACTIVATE", "LIST", "NONE"):
+                    parsed["model_used"] = model_used
+                    logger.info(f"[Gemini Consultation Command Analyzer · {model_used}] Resultado: {parsed}")
+                    return parsed
+            except Exception as e_ai:
+                logger.warning(f"No se pudo parsear JSON de _classify_consultation_command_with_ai: {e_ai}")
+        return None
+
     async def handle_toggle_alert_command(
         self,
         chat_id: Any,
         user_id: Any,
         user_display_name: str,
         text_content: str,
-        message_id: Optional[int] = None
+        message_id: Optional[int] = None,
+        force_ai: bool = False
     ) -> bool:
         """
-        Interpreta comandos conversacionales en Telegram para eliminar/borrar, activar,
-        pausar o listar búsquedas/consultas/alertas del módulo visual de oportunidades.
-        Retorna True si el mensaje fue un comando de gestión de consulta/alerta y se procesó.
+        Interpreta mensajes en Telegram para eliminar/borrar, activar, pausar o listar
+        búsquedas/consultas/alertas del módulo visual de oportunidades.
+        REGLA DE ARQUITECTURA HIVEX:
+        1. Primero analiza el mensaje sintáctica y semánticamente como un prompt con la cascada de modelos
+           de Gemini definida en plataforma (`_classify_consultation_command_with_ai`).
+        2. Las expresiones regulares en Python actúan EXCLUSIVAMENTE como fallback cuando Gemini no está disponible.
         """
         import re
         txt = text_content.strip().lower()
 
+        is_delete = False
+        is_deactivate = False
+        is_activate = False
+        list_match = False
+        explicit_id: Optional[int] = None
+        ai_search_term: Optional[str] = None
+        used_ai_primary = False
+
+        # 1. MOTOR PRIMARIO (100% IA SINTÁCTICO Y SEMÁNTICO EN CASCADA GEMINI)
+        if force_ai or "PYTEST_CURRENT_TEST" not in os.environ:
+            ai_decision = await self._classify_consultation_command_with_ai(text_content)
+            if ai_decision is not None:
+                used_ai_primary = True
+                act = ai_decision.get("action")
+                if act == "NONE":
+                    return False
+                is_delete = (act == "DELETE")
+                is_deactivate = (act == "PAUSE")
+                is_activate = (act == "ACTIVATE")
+                list_match = (act == "LIST")
+                raw_tid = ai_decision.get("target_consultation_id")
+                if raw_tid is not None and str(raw_tid).strip().isdigit():
+                    explicit_id = int(str(raw_tid).strip())
+                raw_st = ai_decision.get("search_term")
+                if isinstance(raw_st, str) and raw_st.strip().lower() not in ("", "null", "none"):
+                    ai_search_term = raw_st.strip().lower()
+
+        # 2. FALLBACK HEURÍSTICO EN PYTHON (Solo si Gemini no estuvo disponible o en test offline sin force_ai)
         del_verbs = r'(borra|borrar|bórrame|borrame|elimina|eliminar|elimíname|eliminame|quita|quitar|quítame|quitame|suprime|suprimir)'
         deact_verbs = r'(desactiva|desactivar|pausa|pausar|inactiva|inactivar|deten|detén|detener|cancela|cancelar|apaga|apagar|silencia|silenciar)'
         act_verbs = r'(activa|activar|reanuda|reanudar|reactiva|reactivar|enciende|encender|habilita|habilitar)'
         alert_nouns = r'(?:la\s+|las\s+|mi\s+|mis\s+|el\s+|los\s+)?(?:alerta|alertas|búsqueda|busqueda|búsquedas|busquedas|consulta|consultas|radar)'
         target_words = ["alerta", "alertas", "busqueda", "búsqueda", "busquedas", "búsquedas", "consulta", "consultas", "radar"]
 
-        is_delete = (
-            bool(re.search(rf'\b{del_verbs}\b', txt) and any(w in txt for w in target_words))
-            or txt.startswith("/borrar")
-            or txt.startswith("/eliminar")
-        )
-        is_deactivate = (not is_delete) and (
-            bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
-            or txt.startswith("/pausar")
-            or txt.startswith("/desactivar")
-        )
-        is_activate = (not is_delete and not is_deactivate) and (
-            bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
-            or txt.startswith("/activar")
-            or txt.startswith("/reanudar")
-        )
-
-        # Regex para detectar intenciones de listar alertas/búsquedas o verificar novedades de alertas en plataforma
-        list_match = (not is_delete and not is_deactivate and not is_activate) and bool(
-            re.search(
-                r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas|alertas configuradas|consultas configuradas|consultas activas)\b',
-                txt
+        if not used_ai_primary:
+            is_delete = (
+                bool(re.search(rf'\b{del_verbs}\b', txt) and any(w in txt for w in target_words))
+                or txt.startswith("/borrar")
+                or txt.startswith("/eliminar")
             )
-            or (
-                re.search(r'\b(alerta|alertas|consulta|consultas)\b', txt)
-                and re.search(r'\b(plataforma|configurada|configuradas|ninguna de las|no hay oportunidades nuevas)\b', txt)
+            is_deactivate = (not is_delete) and (
+                bool(re.search(rf'\b{deact_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
+                or txt.startswith("/pausar")
+                or txt.startswith("/desactivar")
             )
-        )
+            is_activate = (not is_delete and not is_deactivate) and (
+                bool(re.search(rf'\b{act_verbs}\b(?:\s+{alert_nouns})?', txt) and any(w in txt for w in target_words))
+                or txt.startswith("/activar")
+                or txt.startswith("/reanudar")
+            )
+            list_match = (not is_delete and not is_deactivate and not is_activate) and bool(
+                re.search(
+                    r'\b(mis alertas|alertas activas|qué alertas|que alertas|ver alertas|listar alertas|estado de alertas|/alertas|alertas configuradas|consultas configuradas|consultas activas)\b',
+                    txt
+                )
+                or (
+                    re.search(r'\b(alerta|alertas|consulta|consultas)\b', txt)
+                    and re.search(r'\b(plataforma|configurada|configuradas|ninguna de las|no hay oportunidades nuevas)\b', txt)
+                )
+            )
 
         if not (list_match or is_delete or is_deactivate or is_activate):
             return False
@@ -1916,14 +2002,14 @@ class TelegramAdvisorBot:
             from app.db.models import SavedConsultation
             from sqlalchemy import or_
 
-            id_match = re.search(r'(?:consulta|alerta|búsqueda|busqueda|id|#)\s*#?(\d+)|#(\d+)', txt)
-            explicit_id: Optional[int] = None
-            if id_match:
-                explicit_id = int(id_match.group(1) or id_match.group(2))
-            else:
-                any_num = re.search(r'\b(\d+)\b', txt)
-                if any_num and (is_delete or is_deactivate or is_activate):
-                    explicit_id = int(any_num.group(1))
+            if explicit_id is None:
+                id_match = re.search(r'(?:consulta|alerta|búsqueda|busqueda|id|#)\s*#?(\d+)|#(\d+)', txt)
+                if id_match:
+                    explicit_id = int(id_match.group(1) or id_match.group(2))
+                else:
+                    any_num = re.search(r'\b(\d+)\b', txt)
+                    if any_num and (is_delete or is_deactivate or is_activate):
+                        explicit_id = int(any_num.group(1))
 
             # Caso 0: Borrado / Eliminación definitiva de una consulta de BD
             if is_delete:
@@ -1945,7 +2031,7 @@ class TelegramAdvisorBot:
                     if user_display_name:
                         user_conds.append(SavedConsultation.user_name.ilike(user_display_name.strip()))
                     cand_list = db.query(SavedConsultation).filter(or_(*user_conds)).order_by(SavedConsultation.id.desc()).all()
-                    clean_term = re.sub(rf'\b({del_verbs}|{alert_nouns}|por|favor|es|un|error|de|en|para|la|el|los|las)\b', ' ', txt).strip()
+                    clean_term = ai_search_term or re.sub(rf'\b({del_verbs}|{alert_nouns}|por|favor|es|un|error|de|en|para|la|el|los|las)\b', ' ', txt).strip()
                     if len(clean_term) >= 3:
                         for c in cand_list:
                             if clean_term in f"{c.title} {c.description}".lower():

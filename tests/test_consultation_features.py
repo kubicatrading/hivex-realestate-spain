@@ -1034,8 +1034,31 @@ async def test_delete_consultation_command_and_gemini_primary_parser(in_memory_d
     assert res_meta.get("saved_consultation_id") is None
     assert in_memory_db.query(SavedConsultation).count() == 0
 
-    # Verificar que parse_query_intent usa Gemini 100% como motor primario cuando responde JSON válido
+    # Verificar que handle_toggle_alert_command con motor primario IA (Gemini) comprende una frase
+    # natural sin verbos de la regex de Python (ej. "Oye, la 65 se creó sin querer, sácala del panel")
+    c65 = SavedConsultation(
+        id=65,
+        user_name="jsaavedra",
+        telegram_chat_id="-1003904392737",
+        title="#65 - Madrid",
+        description="consulta de prueba 65",
+        query_type="SEARCH_OPPORTUNITIES",
+        criteria_json="{}",
+        matched_opportunity_ids_json='["HIVEX-MKT-1"]',
+        matched_count=1,
+        is_active=True,
+    )
+    in_memory_db.add(c65)
+    in_memory_db.commit()
+
     async def fake_gemini_cascade(prompt, system_instruction="", response_json=False, task_tier="fast_structured"):
+        if "sácala del panel" in prompt:
+            return json.dumps({
+                "action": "DELETE",
+                "target_consultation_id": 65,
+                "search_term": None,
+                "reasoning": "El usuario pide semánticamente retirar/borrar la consulta #65 del panel porque se creó por error."
+            }), "gemini-3.8-flash"
         return json.dumps({
             "query_type": "SEARCH_OPPORTUNITIES",
             "province": "Madrid",
@@ -1044,14 +1067,31 @@ async def test_delete_consultation_command_and_gemini_primary_parser(in_memory_d
             "property_type": None,
             "target_count": 20,
             "is_alert": False,
+            "wants_property_cards": True,
+            "wants_external_portals": False,
+            "clone_from_zone": None,
+            "target_consultation_id": None,
         }), "gemini-3.8-flash"
 
     monkeypatch.setattr(advisor_engine, "call_gemini_flash_cascade", fake_gemini_cascade)
     monkeypatch.setattr(advisor_engine, "gemini_key", "fake_key_for_test")
+
+    handled_ai = await bot.handle_toggle_alert_command(
+        chat_id="1450113787",
+        user_id="1450113787",
+        user_display_name="jsaavedra",
+        text_content="Oye, la 65 se creó sin querer, sácala del panel",
+        message_id=102,
+        force_ai=True,
+    )
+    assert handled_ai is True
+    assert in_memory_db.query(SavedConsultation).filter(SavedConsultation.id == 65).first() is None
+
     parsed_crit = await advisor_engine.parse_query_intent("Envíame oportunidades en la localidad de Pinto")
     assert parsed_crit["parser_engine"] == "gemini_primary"
     assert parsed_crit["municipality"] == "Pinto"
     assert parsed_crit["property_type"] is None  # 'localidad' jamás se contamina como 'Local'
+    assert parsed_crit["wants_property_cards"] is True
 
 
 

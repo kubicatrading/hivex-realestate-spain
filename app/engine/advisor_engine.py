@@ -449,15 +449,23 @@ class AdvisorEngine:
         zone_or_neigh = _clean_str(parsed.get("zone_or_neighborhood"))
 
         q_type = _clean_str(parsed.get("query_type")) or "SEARCH_OPPORTUNITIES"
-        txt_low = (text_input or "").lower()
-        if q_type == "SCHEDULED_ALERT" and any(
-            w in txt_low for w in ["envíame", "enviame", "búscame", "buscame", "muéstrame", "muestrame", "detectes", "detectas", "oportunidades"]
-        ):
-            q_type = "SEARCH_OPPORTUNITIES"
+
+        wants_cards_raw = parsed.get("wants_property_cards")
+        if isinstance(wants_cards_raw, bool):
+            wants_property_cards = wants_cards_raw
+        else:
+            wants_property_cards = (q_type == "SEARCH_OPPORTUNITIES")
+
+        wants_ext_raw = parsed.get("wants_external_portals")
+        wants_external_portals = bool(wants_ext_raw) if isinstance(wants_ext_raw, bool) else False
 
         criteria: Dict[str, Any] = {
             "raw_query": text_input,
             "query_type": q_type,
+            "wants_property_cards": wants_property_cards,
+            "wants_external_portals": wants_external_portals,
+            "clone_from_zone": _clean_str(parsed.get("clone_from_zone")),
+            "target_consultation_id": _safe_int(parsed.get("target_consultation_id")),
             "province": province,
             "zone_or_neighborhood": zone_or_neigh,
             "street_or_urbanization": street_or_urb,
@@ -490,12 +498,12 @@ class AdvisorEngine:
 
     async def parse_query_intent(self, text_input: str) -> Dict[str, Any]:
         """
-        Extrae intención, jerarquía completa de ubicación (calle/urbanización + barrio/distrito +
-        municipio/localidad + código postal + provincia), rangos de precio, tipos de activo,
+        Extrae intención sintáctica y semántica, jerarquía completa de ubicación (calle/urbanización +
+        barrio/distrito + municipio/localidad + código postal + provincia), rangos de precio, tipos de activo,
         descuentos mínimos, rendimiento BTL, target de fichas y solicitud de alertas.
-        REGLA DE ARQUITECTURA HIVEX: Todo el peso del parseo recae PRIMERO en Gemini (100% IA).
-        El parseador por keywords en Python (`_parse_query_intent_heuristics`) actúa ÚNICAMENTE
-        como opción de fallback si Gemini no está disponible o falla la red.
+        REGLA DE ARQUITECTURA HIVEX: Todo mensaje se trata como un prompt analizado sintáctica y semánticamente
+        por la cascada de modelos de Gemini definida en plataforma (`call_gemini_flash_cascade`).
+        El parseador por keywords en Python (`_parse_query_intent_heuristics`) actúa ÚNICAMENTE como fallback.
         """
         api_key = (
             self.gemini_key or
@@ -506,33 +514,38 @@ class AdvisorEngine:
         )
         if api_key:
             sys_inst = (
-                "Eres el analizador semántico principal de consultas inmobiliarias de HIVEX en España. "
-                "Todo el peso del parseo recae en ti: analiza la intención sintáctica y semántica completa del usuario. "
-                "Es VITAL que extraigas el CONJUNTO JERÁRQUICO COMPLETO de la zona indicada por el usuario "
-                "(calle/urbanización + barrio/distrito + municipio/ciudad + código postal + provincia) para aplicar un filtro AND estricto. "
-                "Extrae los parámetros en formato JSON con las siguientes claves:\n"
-                "- query_type ('SEARCH_OPPORTUNITIES', 'ROI_BTL_CALC', 'DISTRICT_ANALYSIS', 'SCORING_CROSSREF', 'SCHEDULED_ALERT', "
-                "'DELETE_CONSULTATION', 'TOGGLE_CONSULTATION', 'SYSTEM_META'; "
-                "usa 'DELETE_CONSULTATION' si el usuario pide borrar/eliminar/quitar una consulta o alerta como 'elimina la consulta 62'; "
-                "usa 'TOGGLE_CONSULTATION' si pide pausar/activar/listar alertas; "
-                "usa 'SYSTEM_META' si es una queja o pregunta sobre el bot como '¿por qué no dices nada?'; "
-                "si pide 'envíame oportunidades', 'búscame oportunidades', 'muéstrame oportunidades' o similar, DEBE ser 'SEARCH_OPPORTUNITIES'),\n"
+                "Eres el motor central de análisis sintáctico y semántico de HIVEX en España. "
+                "Todo mensaje escrito por el usuario en Telegram o web se analiza a través de ti antes de ejecutar cualquier acción. "
+                "Analiza la estructura sintáctica, la intención comunicativa y el significado semántico del mensaje y devuelve "
+                "un objeto JSON con las siguientes claves:\n"
+                "- query_type: clasifica semánticamente la intención principal en UNO de estos valores:\n"
+                "  * 'SEARCH_OPPORTUNITIES': el usuario busca, solicita o quiere recibir fichas/oportunidades de inmuebles.\n"
+                "  * 'QUANTITATIVE_COUNT': el usuario pregunta únicamente cuántas oportunidades hay o qué volumen existe en una zona (sin pedir que le envíes las fichas).\n"
+                "  * 'PRICE_DEVIATION': el usuario pregunta cuánto se desvía el precio de venta respecto al mercado.\n"
+                "  * 'ROI_BTL_CALC': el usuario pregunta por el yield, rentabilidad, ROI o retorno de una zona (sin pedir fichas).\n"
+                "  * 'DISTRICT_ANALYSIS': el usuario pide análisis de mercado, precio medio por m², comparativa entre zonas o recomendación de dónde invertir (sin pedir fichas).\n"
+                "  * 'SCORING_CROSSREF': consulta analítica sobre scoring.\n"
+                "  * 'DELETE_CONSULTATION': el usuario pide borrar, eliminar, quitar, descartar o dar de baja una consulta/búsqueda/alerta guardada (ej: 'elimina la consulta 62', 'la 62 bórrala que es un error').\n"
+                "  * 'TOGGLE_CONSULTATION': el usuario pide pausar, desactivar, activar o reanudar una consulta/alerta.\n"
+                "  * 'LIST_CONSULTATIONS': el usuario pregunta qué alertas o consultas están activas/configuradas en plataforma.\n"
+                "  * 'SYSTEM_META': queja, saludo o pregunta meta sobre el funcionamiento del propio bot (ej: '¿por qué no dices nada?').\n"
+                "- wants_property_cards (bool): true si sintáctica y semánticamente el usuario quiere ver/recibir fichas de oportunidades inmobiliarias; false si es una pregunta analítica de KPIs/conteo o una orden administrativa de gestión de consultas.\n"
+                "- wants_external_portals (bool): true si el usuario pide buscar fuera de HIVEX o en portales externos (Idealista, Fotocasa, etc.); false en caso contrario.\n"
+                "- target_consultation_id (int o null): número de ID de la consulta/alerta si el usuario menciona una específica (ej: 62 en 'elimina la consulta 62' o 'bórrala #62').\n"
+                "- clone_from_zone (string o null): si el usuario pide clonar o hacer 'la misma consulta que tenemos en la zona X pero en la zona Y', pon aquí la zona origen 'X' (ej: 'Biarritz') y en municipality/zone_or_neighborhood pon la zona destino 'Y' (ej: 'Anglet').\n"
                 "- street_or_urbanization (nombre de la calle, avenida o urbanización específica si se menciona, ej: 'Urbanización Las Vegas', o null),\n"
                 "- district_or_neighborhood (barrio, distrito, PAU o ensanche si se menciona, ej: 'Chamberí', 'Carabanchel', 'PAU de Vallecas', o null),\n"
-                "- municipality (municipio, localidad o ciudad específica si se menciona, ej: 'Villanueva del Pardillo', 'Pinto', 'Alcobendas', 'Anglet', o null; "
-                "ATENCIÓN: si el usuario dice 'misma consulta que en X pero en Y', el municipio y zona objetivo es SIEMPRE 'Y', NUNCA 'X'),\n"
-                "- zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, "
-                "ej: 'Urbanización Las Vegas - Villanueva del Pardillo', 'Carabanchel', 'Pinto', o null),\n"
+                "- municipality (municipio, localidad o ciudad específica si se menciona, ej: 'Villanueva del Pardillo', 'Pinto', 'Alcobendas', 'Anglet', o null),\n"
+                "- zone_or_neighborhood (conjunto completo de la micro-zona solicitada uniendo urbanización/calle, barrio y municipio si existen, o null),\n"
                 "- postal_code (código postal de 5 dígitos si se menciona expresamente, ej: '28229', o null),\n"
-                "- province (nombre de la provincia, ej: 'Madrid', 'Vizcaya', 'Málaga', 'Francia (Pirineos Atlánticos)', o null; infiérela si el municipio/barrio pertenece inequívocamente a una provincia española, ej: Carabanchel -> Madrid, Pinto -> Madrid),\n"
+                "- province (nombre de la provincia, ej: 'Madrid', 'Vizcaya', 'Málaga', 'Francia (Pirineos Atlánticos)', o null; infiérela si el municipio/barrio pertenece inequívocamente a una provincia),\n"
                 "- target_count (entero si pide cantidad concreta, o 20 por defecto),\n"
                 "- sort_by ('rental_yield', 'overall_score', 'discount' o 'price'),\n"
-                "- property_type ('Solar', 'Chalet / Casa', 'Vivienda', 'Rústico / Terreno', 'Rústico y Chalet', 'Local' o null; "
-                "extrae SIEMPRE el tipo de inmueble de la oración actual del usuario, NUNCA confundas sustantivos como 'localidad' con 'Local'),\n"
+                "- property_type ('Solar', 'Chalet / Casa', 'Vivienda', 'Rústico / Terreno', 'Rústico y Chalet', 'Local' o null; extrae SIEMPRE el tipo de inmueble por su sentido semántico en la oración actual),\n"
                 "- strategy ('HOUSE_FLIPPING', 'BUY_AND_HOLD', 'LAND_DEVELOPMENT' o null),\n"
                 "- min_price (float o null; si dice 'en el entorno de X', 'alrededor de X' o 'sobre X', pon min_price=X*0.65 y max_price=X*1.20),\n"
                 "- max_price (float o null),\n"
-                "- min_rooms (int o null; ej: 2 si pide '2 hab', '2 habitaciones' o '2 dormitorios'),\n"
+                "- min_rooms (int o null),\n"
                 "- min_discount (float o null), min_yield (float o null), is_alert (bool)."
             )
             prompt = (
@@ -3789,18 +3802,25 @@ class AdvisorEngine:
 
         # 1. Parse de criterios con Cascada Descendente Gemini Flash (solo si no existe en caché)
         criteria = await self.parse_query_intent(final_prompt)
+        is_gemini_primary = (criteria.get("parser_engine") == "gemini_primary")
 
-        # 1.b Herencia de criterios cuando el usuario pide explícitamente clonar una consulta de otra zona
-        # Ej: "necesito que des de alta misma consulta que tenemos en la zona Biarritz pero en la zona de Anglet"
-        clone_match = re.search(
-            r'\b(?:misma\s+(?:consulta|b[uú]squeda|alerta)|igual\s+que\s+la\s+(?:consulta|b[uú]squeda|de)|como\s+la\s+(?:consulta|b[uú]squeda))\b(.+?)\b(?:pero|sino|ahora|cambiando\s+a)\b',
-            final_prompt,
-            flags=re.IGNORECASE | re.DOTALL
-        )
-        if clone_match:
-            source_clause = clone_match.group(1).strip()
-            source_loc = self._parse_query_intent_heuristics(source_clause)
-            source_zone_token = (source_loc.get("zone_or_neighborhood") or source_loc.get("municipality") or "").strip().lower()
+        # 1.b Herencia de criterios cuando el usuario pide clonar una consulta de otra zona
+        # Prioriza `clone_from_zone` extraído sintáctica y semánticamente por Gemini; regex Python solo como fallback
+        source_zone_token = ""
+        if is_gemini_primary:
+            source_zone_token = str(criteria.get("clone_from_zone") or "").strip().lower()
+        else:
+            clone_match = re.search(
+                r'\b(?:misma\s+(?:consulta|b[uú]squeda|alerta)|igual\s+que\s+la\s+(?:consulta|b[uú]squeda|de)|como\s+la\s+(?:consulta|b[uú]squeda))\b(.+?)\b(?:pero|sino|ahora|cambiando\s+a)\b',
+                final_prompt,
+                flags=re.IGNORECASE | re.DOTALL
+            )
+            if clone_match:
+                source_clause = clone_match.group(1).strip()
+                source_loc = self._parse_query_intent_heuristics(source_clause)
+                source_zone_token = (source_loc.get("zone_or_neighborhood") or source_loc.get("municipality") or "").strip().lower()
+
+        if source_zone_token:
             from app.db.session import SessionLocal
             clone_db = db if db is not None else SessionLocal()
             try:
@@ -3808,12 +3828,11 @@ class AdvisorEngine:
                 all_saved = clone_db.query(SavedConsultation).order_by(
                     SavedConsultation.updated_at.desc(), SavedConsultation.id.desc()
                 ).all()
-                if source_zone_token:
-                    for cand in all_saved:
-                        haystack = f"{cand.title or ''} {cand.description or ''} {cand.criteria_json or ''}".lower()
-                        if source_zone_token in haystack:
-                            ref_consultation = cand
-                            break
+                for cand in all_saved:
+                    haystack = f"{cand.title or ''} {cand.description or ''} {cand.criteria_json or ''}".lower()
+                    if source_zone_token in haystack:
+                        ref_consultation = cand
+                        break
                 if not ref_consultation and all_saved:
                     ref_consultation = all_saved[0]
 
@@ -3835,6 +3854,7 @@ class AdvisorEngine:
                         elif "solar" in ref_consultation.title.lower():
                             criteria["property_type"] = "Solar"
                     criteria["query_type"] = "SEARCH_OPPORTUNITIES"
+                    criteria["wants_property_cards"] = True
                     logger.info(
                         f"[Clone Consultation] Heredados criterios de consulta #{ref_consultation.id} "
                         f"('{ref_consultation.title}') hacia nueva zona '{criteria.get('zone_or_neighborhood') or criteria.get('municipality')}'"
@@ -3847,95 +3867,107 @@ class AdvisorEngine:
 
         # Límite por defecto es hasta 20 fichas si no se especifica explícitamente en la consulta
         target_count = int(criteria.get("target_count") or 20)
-
         prompt_lower = final_prompt.lower()
 
-        # 1. Palabras de petición EXPLÍCITA de ver/listar fichas de inmuebles
-        explicit_show_verbs = [
-            "muéstrame", "muestrame", "enséñame", "enseñame", "dame los pisos", "dame las fichas",
-            "dame las oportunidades", "ver pisos", "ver oportunidades", "ver fichas", "listar",
-            "listado de", "pásame las fichas", "pásame", "pasame", "quiero ver", "sácame las", "sacame las",
-            "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
-            "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
-            "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "busco",
-            "encuentra", "encuéntrame", "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame",
-            "dame pisos", "dame inmuebles", "trae", "tráeme", "traeme",
-            "envíame", "enviame", "enviar oportunidades", "enviar pisos", "mándame", "mandame",
-            "detectes", "detectas", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
-            "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
-            "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "misma consulta",
-            "des de alta", "dar de alta", "dame de alta", "nueva consulta", "consulta nueva",
-            "créame una consulta", "creame una consulta", "búsqueda de", "busqueda de"
-        ]
-        has_explicit_show_verb = any(v in prompt_lower for v in explicit_show_verbs)
+        if is_gemini_primary:
+            # ENRUTAMIENTO 100% BASADO EN EL ANÁLISIS SINTÁCTICO Y SEMÁNTICO DE GEMINI (SIN KEYWORDS DE PYTHON)
+            q_type = criteria.get("query_type") or "SEARCH_OPPORTUNITIES"
+            wants_cards = bool(criteria.get("wants_property_cards", q_type == "SEARCH_OPPORTUNITIES"))
+            is_admin_or_meta_command = q_type in (
+                "DELETE_CONSULTATION", "TOGGLE_CONSULTATION", "LIST_CONSULTATIONS", "SYSTEM_META"
+            )
+            is_deviation_query = (q_type == "PRICE_DEVIATION")
+            is_quantitative_query = (q_type in ("QUANTITATIVE_COUNT", "PRICE_DEVIATION")) and not wants_cards
+            is_advisory_inquiry = (
+                q_type in ("DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF")
+                and not wants_cards
+                and not is_quantitative_query
+            )
+            is_explicit_listing_request = wants_cards and not is_admin_or_meta_command
+            is_explicit_external = bool(criteria.get("wants_external_portals", False))
+        else:
+            # FALLBACK EXCLUSIVO EN PYTHON: Solo se ejecuta si Gemini no estuvo disponible
+            explicit_show_verbs = [
+                "muéstrame", "muestrame", "enséñame", "enseñame", "dame los pisos", "dame las fichas",
+                "dame las oportunidades", "ver pisos", "ver oportunidades", "ver fichas", "listar",
+                "listado de", "pásame las fichas", "pásame", "pasame", "quiero ver", "sácame las", "sacame las",
+                "enséñame los", "enseñame los", "muéstrame las", "muestrame las", "cuáles son las oportunidades",
+                "cuales son las oportunidades", "ver inmuebles", "fichas de", "ver catálogo", "ver catalogo",
+                "búscame", "buscame", "busca también", "busca tambien", "busca", "buscar", "busco",
+                "encuentra", "encuéntrame", "encuentrame", "rastrea", "rastrear", "localiza", "localízame", "localizame",
+                "dame pisos", "dame inmuebles", "trae", "tráeme", "traeme",
+                "envíame", "enviame", "enviar oportunidades", "enviar pisos", "mándame", "mandame",
+                "detectes", "detectas", "busca los chalets", "busca chalets", "busca terrenos", "busca fincas",
+                "haz la misma búsqueda", "haz la busqueda", "haz la búsqueda", "haz una búsqueda", "haz una busqueda",
+                "haz búsqueda", "haz busqueda", "misma búsqueda", "misma busqueda", "misma consulta",
+                "des de alta", "dar de alta", "dame de alta", "nueva consulta", "consulta nueva",
+                "créame una consulta", "creame una consulta", "búsqueda de", "busqueda de"
+            ]
+            has_explicit_show_verb = any(v in prompt_lower for v in explicit_show_verbs)
 
-        # 2. Preguntas cuantitativas de conteo o volumen (ej: "¿Cuántas oportunidades tenemos en Carabanchel?")
-        is_count_query = any(w in prompt_lower for w in [
-            "cuántas", "cuantas", "cuántos", "cuantos", "qué cantidad", "que cantidad",
-            "cuánto volumen", "cuanto volumen", "número de", "numero de"
-        ])
+            is_count_query = any(w in prompt_lower for w in [
+                "cuántas", "cuantas", "cuántos", "cuantos", "qué cantidad", "que cantidad",
+                "cuánto volumen", "cuanto volumen", "número de", "numero de"
+            ])
 
-        # 3. Preguntas de desviación o comparativa de precio de venta vs referencia de mercado
-        is_deviation_query = any(w in prompt_lower for w in [
-            "cuánto se desvía", "cuanto se desvia", "desviación", "desviacion",
-            "diferencia de precio", "desviación promedio", "desviacion promedio",
-            "precio venta vs", "precio de venta vs", "desvío", "desvio"
-        ])
+            is_deviation_query = any(w in prompt_lower for w in [
+                "cuánto se desvía", "cuanto se desvia", "desviación", "desviacion",
+                "diferencia de precio", "desviación promedio", "desviacion promedio",
+                "precio venta vs", "precio de venta vs", "desvío", "desvio"
+            ])
 
-        # 3B. Preguntas de KPIs de mercado (yield, rentabilidad, precio medio, €/m2, comparativas entre zonas)
-        is_kpi_market_query = any(w in prompt_lower for w in [
-            "yield", "rentabilidad", "retorno", "roi", "tir", "cap rate", "kpi", "kpis",
-            "métrica", "metrica", "métricas", "metricas", "estadística", "estadistica", "estadísticas", "estadisticas",
-            "precio medio", "precios medios", "qué precio", "que precio", "a qué precio", "a que precio",
-            "cuánto cuesta", "cuanto cuesta", "cuánto vale", "cuanto vale", "a cuánto está", "a cuanto esta",
-            "precio m2", "precio por m2", "€/m2", "€/m²", "eur/m2", "precios de ", "precios en ",
-            "compara", "comparar", "comparativa", "compárame", "comparame", "versus", " vs ",
-            "frente a", "respecto a", "diferencia entre", "cómo está el mercado", "como esta el mercado"
-        ])
+            is_kpi_market_query = any(w in prompt_lower for w in [
+                "yield", "rentabilidad", "retorno", "roi", "tir", "cap rate", "kpi", "kpis",
+                "métrica", "metrica", "métricas", "metricas", "estadística", "estadistica", "estadísticas", "estadisticas",
+                "precio medio", "precios medios", "qué precio", "que precio", "a qué precio", "a que precio",
+                "cuánto cuesta", "cuanto cuesta", "cuánto vale", "cuanto vale", "a cuánto está", "a cuanto esta",
+                "precio m2", "precio por m2", "€/m2", "€/m²", "eur/m2", "precios de ", "precios en ",
+                "compara", "comparar", "comparativa", "compárame", "comparame", "versus", " vs ",
+                "frente a", "respecto a", "diferencia entre", "cómo está el mercado", "como esta el mercado"
+            ])
 
-        # 4. Preguntas de asesoría / recomendación de zonas / dónde invertir
-        is_zone_recommendation_query = any(w in prompt_lower for w in [
-            "cuáles son las zona", "cuales son las zona", "qué zona", "que zona",
-            "dónde comprar", "donde comprar", "dónde invertir", "donde invertir",
-            "qué municipio", "que municipio", "qué barrio", "que barrio",
-            "recomienda", "recomiéndame", "recomiendame", "recomiendas",
-            "zonas con", "zona con", "mejores zonas", "mejor zona", "dónde hay", "donde hay",
-            "son interesantes", "merece la pena", "vale la pena", "qué opinas", "que opinas", "cómo ves", "como ves"
-        ]) and not has_explicit_show_verb
+            is_zone_recommendation_query = any(w in prompt_lower for w in [
+                "cuáles son las zona", "cuales son las zona", "qué zona", "que zona",
+                "dónde comprar", "donde comprar", "dónde invertir", "donde invertir",
+                "qué municipio", "que municipio", "qué barrio", "que barrio",
+                "recomienda", "recomiéndame", "recomiendame", "recomiendas",
+                "zonas con", "zona con", "mejores zonas", "mejor zona", "dónde hay", "donde hay",
+                "son interesantes", "merece la pena", "vale la pena", "qué opinas", "que opinas", "cómo ves", "como ves"
+            ]) and not has_explicit_show_verb
 
-        is_explicit_listing_request = has_explicit_show_verb or (
-            criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
-            and not (is_count_query or is_deviation_query or is_kpi_market_query or is_zone_recommendation_query)
-        )
-
-        is_quantitative_query = (is_count_query or is_deviation_query) and not has_explicit_show_verb
-
-        is_advisory_inquiry = (
-            (criteria.get("query_type") in [
-                "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
-            ] or is_zone_recommendation_query or is_kpi_market_query)
-            and not has_explicit_show_verb
-            and not is_quantitative_query
-        )
+            is_explicit_listing_request = has_explicit_show_verb or (
+                criteria.get("query_type") == "SEARCH_OPPORTUNITIES"
+                and not (is_count_query or is_deviation_query or is_kpi_market_query or is_zone_recommendation_query)
+            )
+            is_quantitative_query = (is_count_query or is_deviation_query) and not has_explicit_show_verb
+            is_advisory_inquiry = (
+                (criteria.get("query_type") in [
+                    "DISTRICT_ANALYSIS", "MARKET_DATA", "ROI_BTL_CALC", "INVESTMENT_ADVICE", "SCORING_CROSSREF"
+                ] or is_zone_recommendation_query or is_kpi_market_query)
+                and not has_explicit_show_verb
+                and not is_quantitative_query
+            )
+            is_explicit_external = any(w in prompt_lower for w in [
+                "busca fuera", "fuera de hivex", "idealista", "fotocasa", "pisos.com", "portales",
+                "externo", "externa", "en internet", "en la web", "buscar en la red"
+            ])
+            import re as _re_meta
+            is_admin_or_meta_command = (
+                criteria.get("query_type") in ("DELETE_CONSULTATION", "TOGGLE_CONSULTATION", "LIST_CONSULTATIONS", "SYSTEM_META")
+                or bool(
+                    _re_meta.search(
+                        r'\b(borra|borrar|elimina|eliminar|quita|quitar|suprime|suprimir|pausa|pausar|desactiva|desactivar|activa|activar)\b'
+                        r'.*\b(consulta|consultas|alerta|alertas|búsqueda|busqueda)\b',
+                        prompt_lower
+                    )
+                )
+                or bool(_re_meta.search(r'\b(por\s+qu[eé]\s+no\s+(?:dices|respondes|contestas))\b', prompt_lower))
+            )
 
         should_display_cards = False
         intro_text = None
         is_relaxed = False
         exact_zone_count = 0
-
-        # Guardarraíl contra comandos administrativos de borrado/gestión de consultas o mensajes meta
-        import re as _re_meta
-        is_admin_or_meta_command = (
-            criteria.get("query_type") in ("DELETE_CONSULTATION", "TOGGLE_CONSULTATION", "SYSTEM_META")
-            or bool(
-                _re_meta.search(
-                    r'\b(borra|borrar|elimina|eliminar|quita|quitar|suprime|suprimir|pausa|pausar|desactiva|desactivar|activa|activar)\b'
-                    r'.*\b(consulta|consultas|alerta|alertas|búsqueda|busqueda)\b',
-                    prompt_lower
-                )
-            )
-            or bool(_re_meta.search(r'\b(por\s+qu[eé]\s+no\s+(?:dices|respondes|contestas))\b', prompt_lower))
-        )
 
         if is_admin_or_meta_command:
             title = "⚙️ Gestión de Consultas HIVEX"
@@ -3992,16 +4024,9 @@ class AdvisorEngine:
             zone = criteria.get("zone_or_neighborhood")
             internal_metrics = self.get_hivex_internal_zone_metrics(prov, zone, db=db)
 
-            # Detectar si el usuario pide explícitamente rastrear fuera de HIVEX
-            is_explicit_external = any(w in final_prompt.lower() for w in [
-                "busca fuera", "fuera de hivex", "idealista", "fotocasa", "pisos.com", "portales",
-                "externo", "externa", "en internet", "en la web", "buscar en la red"
-            ])
-
             # REGLA DE INGESTA DE OPORTUNIDADES HIVEX:
             # Si hay 0 fichas de entrada en el catálogo interno (len(matched_opps) == 0) o si el usuario
-            # solicita explícitamente rastrear fuera de HIVEX, se activa automáticamente Out-of-HIVEX,
-            # independientemente de que existan precios medios de referencia en la zona.
+            # solicita explícitamente rastrear fuera de HIVEX (analizado por Gemini), se activa Out-of-HIVEX.
             if is_explicit_external or len(matched_opps) == 0:
                 logger.info(
                     f"[Advisor Process] Activando búsqueda fuera de HIVEX (out-hivex) de forma asíncrona y con await..."
