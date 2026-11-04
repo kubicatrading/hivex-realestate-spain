@@ -329,6 +329,7 @@ def execute_agent_loop(
 ) -> str:
     """Bucle agente de razonamiento y ejecución con Gemini."""
     models_to_try = [
+        "gemini-4-argon",
         "gemini-4.0-argon",
         "gemini-3.8-flash",
         "gemini-3.8-flash-lite",

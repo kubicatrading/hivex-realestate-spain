@@ -221,36 +221,11 @@ class AdvisorEngine:
     # Caché en memoria de modelos que devolvieron 404/400 en el endpoint actual para evitar latencia en llamadas sucesivas
     _UNAVAILABLE_MODELS_CACHE: set = set()
 
-    # Enrutamiento inteligente de modelos por nivel de complejidad de tarea (Task-Tier Smart Routing)
+    # Todos los niveles de tarea respetan estrictamente el orden oficial de cascada definido en plataforma
     GEMINI_TASK_TIER_CASCADES = {
-        # 1. Razonamiento Financiero Profundo, Estrategia de Distrito, Síntesis Comparativa y Tasación Compleja
-        "deep_reasoning": [
-            "gemini-4-argon",
-            "gemini-3.8-flash",
-            "gemini-3.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-flash-latest",
-        ],
-        # 2. Extracción Estructurada JSON de Baja Latencia (Intent Parsing, Filtrado Semántico, Construcción de URLs)
-        "fast_structured": [
-            "gemini-3.8-flash",
-            "gemini-3.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-2.5-flash",
-            "gemini-flash-latest",
-            "gemini-4-argon",
-            "gemini-2.5-pro",
-        ],
-        # 3. Micro-tareas de Alta Frecuencia / Lotes Rápidos (Cohesión Sintáctica, Clasificación Rápida)
-        "micro_batch": [
-            "gemini-3.8-flash-lite",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-3.8-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest",
-        ],
+        "deep_reasoning": list(GEMINI_FLASH_CASCADE),
+        "fast_structured": list(GEMINI_FLASH_CASCADE),
+        "micro_batch": list(GEMINI_FLASH_CASCADE),
     }
 
     def __init__(self):
