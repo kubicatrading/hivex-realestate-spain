@@ -380,11 +380,14 @@ def execute_agent_loop(
         }
 
         resp_data = None
+        skipped_models_info: List[str] = []
         for model in models_to_try:
             if resp_data is not None:
                 break
+            model_last_status: Optional[str] = None
             for key_idx, cand_key in enumerate(candidate_keys):
                 if (model, key_idx) in unavailable_pairs:
+                    model_last_status = model_last_status or "en caché 404/no disponible"
                     continue
                 try:
                     with httpx.Client(timeout=90.0) as client:
@@ -395,16 +398,22 @@ def execute_agent_loop(
                             print(f"✅ Respuesta obtenida con modelo: {active_model} (key #{key_idx + 1})")
                             break
                         elif r.status_code in (429, 503):
+                            model_last_status = f"HTTP {r.status_code}"
                             continue
                         elif r.status_code in (400, 403, 404):
+                            model_last_status = f"HTTP {r.status_code}"
                             print(f"Aviso API ({model} con key #{key_idx + 1} devolvió {r.status_code}): probando siguiente credencial/modelo.")
                             unavailable_pairs.add((model, key_idx))
                             continue
                         else:
+                            model_last_status = f"HTTP {r.status_code}"
                             print(f"Aviso API ({model}): {r.status_code} - {r.text[:150]}")
                 except Exception as e:
+                    model_last_status = "timeout/red"
                     print(f"Error de red con modelo {model}: {e}")
                     continue
+            if resp_data is None and model_last_status:
+                skipped_models_info.append(f"{model} ({model_last_status})")
 
         if not resp_data:
             err_msg = "Error: No se pudo obtener respuesta válida de Gemini API tras evaluar la cascada de modelos."
@@ -413,8 +422,19 @@ def execute_agent_loop(
 
         if announced_active_model != active_model:
             announced_active_model = active_model
+            if skipped_models_info:
+                cascade_trace_str = " → ".join(skipped_models_info)
+                cascade_line = (
+                    f"\n🔄 <b>Cascada evaluada previamente:</b> <code>{html.escape(cascade_trace_str)}</code>\n"
+                    f"✅ <b>Conectado con:</b> <code>{html.escape(active_model)}</code>\n"
+                )
+            else:
+                cascade_line = (
+                    f"\n✅ <b>Conectado en 1.ª prioridad de cascada:</b> <code>{html.escape(active_model)}</code>\n"
+                )
             send_telegram_update(
-                f"🤖 <b>[Paso {step}/{max_steps} · {html.escape(active_model)}]</b> Modelo activo conectado. Analizando tarea:\n<i>{html.escape(task[:300])}</i>",
+                f"🤖 <b>[Paso {step}/{max_steps} · {html.escape(active_model)}]</b> Modelo activo conectado.{cascade_line}"
+                f"🎯 <b>Analizando tarea:</b>\n<i>{html.escape(task[:300])}</i>",
                 chat_id, bot_token, reply_to_message_id
             )
 

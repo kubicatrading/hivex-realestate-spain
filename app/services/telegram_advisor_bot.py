@@ -2005,7 +2005,14 @@ class TelegramAdvisorBot:
                             clean_html = ans_text.strip()
                             # Convertir posibles **residuales** a <b> si el modelo los incluyó
                             clean_html = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', clean_html)
-                            header = f"💡 <b>Respuesta Contextual · DevAgent ({html.escape(ans_model or 'Gemini')}):</b>\n\n"
+                            used_m = ans_model or "Gemini"
+                            cascade_list = list(getattr(advisor_engine, "GEMINI_FLASH_CASCADE", []))
+                            if used_m in cascade_list and cascade_list.index(used_m) > 0:
+                                tried_before = " → ".join(cascade_list[:cascade_list.index(used_m)])
+                                trace_note = f"<i>🔄 Cascada evaluada previamente: <code>{html.escape(tried_before)}</code> → ✅ Conectado con <code>{html.escape(used_m)}</code></i>\n\n"
+                            else:
+                                trace_note = ""
+                            header = f"💡 <b>Respuesta Contextual · DevAgent ({html.escape(used_m)}):</b>\n{trace_note}\n"
                             full_reply = header + clean_html
                             await self.send_message(chat_id, full_reply, parse_mode="HTML", reply_to_message_id=message_id)
                             try:
