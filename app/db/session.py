@@ -206,7 +206,7 @@ else:
 
 
 def run_db_migrations(target_engine):
-    """Garantiza de forma idempotente que las columnas de rentabilidad y yield existan en SQLite y PostgreSQL."""
+    """Garantiza de forma idempotente que las columnas de rentabilidad/yield existan y que RLS esté activo en PostgreSQL (Supabase)."""
     try:
         inspector = inspect(target_engine)
         if "opportunities" in inspector.get_table_names():
@@ -224,6 +224,17 @@ def run_db_migrations(target_engine):
                         try:
                             conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {col_name} {col_type};"))
                             conn.commit()
+                        except Exception:
+                            pass
+        if getattr(target_engine.dialect, "name", "") == "postgresql":
+            with target_engine.begin() as conn:
+                rows = conn.execute(
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = false;")
+                ).fetchall()
+                for (tbl,) in rows:
+                    if tbl != "spatial_ref_sys":
+                        try:
+                            conn.execute(text(f'ALTER TABLE public."{tbl}" ENABLE ROW LEVEL SECURITY;'))
                         except Exception:
                             pass
     except Exception:
